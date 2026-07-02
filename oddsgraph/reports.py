@@ -79,6 +79,7 @@ def write_reports(db: DuckDB, out_dir: Path, stats: dict[str, object]) -> None:
         ORDER BY e.confidence DESC, e.overlap_minutes DESC
         LIMIT 50
     """))
+    _write(reports / "coverage.md", _coverage_report(db))
     _write(reports / "conditional_examples.md", _query_report(db, "Conditional Examples", """
         SELECT a_node_id, b_node_id, method, p_a_given_b, lower_bound, upper_bound, confidence
         FROM conditional_edges_v
@@ -107,6 +108,68 @@ def _summary(stats: dict[str, object]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _coverage_report(db: DuckDB) -> str:
+    lines = ["# Coverage", ""]
+    _append_table(lines, "Market Families", db.rows("""
+        SELECT
+            market_family,
+            count(DISTINCT market_id) AS markets,
+            count(*) AS nodes,
+            max(market_volume_usd) AS max_market_volume_usd
+        FROM nodes_v
+        GROUP BY market_family
+        ORDER BY markets DESC, market_family
+    """))
+    _append_table(lines, "Candidate Sources", db.rows("""
+        SELECT candidate_source, candidate_type, count(*) AS candidates
+        FROM candidate_edges_v
+        GROUP BY 1, 2
+        ORDER BY candidates DESC, candidate_source, candidate_type
+    """))
+    _append_table(lines, "Logic Edges", db.rows("""
+        SELECT edge_basis, edge_type, count(*) AS edges
+        FROM logic_edges_v
+        GROUP BY 1, 2
+        ORDER BY edges DESC, edge_basis, edge_type
+    """))
+    _append_table(lines, "Price-Only Edges", db.rows("""
+        SELECT edge_type, count(*) AS edges
+        FROM price_edges_v
+        GROUP BY edge_type
+        ORDER BY edges DESC, edge_type
+    """))
+    _append_table(lines, "Top Unknown Markets", db.rows("""
+        SELECT
+            market_id,
+            any_value(event_slug) AS event_slug,
+            any_value(question) AS question,
+            max(market_volume_usd) AS market_volume_usd,
+            count(*) AS nodes
+        FROM nodes_v
+        WHERE market_family = 'unknown'
+        GROUP BY market_id
+        ORDER BY market_volume_usd DESC, market_id
+        LIMIT 25
+    """))
+    _append_table(lines, "High-Confidence Price-Only Edges", db.rows("""
+        SELECT
+            e.edge_type,
+            e.confidence,
+            e.score,
+            e.overlap_minutes,
+            e.src_node_id,
+            e.dst_node_id,
+            s.canonical_proposition AS src_proposition,
+            d.canonical_proposition AS dst_proposition
+        FROM price_edges_v e
+        JOIN nodes_v s ON s.node_id = e.src_node_id
+        JOIN nodes_v d ON d.node_id = e.dst_node_id
+        ORDER BY e.confidence DESC, e.overlap_minutes DESC
+        LIMIT 25
+    """))
+    return "\n".join(lines) + "\n"
+
+
 def _query_report(db: DuckDB, title: str, sql: str) -> str:
     rows = db.rows(sql)
     lines = [f"# {title}", ""]
@@ -118,6 +181,19 @@ def _query_report(db: DuckDB, title: str, sql: str) -> str:
     for row in rows:
         lines.append("| " + " | ".join(_cell(row.get(col)) for col in cols) + " |")
     return "\n".join(lines) + "\n"
+
+
+def _append_table(lines: list[str], title: str, rows: list[dict[str, object]]) -> None:
+    lines.extend([f"## {title}", ""])
+    if not rows:
+        lines.extend(["No rows.", ""])
+        return
+    cols = list(rows[0])
+    lines.append("| " + " | ".join(cols) + " |")
+    lines.append("| " + " | ".join("---" for _ in cols) + " |")
+    for row in rows:
+        lines.append("| " + " | ".join(_cell(row.get(col)) for col in cols) + " |")
+    lines.append("")
 
 
 def _cell(value: object) -> str:

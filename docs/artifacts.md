@@ -124,6 +124,9 @@ The build also writes markdown files under `reports/`:
 - `duplicate_candidates.md`: exact duplicate-question candidates.
 - `price_only_edges.md`: strongest price-threshold relationships not accepted
   as logic.
+- `coverage.md`: market-family counts, candidate-source counts, logic and
+  price-only edge coverage, high-volume unknown markets, and high-confidence
+  price-only edges.
 - `conditional_examples.md`: sample conditional rows.
 
 ## Manifest

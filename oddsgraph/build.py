@@ -30,6 +30,7 @@ GENERATED_REPORTS = (
     "strongest_exclusions.md",
     "duplicate_candidates.md",
     "price_only_edges.md",
+    "coverage.md",
     "conditional_examples.md",
 )
 

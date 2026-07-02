@@ -97,6 +97,24 @@ Show price-threshold relationships that are not accepted as logic:
 python -m oddsgraph.cli price-edges --out output/wc2026 --edge-type implies --top 50
 ```
 
+Explain a node, including its market sibling, touching edges, violations, and
+conditional rows:
+
+```bash
+python -m oddsgraph.cli explain --out output/wc2026 --node "<token id or unique text>"
+```
+
+Explain a specific edge. Implications are directional; complement, equivalent,
+and mutual-exclusion lookups also check the reverse stored order:
+
+```bash
+python -m oddsgraph.cli explain-edge \
+  --out output/wc2026 \
+  --src "<token id or unique text>" \
+  --dst "<token id or unique text>" \
+  --edge-type implies
+```
+
 Show pricing or logic violations:
 
 ```bash
@@ -113,7 +131,8 @@ python -m oddsgraph.cli condition \
   --b "NOT(Will Brazil reach the Round of 16?)"
 ```
 
-Generated markdown reports are written to `output/wc2026/reports/`.
+Generated markdown reports are written to `output/wc2026/reports/`, including
+`coverage.md` for market-family and edge-basis coverage.
 
 ## Troubleshooting
 

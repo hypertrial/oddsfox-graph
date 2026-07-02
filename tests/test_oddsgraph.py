@@ -123,6 +123,11 @@ def test_build_outputs_artifacts_and_core_logic(synthetic_output: Path) -> None:
     try:
         assert ARTIFACTS <= {p.name for p in synthetic_output.glob("*.parquet")}
         assert (synthetic_output / "reports" / "summary.md").read_text()
+        coverage = (synthetic_output / "reports" / "coverage.md").read_text()
+        assert "## Market Families" in coverage
+        assert "## Candidate Sources" in coverage
+        assert "## Logic Edges" in coverage
+        assert "## Price-Only Edges" in coverage
 
         nodes = db.rows(f"""
             SELECT outcome_label, canonical_proposition
@@ -221,6 +226,7 @@ def test_build_manifest_marks_success(synthetic_output: Path) -> None:
     assert set(manifest["artifacts"]) == ARTIFACTS
     assert manifest["stats"]["tokens"] > 0
     assert "reports/summary.md" in manifest["reports"]
+    assert "reports/coverage.md" in manifest["reports"]
 
 
 def test_failed_build_removes_success_manifest(tmp_path: Path) -> None:
@@ -253,6 +259,54 @@ def test_cli_smoke(synthetic_input: Path, tmp_path: Path, capsys: pytest.Capture
     captured = capsys.readouterr()
     assert "Ambiguous node query" in captured.err
     assert "Candidates:" in captured.err
+
+
+def test_cli_explain_smoke(synthetic_output: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["explain", "--out", str(synthetic_output), "--node", "comp:Yes"]) == 0
+    captured = capsys.readouterr()
+    assert "Same-Market Constraint" in captured.out
+    assert "comp:No" in captured.out
+
+    assert main(["explain", "--out", str(synthetic_output), "--node", "Messi"]) == 0
+    captured = capsys.readouterr()
+    assert "Top goalscorer? :: Messi" in captured.out
+
+    assert main(["explain", "--out", str(synthetic_output), "--node", "Alpha"]) == 1
+    captured = capsys.readouterr()
+    assert "Ambiguous node query" in captured.err
+    assert "Candidates:" in captured.err
+
+    assert main([
+        "explain-edge",
+        "--out", str(synthetic_output),
+        "--src", "comp:No",
+        "--dst", "comp:Yes",
+        "--edge-type", "complement",
+    ]) == 0
+    captured = capsys.readouterr()
+    assert "Logic Edge" in captured.out
+    assert "same_market" in captured.out
+
+    assert main([
+        "explain-edge",
+        "--out", str(synthetic_output),
+        "--src", "eq_a:Yes",
+        "--dst", "eq_b:Yes",
+        "--edge-type", "equivalent",
+    ]) == 0
+    captured = capsys.readouterr()
+    assert "Price-Only Edge" in captured.out
+    assert "price_only" in captured.out
+
+    assert main([
+        "explain-edge",
+        "--out", str(synthetic_output),
+        "--src", "alpha_final:Yes",
+        "--dst", "winner_alpha:Yes",
+        "--edge-type", "implies",
+    ]) == 0
+    captured = capsys.readouterr()
+    assert "stage_progression_rule" not in captured.out
 
 
 def _write_input(path: Path, rows: list[tuple[Any, ...]]) -> None:
