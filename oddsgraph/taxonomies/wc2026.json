@@ -1,0 +1,41 @@
+{
+  "name": "wc2026",
+  "stage_rules": [
+    {
+      "pattern": "^Will (.*) win the 2026 FIFA World Cup\\?$",
+      "rank": 5
+    },
+    {
+      "pattern": "^Will (.*) reach the 2026 FIFA World Cup final\\?$",
+      "rank": 4
+    },
+    {
+      "pattern": "^Will (.*) reach the Semifinals at the 2026 FIFA World Cup\\?$",
+      "rank": 3
+    },
+    {
+      "pattern": "^Will (.*) reach the Quarterfinals at the 2026 FIFA World Cup\\?$",
+      "rank": 2
+    },
+    {
+      "pattern": "^Will (.*) reach the Round of 16 at the 2026 FIFA World Cup\\?$",
+      "rank": 1
+    }
+  ],
+  "single_winner_slugs": [
+    "world-cup-winner",
+    "world-cup-golden-boot-winner",
+    "which-continent-will-win-the-world-cup",
+    "world-cup-bronze-ball-winner-20260603194938828",
+    "world-cup-bronze-boot-winner-20260603200444388",
+    "world-cup-fair-play-award-winner-20260603201520240",
+    "world-cup-golden-ball-winner-20260603194031758",
+    "world-cup-golden-glove-winner-20260603195306910",
+    "world-cup-silver-ball-winner-20260603194459107",
+    "world-cup-silver-boot-winner-20260603195826159",
+    "world-cup-young-player-award-winner-20260602160649063"
+  ],
+  "single_winner_slug_patterns": [
+    "world-cup-group-%-winner"
+  ]
+}

@@ -1,40 +1,62 @@
 from __future__ import annotations
 
+import hashlib
+import json
+from dataclasses import dataclass
+from pathlib import Path
+
 from .queries import q
 
-
-STAGE_RULES = (
-    ("^Will (.*) win the 2026 FIFA World Cup\\?$", 5),
-    ("^Will (.*) reach the 2026 FIFA World Cup final\\?$", 4),
-    ("^Will (.*) reach the Semifinals at the 2026 FIFA World Cup\\?$", 3),
-    ("^Will (.*) reach the Quarterfinals at the 2026 FIFA World Cup\\?$", 2),
-    ("^Will (.*) reach the Round of 16 at the 2026 FIFA World Cup\\?$", 1),
-)
-
-SINGLE_WINNER_SLUGS = (
-    "world-cup-winner",
-    "world-cup-golden-boot-winner",
-    "which-continent-will-win-the-world-cup",
-    "world-cup-bronze-ball-winner-20260603194938828",
-    "world-cup-bronze-boot-winner-20260603200444388",
-    "world-cup-fair-play-award-winner-20260603201520240",
-    "world-cup-golden-ball-winner-20260603194031758",
-    "world-cup-golden-glove-winner-20260603195306910",
-    "world-cup-silver-ball-winner-20260603194459107",
-    "world-cup-silver-boot-winner-20260603195826159",
-    "world-cup-young-player-award-winner-20260602160649063",
-)
-
-SINGLE_WINNER_SLUG_PATTERNS = ("world-cup-group-%-winner",)
+_DEFAULT_TAXONOMY = Path(__file__).resolve().parent / "taxonomies" / "wc2026.json"
 
 
-def stage_rules_values_sql() -> str:
-    return ",\n".join(f"('{q(pattern)}', {rank})" for pattern, rank in STAGE_RULES)
+@dataclass(frozen=True)
+class Taxonomy:
+    name: str
+    stage_rules: tuple[tuple[str, int], ...]
+    single_winner_slugs: tuple[str, ...]
+    single_winner_slug_patterns: tuple[str, ...]
+    source_path: Path
+    content_hash: str
 
 
-def single_winner_values_sql() -> str:
-    return ",\n".join(f"('{q(slug)}')" for slug in SINGLE_WINNER_SLUGS)
+def default_taxonomy_path() -> Path:
+    return _DEFAULT_TAXONOMY
 
 
-def single_winner_pattern_sql(column: str) -> str:
-    return " OR ".join(f"{column} LIKE '{q(pattern)}'" for pattern in SINGLE_WINNER_SLUG_PATTERNS)
+def load_taxonomy(path: Path | None = None) -> Taxonomy:
+    source = path or default_taxonomy_path()
+    raw = json.loads(source.read_text(encoding="utf-8"))
+    stage_rules = tuple(
+        (item["pattern"], int(item["rank"]))
+        for item in raw.get("stage_rules", [])
+    )
+    single_winner_slugs = tuple(raw.get("single_winner_slugs", []))
+    single_winner_slug_patterns = tuple(raw.get("single_winner_slug_patterns", []))
+    content_hash = hashlib.sha256(source.read_bytes()).hexdigest()[:16]
+    return Taxonomy(
+        name=str(raw.get("name", source.stem)),
+        stage_rules=stage_rules,
+        single_winner_slugs=single_winner_slugs,
+        single_winner_slug_patterns=single_winner_slug_patterns,
+        source_path=source,
+        content_hash=content_hash,
+    )
+
+
+def stage_rules_values_sql(taxonomy: Taxonomy) -> str:
+    if not taxonomy.stage_rules:
+        return "('^$', 0)"
+    return ",\n".join(f"('{q(pattern)}', {rank})" for pattern, rank in taxonomy.stage_rules)
+
+
+def single_winner_values_sql(taxonomy: Taxonomy) -> str:
+    if not taxonomy.single_winner_slugs:
+        return "('__no_single_winner_slug__')"
+    return ",\n".join(f"('{q(slug)}')" for slug in taxonomy.single_winner_slugs)
+
+
+def single_winner_pattern_sql(taxonomy: Taxonomy, column: str) -> str:
+    if not taxonomy.single_winner_slug_patterns:
+        return "false"
+    return " OR ".join(f"{column} LIKE '{q(pattern)}'" for pattern in taxonomy.single_winner_slug_patterns)

@@ -25,7 +25,7 @@ def _values(rows: list[tuple[Any, ...]]) -> str:
 def write_synthetic_input(path: Path) -> None:
     markets = [
         ("comp", "Will Complement pass?", "comp-event", 0.42, 0.42, 0.58, 0.58, 20_000.0, 1000, 0),
-        ("bad", "Will Bad Sum pass?", "bad-event", 0.70, 0.70, 0.70, 0.70, 1.0, 20, 10_000),
+        ("bad", "Will Bad Sum pass?", "bad-event", 0.70, 0.70, 0.70, 0.70, 20_000.0, 1000, 10_000),
         ("eq_a", "Will Equivalent A happen?", "eq-event", 0.55, 0.55, 0.45, 0.45, 20_000.0, 1000, 20_000),
         ("eq_b", "Will Equivalent B happen?", "eq-event", 0.56, 0.56, 0.44, 0.44, 20_000.0, 1000, 20_000),
         ("eq_shift_a", "Will Shift A happen?", "eq-shift-event", 0.55, 0.55, 0.45, 0.45, 20_000.0, 1000, 30_000),
@@ -49,7 +49,7 @@ def write_synthetic_input(path: Path) -> None:
         ("low_active_a", "Will Low Active A happen?", "low-active-event", 0.55, 0.55, 0.45, 0.45, 20_000.0, T.MIN_ACTIVE_MINUTES - 1, 120_000),
         ("low_active_b", "Will Low Active B happen?", "low-active-event", 0.56, 0.56, 0.44, 0.44, 20_000.0, T.MIN_ACTIVE_MINUTES - 1, 120_000),
         ("low_overlap_a", "Will Low Overlap A happen?", "low-overlap-event", 0.55, 0.55, 0.45, 0.45, 20_000.0, 1000, 130_000),
-        ("low_overlap_b", "Will Low Overlap B happen?", "low-overlap-event", 0.56, 0.56, 0.44, 0.44, 20_000.0, 1000, 130_001),
+        ("low_overlap_b", "Will Low Overlap B happen?", "low-overlap-event", 0.56, 0.56, 0.44, 0.44, 20_000.0, 1000, 130_950),
         ("diff_event_a", "Will Different Event A happen?", "diff-event-a", 0.55, 0.55, 0.45, 0.45, 20_000.0, 1000, 140_000),
         ("diff_event_b", "Will Different Event B happen?", "diff-event-b", 0.56, 0.56, 0.44, 0.44, 20_000.0, 1000, 140_000),
         ("dup_same_a", "Will Duplicate Semantic happen?", "dup-sem-event", 0.55, 0.55, 0.45, 0.45, 20_000.0, 1000, 150_000),
@@ -96,8 +96,8 @@ def write_synthetic_input(path: Path) -> None:
                     true AS is_active,
                     false AS is_closed,
                     volume AS market_volume_usd,
-                    to_timestamp(start_epoch + i) AS ODDS_TIMESTAMP,
-                    (start_epoch + i)::BIGINT AS ODDS_TIMESTAMP_EPOCH,
+                    to_timestamp(start_epoch + i * 60) AS ODDS_TIMESTAMP,
+                    (start_epoch + i * 60)::BIGINT AS ODDS_TIMESTAMP_EPOCH,
                     CASE outcome_label
                         WHEN 'Yes' THEN CASE WHEN i = minute_count - 1 THEN yes_current ELSE yes_base END
                         ELSE CASE WHEN i = minute_count - 1 THEN no_current ELSE no_base END
@@ -117,11 +117,33 @@ def write_synthetic_input(path: Path) -> None:
                     true AS is_active,
                     false AS is_closed,
                     1.0 AS market_volume_usd,
-                    to_timestamp(200000 + i) AS ODDS_TIMESTAMP,
-                    (200000 + i)::BIGINT AS ODDS_TIMESTAMP_EPOCH,
+                    to_timestamp(200000 + i * 60) AS ODDS_TIMESTAMP,
+                    (200000 + i * 60)::BIGINT AS ODDS_TIMESTAMP_EPOCH,
                     CASE outcome_label WHEN 'Messi' THEN 0.55 ELSE 0.45 END AS price
                 FROM (SELECT * FROM minute LIMIT 3)
                 CROSS JOIN (VALUES (0, 'Messi'), (1, 'Ronaldo')) AS o(outcome_index, outcome_label)
+            ),
+            nary_rows AS (
+                SELECT
+                    'golden_boot' AS market_id,
+                    outcome_index,
+                    'golden_boot:' || outcome_label AS clob_token_id,
+                    'Who wins Golden Boot?' AS question,
+                    outcome_label,
+                    'world-cup-golden-boot-winner' AS event_slug,
+                    true AS is_active,
+                    false AS is_closed,
+                    20_000.0 AS market_volume_usd,
+                    to_timestamp(220000 + i * 60) AS ODDS_TIMESTAMP,
+                    (220000 + i * 60)::BIGINT AS ODDS_TIMESTAMP_EPOCH,
+                    CASE outcome_label
+                        WHEN 'Alpha' THEN 0.34
+                        WHEN 'Beta' THEN 0.33
+                        ELSE 0.33
+                    END AS price
+                FROM minute
+                CROSS JOIN (VALUES (0, 'Alpha'), (1, 'Beta'), (2, 'Gamma')) AS o(outcome_index, outcome_label)
+                WHERE i < 1000
             ),
             stale_rows AS (
                 SELECT 'stale', 0, 'stale:Yes', 'Will stale pass?', 'Yes', 'stale-event', true, false, 1.0,
@@ -133,6 +155,7 @@ def write_synthetic_input(path: Path) -> None:
             )
             SELECT * FROM binary_rows
             UNION ALL SELECT * FROM named_rows
+            UNION ALL SELECT * FROM nary_rows
             UNION ALL SELECT * FROM stale_rows;
 
             COPY fixture TO '{q(path)}' (FORMAT PARQUET);
@@ -154,3 +177,20 @@ def synthetic_output(tmp_path_factory: pytest.TempPathFactory, synthetic_input: 
     out = tmp_path_factory.mktemp("synthetic_build") / "out"
     build(synthetic_input, out)
     return out
+
+
+def write_synthetic_resolutions(path: Path) -> None:
+    db = DuckDB(path.with_suffix(".duckdb"))
+    try:
+        db.execute(f"""
+            COPY (
+                SELECT * FROM (VALUES
+                    ('comp:Yes', 'comp', 'Yes', 1.0, to_timestamp(300000)),
+                    ('comp:No', 'comp', 'No', 0.0, to_timestamp(300000)),
+                    ('winner_alpha:Yes', 'winner_alpha', 'Yes', 0.0, to_timestamp(300000)),
+                    ('alpha_final:Yes', 'alpha_final', 'Yes', 0.0, to_timestamp(300000))
+                ) AS t(clob_token_id, market_id, outcome_label, payout, resolved_at)
+            ) TO '{q(path)}' (FORMAT PARQUET);
+        """)
+    finally:
+        db.close()

@@ -25,6 +25,9 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("build")
     p.add_argument("--input", required=True, type=Path)
     p.add_argument("--out", required=True, type=Path)
+    p.add_argument("--quotes", type=Path, default=None)
+    p.add_argument("--resolutions", type=Path, default=None)
+    p.add_argument("--taxonomy", type=Path, default=None)
 
     p = sub.add_parser("nodes")
     p.add_argument("--out", required=True, type=Path)
@@ -43,6 +46,13 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("violations")
     p.add_argument("--out", required=True, type=Path)
     p.add_argument("--top", type=int, default=50)
+
+    p = sub.add_parser("coherence")
+    p.add_argument("--out", required=True, type=Path)
+    p.add_argument("--top", type=int, default=50)
+
+    p = sub.add_parser("evaluate")
+    p.add_argument("--out", required=True, type=Path)
 
     p = sub.add_parser("condition")
     p.add_argument("--out", required=True, type=Path)
@@ -67,7 +77,13 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         if args.cmd == "build":
-            stats = build(args.input, args.out)
+            stats = build(
+                args.input,
+                args.out,
+                quotes_path=args.quotes,
+                resolutions_path=args.resolutions,
+                taxonomy_path=args.taxonomy,
+            )
             for key, value in stats.items():
                 print(f"{key}: {value}")
         elif args.cmd == "nodes":
@@ -101,6 +117,26 @@ def main(argv: list[str] | None = None) -> int:
                 FROM read_parquet('{{path}}')
                 ORDER BY current_gap DESC, mean_gap DESC
                 LIMIT {args.top}
+            """))
+        elif args.cmd == "coherence":
+            _print_rows(read_rows(args.out, "coherence.parquet", f"""
+                SELECT event_slug, node_count, constraint_count, incoherence_distance, solver_status
+                FROM read_parquet('{{path}}')
+                ORDER BY incoherence_distance DESC
+                LIMIT {args.top}
+            """))
+            _print_section("Repairs", read_rows(args.out, "coherence_repairs.parquet", f"""
+                SELECT event_slug, node_id, observed_price, repaired_price, adjustment
+                FROM read_parquet('{{path}}')
+                ORDER BY abs(adjustment) DESC
+                LIMIT {args.top}
+            """))
+        elif args.cmd == "evaluate":
+            _print_rows(read_rows(args.out, "evaluation.parquet", f"""
+                SELECT *
+                FROM read_parquet('{{path}}')
+                ORDER BY metric_type, value DESC NULLS LAST
+                LIMIT 100
             """))
         elif args.cmd == "condition":
             a = resolve_node(args.out, args.a, require_unique=True)

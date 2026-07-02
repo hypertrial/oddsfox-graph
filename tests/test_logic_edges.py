@@ -84,7 +84,8 @@ def _assert_logic_invariants(out: Path) -> None:
             """,
             "bad exclusion basis": f"""
                 SELECT count(*) FROM read_parquet('{logic}')
-                WHERE edge_type = 'mutually_exclusive' AND edge_basis != 'single_winner_family'
+                WHERE edge_type = 'mutually_exclusive'
+                    AND edge_basis NOT IN ('single_winner_family', 'same_market')
             """,
             "null required metadata": f"""
                 SELECT count(*) FROM read_parquet('{logic}')

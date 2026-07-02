@@ -66,13 +66,13 @@ def validate_input(db: DuckDB, path: Path) -> None:
                     OR count(DISTINCT market_volume_usd) > 1
             )
         """), "tokens"),
-        ("non-binary markets", _count(db, f"""
+        ("markets with fewer than 2 tokens", _count(db, f"""
             SELECT count(*)
             FROM (
                 SELECT market_id
                 FROM {source}
                 GROUP BY market_id
-                HAVING count(DISTINCT clob_token_id) != 2
+                HAVING count(DISTINCT clob_token_id) < 2
             )
         """), "markets"),
         ("markets without complete current minute", _count(db, f"""

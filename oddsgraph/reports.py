@@ -101,7 +101,9 @@ def _summary(stats: dict[str, object]) -> str:
         "candidate_edges",
         "logic_edges",
         "price_edges",
+        "derived_edges",
         "violations",
+        "incoherent_events",
         "runtime_seconds",
     ):
         lines.append(f"- **{key}:** {stats.get(key)}")

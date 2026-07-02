@@ -46,27 +46,38 @@ python -m oddsgraph.cli build \
   --out output/wc2026
 ```
 
-On the local WC2026 file, the full build rewrites a 53.8M-row `prices.parquet`
-and usually takes about two minutes on this machine. The output directory is
-recreated in place for the DuckDB working database and generated artifacts.
+Optional inputs:
 
-Latest local WC2026 run:
+```bash
+python -m oddsgraph.cli build \
+  --input wc2026_token_minutely_odds_20260702T070755Z.parquet \
+  --quotes quotes.parquet \
+  --resolutions resolutions.parquet \
+  --taxonomy oddsgraph/taxonomies/wc2026.json \
+  --out output/wc2026
+```
 
-| Metric | Value |
+On the local WC2026 file, the full build rewrites minute-level `prices.parquet`
+and usually takes about 5 minutes on this machine (LP coherence adds per-event
+solve time). The output directory is recreated in place for the DuckDB working
+database and generated artifacts.
+
+Latest local WC2026 run (`wc2026_token_minutely_odds_20260702T070755Z.parquet`):
+
+| metric | value |
 | --- | ---: |
-| Input rows | 53,827,798 |
-| Markets | 2,344 |
-| Tokens / nodes | 4,688 |
-| Candidate edges | 16,684 |
-| Logic edges | 7,842 |
-| Price-only edges | 5,285 |
-| Constraint rows | 2,344 |
-| Conditional rows | 18,844 |
-| Violations | 9 |
+| input rows | 53,827,798 |
+| markets / tokens | 2,344 / 4,688 |
+| candidate edges | 16,684 |
+| logic edges | 12,886 |
+| price edges | 12,137 |
+| violations | 10 |
+| incoherent events | 10 |
+| runtime | 290s |
 
 The artifact reference is in [docs/artifacts.md](docs/artifacts.md).
-Successful builds also write `build_manifest.json` after every artifact and
-report has been written.
+Successful builds also write `build_manifest.json` with taxonomy metadata,
+effective calibrated thresholds, and summary stats.
 
 ## Inspect Results
 
@@ -121,6 +132,18 @@ Show pricing or logic violations:
 python -m oddsgraph.cli violations --out output/wc2026 --top 50
 ```
 
+Show per-event LP coherence and top repairs:
+
+```bash
+python -m oddsgraph.cli coherence --out output/wc2026 --top 20
+```
+
+Show resolution backtest metrics (requires build with `--resolutions`):
+
+```bash
+python -m oddsgraph.cli evaluate --out output/wc2026
+```
+
 Ask for a conditional probability row between two nodes. Each side can be a
 full token id or search text that resolves to exactly one node:
 
@@ -142,10 +165,13 @@ Generated markdown reports are written to `output/wc2026/reports/`, including
   [wc2026_token_minutely_odds_20260702T070755Z.md](wc2026_token_minutely_odds_20260702T070755Z.md).
   The build expects uppercase `ODDS_TIMESTAMP` and `ODDS_TIMESTAMP_EPOCH`.
 - `Input parquet failed validation`: fix the reported nulls, invalid prices,
-  duplicate token timestamps, unstable token metadata, non-binary markets, or
-  markets without a complete current minute.
+  duplicate token timestamps, unstable token metadata, markets with fewer than two
+  tokens, or markets without a complete current minute.
 - Slow build: the MVP writes all minute-level prices. The WC2026 file has
-  53,827,798 rows, so `prices.parquet` dominates runtime and disk I/O.
+  53,827,798 rows, so `prices.parquet` dominates runtime and disk I/O. Pair
+  scoring uses a 30-day lookback window (`SCORING_LOOKBACK_DAYS` in
+  `thresholds.py`) so year-long feeds do not materialize full pair-minute
+  history.
 - `violations` returns rows: strict semantic edges can still have current prices
   that contradict the relationship. Inspect the row before treating it as data
   corruption.

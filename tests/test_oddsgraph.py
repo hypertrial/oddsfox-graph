@@ -9,7 +9,9 @@ import pytest
 from oddsgraph.build import build
 from oddsgraph.cli import main
 from oddsgraph.queries import DuckDB, q
+from oddsgraph.rules import load_taxonomy
 from oddsgraph.schema import validate_input
+from tests.conftest import write_synthetic_resolutions
 
 
 ARTIFACTS = {
@@ -19,21 +21,26 @@ ARTIFACTS = {
     "candidate_edges.parquet",
     "logic_edges.parquet",
     "price_edges.parquet",
+    "derived_edges.parquet",
     "constraint_hyperedges.parquet",
     "conditional_edges.parquet",
     "violations.parquet",
+    "calibration.parquet",
+    "coherence.parquet",
+    "coherence_repairs.parquet",
 }
 
 ARTIFACT_COLUMNS = {
     "nodes.parquet": [
         "node_id", "market_id", "outcome_index", "clob_token_id", "question",
         "outcome_label", "event_slug", "is_active", "is_closed", "market_volume_usd",
-        "market_family", "canonical_proposition", "proposition_type", "first_seen_ts",
-        "last_seen_ts", "active_minutes", "current_price", "mean_price", "min_price", "max_price",
+        "market_family", "canonical_proposition", "proposition_type", "expected_tokens",
+        "first_seen_ts", "last_seen_ts", "active_minutes", "current_price", "current_price_devig",
+        "mean_price", "mean_price_devig", "min_price", "max_price",
     ],
     "prices.parquet": [
-        "node_id", "market_id", "odds_timestamp", "odds_timestamp_epoch", "price",
-        "is_active", "is_closed", "market_volume_usd", "logit_price", "price_return_1m",
+        "node_id", "market_id", "odds_timestamp", "odds_timestamp_epoch", "price", "price_devig",
+        "scoring_price", "is_active", "is_closed", "market_volume_usd", "logit_price", "price_return_1m",
     ],
     "market_groups.parquet": [
         "market_id", "event_slug", "question", "market_family", "num_tokens", "token_ids",
@@ -54,6 +61,9 @@ ARTIFACT_COLUMNS = {
         "violation_score", "overlap_minutes", "current_p_src", "current_p_dst", "mean_p_src",
         "mean_p_dst", "market_id_src", "market_id_dst", "event_slug_src", "event_slug_dst", "evidence",
     ],
+    "derived_edges.parquet": [
+        "src_node_id", "dst_node_id", "edge_type", "edge_basis", "confidence", "path", "evidence",
+    ],
     "constraint_hyperedges.parquet": [
         "constraint_id", "constraint_type", "market_id", "event_slug", "question", "node_ids",
         "current_sum_price", "mean_sum_price", "expected_sum_price", "violation_score",
@@ -67,6 +77,16 @@ ARTIFACT_COLUMNS = {
         "violation_id", "violation_type", "src_node_id", "dst_node_id", "market_id_src",
         "market_id_dst", "event_slug_src", "event_slug_dst", "severity", "current_gap",
         "mean_gap", "confidence", "first_seen_ts", "last_seen_ts", "description",
+    ],
+    "calibration.parquet": [
+        "bucket_id", "volume_min", "volume_max", "sample_count", "complement_p50",
+        "complement_p95", "equivalence_p95", "implication_p95", "exclusion_p95",
+    ],
+    "coherence.parquet": [
+        "event_slug", "node_count", "constraint_count", "incoherence_distance", "solver_status",
+    ],
+    "coherence_repairs.parquet": [
+        "event_slug", "node_id", "observed_price", "repaired_price", "adjustment",
     ],
 }
 
@@ -101,7 +121,7 @@ def test_schema_rejects_missing_columns(tmp_path: Path) -> None:
           ("m1", 0, "m1:Yes", "Will M1 changed pass?", "Yes", "event-1", True, False, 1.0, 2, 0.4),
           ("m1", 1, "m1:No", "Will M1 pass?", "No", "event-1", True, False, 1.0, 2, 0.6)],
          "unstable token metadata: 1 tokens"),
-        ([BASE_ROWS[0]], "non-binary markets: 1 markets"),
+        ([BASE_ROWS[0]], "markets with fewer than 2 tokens: 1 markets"),
         ([("m1", 0, "m1:Yes", "Will M1 pass?", "Yes", "event-1", True, False, 1.0, 1, 0.4),
           ("m1", 1, "m1:No", "Will M1 pass?", "No", "event-1", True, False, 1.0, 61, 0.6)],
          "markets without complete current minute: 1 markets"),
@@ -140,6 +160,13 @@ def test_build_outputs_artifacts_and_core_logic(synthetic_output: Path) -> None:
             {"outcome_label": "Ronaldo", "canonical_proposition": "Top goalscorer? :: Ronaldo"},
         ]
 
+        nary = db.rows(f"""
+            SELECT constraint_type, current_sum_price
+            FROM read_parquet('{q(synthetic_output / "constraint_hyperedges.parquet")}')
+            WHERE market_id = 'golden_boot'
+        """)
+        assert nary == [{"constraint_type": "one_of_n", "current_sum_price": pytest.approx(1.0)}]
+
         current_sum = float(db.scalar(f"""
             SELECT current_sum_price
             FROM read_parquet('{q(synthetic_output / "market_groups.parquet")}')
@@ -164,6 +191,13 @@ def test_build_outputs_artifacts_and_core_logic(synthetic_output: Path) -> None:
             WHERE market_id_src = 'bad'
         """)
         assert violations == [{"violation_type": "complement_violation"}]
+
+        conditionals = db.rows(f"""
+            SELECT p_a_given_b
+            FROM read_parquet('{q(synthetic_output / "conditional_edges.parquet")}')
+            WHERE method = 'exact_implication_reverse'
+        """)
+        assert all(row["p_a_given_b"] is None or row["p_a_given_b"] <= 1.0 for row in conditionals)
 
         methods = {
             row["method"]
@@ -200,7 +234,7 @@ def test_semantic_rule_classification(synthetic_output: Path) -> None:
             for row in db.rows(f"""
                 SELECT market_id, market_family
                 FROM read_parquet('{q(synthetic_output / "market_groups.parquet")}')
-                WHERE market_id IN ('comp', 'winner_alpha', 'alpha_final', 'alpha_semis')
+                WHERE market_id IN ('comp', 'winner_alpha', 'alpha_final', 'alpha_semis', 'golden_boot')
             """)
         }
         assert families == {
@@ -208,6 +242,7 @@ def test_semantic_rule_classification(synthetic_output: Path) -> None:
             "winner_alpha": "single_winner",
             "alpha_final": "stage_progression",
             "alpha_semis": "stage_progression",
+            "golden_boot": "single_winner",
         }
         sources = {
             row["candidate_source"]
@@ -225,8 +260,26 @@ def test_build_manifest_marks_success(synthetic_output: Path) -> None:
     manifest = json.loads((synthetic_output / "build_manifest.json").read_text())
     assert set(manifest["artifacts"]) == ARTIFACTS
     assert manifest["stats"]["tokens"] > 0
+    assert manifest["taxonomy"]["name"] == "wc2026"
+    assert manifest["effective_thresholds"] is not None
     assert "reports/summary.md" in manifest["reports"]
     assert "reports/coverage.md" in manifest["reports"]
+
+
+def test_taxonomy_loader_round_trip() -> None:
+    taxonomy = load_taxonomy()
+    assert taxonomy.name == "wc2026"
+    assert len(taxonomy.stage_rules) == 5
+    assert "world-cup-winner" in taxonomy.single_winner_slugs
+
+
+def test_evaluation_with_resolutions(synthetic_input: Path, tmp_path: Path) -> None:
+    out = tmp_path / "out"
+    resolutions = tmp_path / "resolutions.parquet"
+    write_synthetic_resolutions(resolutions)
+    build(synthetic_input, out, resolutions_path=resolutions)
+    assert (out / "evaluation.parquet").exists()
+    assert (out / "reports" / "evaluation.md").exists()
 
 
 def test_failed_build_removes_success_manifest(tmp_path: Path) -> None:
@@ -251,6 +304,8 @@ def test_cli_smoke(synthetic_input: Path, tmp_path: Path, capsys: pytest.Capture
     assert main(["build", "--input", str(synthetic_input), "--out", str(out)]) == 0
     assert main(["search", "--out", str(out), "--query", "Equivalent A"]) == 0
     assert "Will Equivalent A happen?" in capsys.readouterr().out
+    assert main(["coherence", "--out", str(out), "--top", "5"]) == 0
+    assert "incoherence_distance" in capsys.readouterr().out
     assert main(["condition", "--out", str(out), "--a", "comp:Yes", "--b", "comp:No"]) == 0
     assert "exact_complement" in capsys.readouterr().out
     assert main(["condition", "--out", str(out), "--a", "NOT(Will Complement pass?)", "--b", "comp:Yes"]) == 0
