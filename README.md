@@ -1,11 +1,12 @@
 # oddsgraph
 
-`oddsgraph` turns token-minute Polymarket odds into graph-ready parquet artifacts.
-Each `clob_token_id` is treated as a probabilistic proposition node, then the
-batch build emits price series, logical edges, conditional probabilities,
-constraint rows, violation rows, and markdown reports.
+`oddsgraph` turns token-minute Polymarket odds into graph-ready parquet
+artifacts. Each `clob_token_id` becomes a proposition node, then the batch build
+emits market groups, logical edges, price-only edges, derived implications,
+conditional probabilities, constraint rows, violations, optional coherence and
+evaluation artifacts, and markdown reports.
 
-This is a Python/DuckDB MVP for offline analysis. It is not a live ingest or
+This is a Python/DuckDB tool for offline analysis. It is not a live ingest or
 trading system.
 
 ## Requirements
@@ -15,10 +16,9 @@ trading system.
 - A parquet input with the schema described in
   [wc2026_token_minutely_odds_20260702T070755Z.md](wc2026_token_minutely_odds_20260702T070755Z.md).
 
-The current WC2026 parquet is a large local sample, about 621 MB. It is useful
-for reproducing the MVP results, but large datasets should move to external
-storage or a download step before this repo is treated as lightweight source
-code.
+The local WC2026 parquet is a large sample, about 621 MB. It is useful for
+reproducing the project results, but generated outputs and large datasets should
+stay outside source control.
 
 ## Setup
 
@@ -30,7 +30,7 @@ python -m pip install -e ".[dev]"
 
 ## Build Artifacts
 
-Run the batch build:
+Run a full build when you want the complete artifact set:
 
 ```bash
 python -m oddsgraph.cli build \
@@ -38,31 +38,8 @@ python -m oddsgraph.cli build \
   --out output/wc2026
 ```
 
-Optional inputs:
-
-```bash
-python -m oddsgraph.cli build \
-  --input wc2026_token_minutely_odds_20260702T070755Z.parquet \
-  --quotes quotes.parquet \
-  --resolutions resolutions.parquet \
-  --taxonomy oddsgraph/taxonomies/wc2026.json \
-  --out output/wc2026
-```
-
-For graph inspection runs where archival minute prices or global LP coherence
-are not needed, skip the expensive optional artifacts explicitly:
-
-```bash
-python -m oddsgraph.cli build \
-  --input wc2026_token_minutely_odds_20260702T070755Z.parquet \
-  --out output/wc2026-fast \
-  --skip-prices \
-  --skip-coherence
-```
-
-For the fastest graph inspection run, use lookback-scoped graph mode. This
-keeps graph/query artifacts but scopes historical node and market stats to the
-lookback window plus each market's latest complete minute:
+Run fast graph mode when you want graph/query artifacts quickly and can accept
+lookback-scoped historical node and market statistics:
 
 ```bash
 python -m oddsgraph.cli build \
@@ -72,40 +49,8 @@ python -m oddsgraph.cli build \
   --graph-lookback-days 30
 ```
 
-On the local WC2026 file, the full build materializes minute-level prices and
-usually takes 6-7 minutes on this machine. The output directory is recreated in
-place for the DuckDB working database and generated artifacts.
-
-Post-PR local WC2026 runs, July 2 2026
-(`wc2026_token_minutely_odds_20260702T070755Z.parquet`):
-
-| mode | runtime | output size | candidates | logic | price | violations |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| default full | 444.189s | 3.2G | 16,684 | 7,842 | 5,325 | 9 |
-| `--fast-graph --graph-lookback-days 30` | 111.717s | 917M | 15,118 | 7,842 | 5,325 | 0 |
-
-The active full-build comparison baseline remains the latest committed
-`401.205s` run. The post-PR full run missed that gate because the unchanged
-full-history window dedupe took 206.043s in this run versus 154.391s in the
-baseline, and price export took 34.206s versus 22.278s. The LP coherence setup
-change still reduced `solve_event_coherence` from 71.512s to 0.8s. The attempted
-max-join minute dedupe and materialized full-history market-minute sums were not
-landed in the default hot path because they exceeded the local performance gate.
-
-`--fast-graph` replaces the previous `--skip-prices --skip-coherence` graph
-inspection workflow, which took 332.928s on the same file. It omits
-`prices.parquet`, `coherence.parquet`, and `coherence_repairs.parquet` from
-`build_manifest.json`, and historical node/market stats are lookback-scoped.
-
-The artifact reference is in [docs/artifacts.md](docs/artifacts.md).
-Successful builds also write `build_manifest.json` with taxonomy metadata,
-effective calibrated thresholds, stage timings, and summary stats.
-
-Summarize a completed build manifest:
-
-```bash
-python -m oddsgraph.cli benchmark-summary --out output/wc2026
-```
+Successful builds write `build_manifest.json` last. Treat that file as the
+completion marker for a coherent output directory.
 
 ## Inspect Results
 
@@ -127,31 +72,10 @@ Show trusted structural or semantic logic edges:
 python -m oddsgraph.cli edges --out output/wc2026 --edge-type implies --top 50
 ```
 
-Supported edge filters are `complement`, `equivalent`, `implies`, and
-`mutually_exclusive`. Omit `--edge-type` to list all edge types.
-
 Show price-threshold relationships that are not accepted as logic:
 
 ```bash
 python -m oddsgraph.cli price-edges --out output/wc2026 --edge-type implies --top 50
-```
-
-Explain a node, including its market sibling, touching edges, violations, and
-conditional rows:
-
-```bash
-python -m oddsgraph.cli explain --out output/wc2026 --node "<token id or unique text>"
-```
-
-Explain a specific edge. Implications are directional; complement, equivalent,
-and mutual-exclusion lookups also check the reverse stored order:
-
-```bash
-python -m oddsgraph.cli explain-edge \
-  --out output/wc2026 \
-  --src "<token id or unique text>" \
-  --dst "<token id or unique text>" \
-  --edge-type implies
 ```
 
 Show pricing or logic violations:
@@ -160,20 +84,13 @@ Show pricing or logic violations:
 python -m oddsgraph.cli violations --out output/wc2026 --top 50
 ```
 
-Show per-event LP coherence and top repairs:
+Explain a node:
 
 ```bash
-python -m oddsgraph.cli coherence --out output/wc2026 --top 20
+python -m oddsgraph.cli explain --out output/wc2026 --node "<token id or unique text>"
 ```
 
-Show resolution backtest metrics (requires build with `--resolutions`):
-
-```bash
-python -m oddsgraph.cli evaluate --out output/wc2026
-```
-
-Ask for a conditional probability row between two nodes. Each side can be a
-full token id or search text that resolves to exactly one node:
+Ask for a conditional probability row:
 
 ```bash
 python -m oddsgraph.cli condition \
@@ -182,34 +99,25 @@ python -m oddsgraph.cli condition \
   --b "NOT(Will Brazil reach the Round of 16?)"
 ```
 
-Generated markdown reports are written to `output/wc2026/reports/`, including
-`coverage.md` for market-family and edge-basis coverage.
+Summarize a completed build manifest:
 
-## Troubleshooting
+```bash
+python -m oddsgraph.cli benchmark-summary --out output/wc2026
+```
 
-- `DuckDB is required`: install the Python package with `python -m pip install -e ".[dev]"`.
-- `Input parquet missing required columns`: compare the input with
-  [wc2026_token_minutely_odds_20260702T070755Z.md](wc2026_token_minutely_odds_20260702T070755Z.md).
-  The build expects uppercase `ODDS_TIMESTAMP` and `ODDS_TIMESTAMP_EPOCH`.
-- `Input parquet failed validation`: fix the reported nulls, invalid prices,
-  duplicate token timestamps, unstable token metadata, markets with fewer than two
-  tokens, or markets without a complete current minute.
-- Slow build: the MVP deduplicates and enriches all minute-level rows before
-  graph scoring. The WC2026 file has 53,827,798 rows, so minute materialization,
-  `prices.parquet`, and LP coherence dominate runtime. Pair scoring uses a
-  30-day lookback window (`SCORING_LOOKBACK_DAYS` in
-  `thresholds.py`) so year-long feeds do not materialize full pair-minute
-  history. Use the full default build for archival/research output; use
-  `--skip-prices` and/or `--skip-coherence` for compatible graph inspection,
-  or `--fast-graph` when lookback-scoped historical stats are acceptable.
-- Skipped artifact errors: if a command says an artifact was intentionally not
-  generated, rebuild without the matching skip flag or with the missing optional
-  input, such as `--resolutions` for `evaluation.parquet`.
-- `violations` returns rows: strict semantic edges can still have current prices
-  that contradict the relationship. Inspect the row before treating it as data
-  corruption.
-- `condition` cannot resolve or reports an ambiguous query: run `search` first
-  and pass exact `node_id` values.
+## Documentation Map
+
+- [docs/index.md](docs/index.md): handbook map and recommended reading order.
+- [docs/cli.md](docs/cli.md): CLI commands, flags, query commands, and expected
+  skipped-artifact errors.
+- [docs/builds.md](docs/builds.md): build modes, optional inputs, manifest
+  semantics, and artifact omission rules.
+- [docs/artifacts.md](docs/artifacts.md): parquet artifact schemas and report
+  reference.
+- [docs/architecture.md](docs/architecture.md): build stages, major tables,
+  edge lifecycle, coherence, evaluation, and performance hotspots.
+- [docs/benchmarks.md](docs/benchmarks.md): benchmark methodology, dated local
+  results, accepted/rejected optimizations, and summary command usage.
 
 ## Development Check
 
@@ -217,6 +125,9 @@ Generated markdown reports are written to `output/wc2026/reports/`, including
 pytest -q
 python -m oddsgraph.cli --help
 ```
+
+The docs contract checks are part of `pytest -q`; there is no docs generator or
+extra documentation dependency.
 
 To run optional checks against an existing full WC2026 build:
 

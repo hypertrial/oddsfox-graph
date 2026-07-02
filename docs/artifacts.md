@@ -1,142 +1,186 @@
-# oddsgraph Artifacts
+# Artifact Reference
 
-The build writes parquet artifacts and markdown reports under the `--out`
-directory. The graph node id is always `clob_token_id`, exposed as `node_id`.
-`market_id` is a market container, not the graph node.
-Successful builds write `build_manifest.json` last. Treat its presence as the
-completion marker for a coherent output directory.
+The graph node id is always `clob_token_id`, exposed as `node_id`.
+`market_id` is a market container, not the graph node. Successful builds write
+`build_manifest.json` last; use the manifest artifact list as the contract for
+that output directory.
 
-## Optional Inputs
+Optional artifacts can be absent by design. `prices.parquet` is omitted by
+`--skip-prices` and `--fast-graph`. `coherence.parquet` and
+`coherence_repairs.parquet` are omitted by `--skip-coherence` and
+`--fast-graph`. `evaluation.parquet` is written only when `--resolutions` is
+provided.
 
-- `--quotes quotes.parquet`: optional bid/ask history with `clob_token_id`,
-  `odds_timestamp_epoch`, `bid`, `ask`. When provided, midpoint prices and
-  half-spread noise floors are used for scoring.
-- `--resolutions resolutions.parquet`: optional resolved outcomes with
-  `clob_token_id` or (`market_id`, `outcome_label`), `payout`, `resolved_at`.
-  When provided, the build also writes `evaluation.parquet` and
-  `reports/evaluation.md`.
-- `--taxonomy path.json`: event taxonomy for stage progression and single-winner
-  families. Defaults to bundled `oddsgraph/taxonomies/wc2026.json`.
+Build-mode behavior is documented in [Build Modes](builds.md). Pipeline behavior
+is documented in [Architecture](architecture.md).
 
-## Optional Outputs
-
-- `--skip-prices`: omits `prices.parquet`. Graph artifacts, reports, and query
-  commands that read nodes/edges/violations/conditionals still work.
-- `--skip-coherence`: omits `coherence.parquet` and
-  `coherence_repairs.parquet`. Conditional rows fall back to current pair prices,
-  and violations omit `global_incoherence` rows.
-- `--fast-graph`: implies `--skip-prices` and `--skip-coherence`, and scopes
-  historical graph stats to `--graph-lookback-days` plus each market's latest
-  complete minute.
-- Skipped artifacts are intentionally absent and are not listed in
-  `build_manifest.json`.
-
-## Generated Parquet Files
+## Parquet Artifacts
 
 ### `nodes.parquet`
 
-- Grain: one row per `clob_token_id`.
-- Purpose: canonical proposition table for graph nodes.
-- Important columns: `node_id`, `market_id`, `outcome_index`, `question`,
-  `outcome_label`, `event_slug`, `canonical_proposition`, `proposition_type`,
-  `expected_tokens`, `market_family`, `first_seen_ts`, `last_seen_ts`,
-  `active_minutes`, `current_price`, `current_price_devig`, `mean_price`,
-  `mean_price_devig`, `min_price`, `max_price`.
+Grain: one row per `clob_token_id`.
 
-### `prices.parquet` (optional with `--skip-prices`)
+Purpose: canonical proposition table for graph nodes.
 
-- Grain: one row per `(node_id, odds_minute_epoch)` after deduplication.
-- Purpose: minute-level price series with devig and scoring prices.
-- Important columns: `price`, `price_devig`, `scoring_price`, `logit_price`,
-  `price_return_1m`.
+Columns: `node_id`, `market_id`, `outcome_index`, `clob_token_id`, `question`,
+`outcome_label`, `event_slug`, `is_active`, `is_closed`, `market_volume_usd`,
+`market_family`, `canonical_proposition`, `proposition_type`,
+`expected_tokens`, `first_seen_ts`, `last_seen_ts`, `active_minutes`,
+`current_price`, `current_price_devig`, `mean_price`, `mean_price_devig`,
+`min_price`, `max_price`.
+
+### `prices.parquet`
+
+Grain: one row per `(node_id, odds_minute_epoch)` after deduplication.
+
+Purpose: minute-level price series with devig and scoring prices.
+
+Columns: `node_id`, `market_id`, `odds_timestamp`, `odds_timestamp_epoch`,
+`price`, `price_devig`, `scoring_price`, `is_active`, `is_closed`,
+`market_volume_usd`, `logit_price`, `price_return_1m`.
 
 ### `market_groups.parquet`
 
-- Grain: one row per `market_id`.
-- Purpose: market-level grouping and sum diagnostics for binary and n-ary markets.
-- Important columns: `num_tokens`, `token_ids`, `current_sum_price`,
-  `mean_sum_price`.
+Grain: one row per `market_id`.
+
+Purpose: market-level grouping and sum diagnostics for binary and n-ary markets.
+
+Columns: `market_id`, `event_slug`, `question`, `market_family`, `num_tokens`,
+`token_ids`, `outcome_labels`, `is_active`, `is_closed`, `market_volume_usd`,
+`first_seen_ts`, `last_seen_ts`, `current_sum_price`, `mean_sum_price`.
 
 ### `candidate_edges.parquet`
 
-- Grain: one row per `(src_node_id, dst_node_id, candidate_type)`.
-- Candidate sources: `same_market`, `exact_duplicate_same_event`,
-  `semantic_single_winner`, `semantic_stage_progression`, `price_same_event_slug`.
+Grain: one row per `(src_node_id, dst_node_id, candidate_type)`.
+
+Purpose: candidate relationships before acceptance filters.
+
+Columns: `src_node_id`, `dst_node_id`, `candidate_type`, `candidate_source`,
+`candidate_score`, `market_id_src`, `market_id_dst`, `event_slug_src`,
+`event_slug_dst`.
+
+Candidate sources include `same_market`, `exact_duplicate_same_event`,
+`semantic_single_winner`, `semantic_stage_progression`, and
+`price_same_event_slug`.
 
 ### `logic_edges.parquet`
 
-- Strict semantic/structural edges only (`edge_basis != price_only`).
-- Edge bases: `same_market`, `exact_duplicate`, `single_winner_family`,
-  `stage_progression_rule`.
+Grain: one row per accepted strict semantic or structural graph edge.
+
+Purpose: trusted relationships for graph logic.
+
+Columns: `src_node_id`, `dst_node_id`, `edge_type`, `edge_basis`, `confidence`,
+`score`, `violation_score`, `overlap_minutes`, `current_p_src`,
+`current_p_dst`, `mean_p_src`, `mean_p_dst`, `market_id_src`, `market_id_dst`,
+`event_slug_src`, `event_slug_dst`, `evidence`.
 
 ### `price_edges.parquet`
 
-- Price-threshold relationships not promoted to logic (`edge_basis = price_only`).
+Grain: one row per price-threshold relationship that was not promoted to logic.
+
+Purpose: inspect useful price signals without treating them as structural graph
+facts.
+
+Columns: `src_node_id`, `dst_node_id`, `edge_type`, `edge_basis`, `confidence`,
+`score`, `violation_score`, `overlap_minutes`, `current_p_src`,
+`current_p_dst`, `mean_p_src`, `mean_p_dst`, `market_id_src`, `market_id_dst`,
+`event_slug_src`, `event_slug_dst`, `evidence`.
 
 ### `derived_edges.parquet`
 
-- Transitive closure of accepted `implies` logic edges.
-- Columns include `path` (provenance chain) and `edge_basis = transitive`.
+Grain: one row per derived implication.
+
+Purpose: transitive closure of accepted `implies` logic edges.
+
+Columns: `src_node_id`, `dst_node_id`, `edge_type`, `edge_basis`, `confidence`,
+`path`, `evidence`.
 
 ### `constraint_hyperedges.parquet`
 
-- Market-level constraints: `complement_pair` for binary markets, `one_of_n` for
-  n-ary markets (expected sum 1).
+Grain: one row per market-level constraint.
+
+Purpose: binary complement and one-of-n constraints for market groups.
+
+Columns: `constraint_id`, `constraint_type`, `market_id`, `event_slug`,
+`question`, `node_ids`, `current_sum_price`, `mean_sum_price`,
+`expected_sum_price`, `violation_score`, `confidence`, `evidence`.
 
 ### `conditional_edges.parquet`
 
-- Exact conditionals from logic/derived edges; Fréchet bounds from repaired
-  prices for unrelated pairs.
-- `exact_implication_reverse` values are clamped to `[0, 1]`.
+Grain: one row per ordered pair conditional emitted by the build.
+
+Purpose: exact conditionals from logic/derived edges and bounded estimates for
+unrelated pairs.
+
+Columns: `a_node_id`, `b_node_id`, `p_a_given_b`, `lower_bound`,
+`upper_bound`, `method`, `confidence`, `as_of_ts`, `evidence`.
 
 ### `violations.parquet`
 
-- Persistence-aware violations requiring breach streaks over recent aligned minutes.
-- `confidence` is the recent breach fraction (higher means more persistent).
-- `global_incoherence` rows come from per-event LP repair distance.
+Grain: one row per persistence-aware pricing, logic, or global incoherence
+violation.
+
+Purpose: current contradictions that persisted long enough to report.
+
+Columns: `violation_id`, `violation_type`, `src_node_id`, `dst_node_id`,
+`market_id_src`, `market_id_dst`, `event_slug_src`, `event_slug_dst`,
+`severity`, `current_gap`, `mean_gap`, `confidence`, `first_seen_ts`,
+`last_seen_ts`, `description`.
 
 ### `calibration.parquet`
 
-- Empirical complement-noise buckets by liquidity and derived threshold quantiles.
+Grain: one row per liquidity bucket.
 
-### `coherence.parquet` (optional with `--skip-coherence`)
+Purpose: empirical complement-noise buckets and derived threshold quantiles.
 
-- Per `event_slug` LP repair summary: node count, constraint count,
-  `incoherence_distance`, `solver_status`.
+Columns: `bucket_id`, `volume_min`, `volume_max`, `sample_count`,
+`complement_p50`, `complement_p95`, `equivalence_p95`, `implication_p95`,
+`exclusion_p95`.
 
-### `coherence_repairs.parquet` (optional with `--skip-coherence`)
+### `coherence.parquet`
 
-- Per-node observed vs repaired prices from the event-level L1 coherence solve.
+Grain: one row per `event_slug`.
 
-### `evaluation.parquet` (optional)
+Purpose: event-level LP repair summary.
 
-- Written when `--resolutions` is provided.
-- Metrics: edge precision by basis, violation follow-through, Brier score buckets.
+Columns: `event_slug`, `node_count`, `constraint_count`,
+`incoherence_distance`, `solver_status`.
 
-## Methodology Notes
+### `coherence_repairs.parquet`
 
-- Pair scoring aligns on deduplicated minute buckets (`token_minute_prices`).
-- Full builds materialize all deduplicated minute buckets. Fast graph builds
-  materialize only the graph lookback window plus current complete market
-  minutes, so historical fields such as `active_minutes`, `mean_price`, and
-  `mean_sum_price` are intentionally lookback-scoped.
-- EW gap stats and overlap counts use a trailing `SCORING_LOOKBACK_DAYS` window
-  (default 30 days). Older minutes contribute negligible weight at the 7-day
-  half-life but would otherwise multiply pair-minute rows on year-long feeds.
-- Persistence scans only the last `PERSISTENCE_LOOKBACK_MINUTES` per pair and
-  reuses `pair_max_epoch` from `aligned_edges` instead of rescanning history.
-- Error metrics use exponentially weighted means (half-life in `thresholds.py`).
-- Confidence scores are empirical p-values from complement-pair noise buckets.
-- Global coherence solves `min sum |x - p|` subject to accepted logic constraints
-  per event using SciPy HiGHS.
-- Effective thresholds used at build time are recorded in `build_manifest.json`.
+Grain: one row per repaired node in each event.
+
+Purpose: observed and repaired prices from the event-level LP solve.
+
+Columns: `event_slug`, `node_id`, `observed_price`, `repaired_price`,
+`adjustment`.
+
+### `evaluation.parquet`
+
+Grain: one row per evaluation metric bucket.
+
+Purpose: optional resolution backtest metrics.
+
+Columns: `metric_type`, `artifact`, `edge_basis`, `edge_type`,
+`violation_type`, `liquidity_bucket`, `edge_count`, `value`.
+
+## Markdown Reports
+
+Reports are written under `reports/`.
+
+- `summary.md`: summary counts and build stats.
+- `top_complement_violations.md`: largest complement violations.
+- `strongest_implications.md`: highest-confidence implication edges.
+- `strongest_exclusions.md`: highest-confidence mutual exclusion edges.
+- `duplicate_candidates.md`: duplicate proposition candidates.
+- `price_only_edges.md`: strongest price-only edges.
+- `coverage.md`: market-family and edge-basis coverage.
+- `conditional_examples.md`: sample conditional probability rows.
+- `evaluation.md`: optional evaluation report written with `--resolutions`.
 
 ## Manifest
 
-`build_manifest.json` records input paths, build options (`write_prices`,
-`solve_coherence`, `fast_graph`, `graph_lookback_days`), taxonomy hash,
-effective thresholds, LP warnings, generated artifacts/reports, summary stats,
-`stats.history_mode`, and `stage_timings` in seconds. Its artifact list is the
-contract for that build, so omitted optional artifacts are not validation
-failures. Query commands use the manifest to distinguish intentionally skipped
-artifacts from missing or stale output files.
+`build_manifest.json` records input paths, taxonomy metadata, effective
+thresholds, LP warnings, build options, generated artifacts, generated reports,
+summary stats, and stage timings. The manifest shape and omission semantics are
+documented in [Build Modes](builds.md).
