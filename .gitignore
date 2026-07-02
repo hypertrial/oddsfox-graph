@@ -216,3 +216,15 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# oddsgraph generated artifacts
+*.duckdb
+*.duckdb.wal
+output/
+.benchmarks/
+
+# Large exported odds inputs (keep local; see companion *.md manifests)
+*_token_minutely_odds_*.parquet
+
+# macOS
+.DS_Store
