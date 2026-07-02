@@ -17,7 +17,15 @@ from oddsgraph.build import (
 )
 from oddsgraph.calibration import _empirical_confidence, apply_calibration_confidence, default_thresholds
 from oddsgraph.cli import main
-from oddsgraph.coherence import EventModel, LpConstraint, _solve_l1_repair
+from oddsgraph.coherence import (
+    EventModel,
+    LpConstraint,
+    _collect_coherence_inputs,
+    _collect_constraints,
+    _collect_constraints_from_inputs,
+    _constraints_satisfied,
+    _solve_l1_repair,
+)
 from oddsgraph.queries import DuckDB, q
 from oddsgraph.rules import load_taxonomy
 from oddsgraph.schema import validate_input
@@ -258,7 +266,13 @@ def test_build_manifest_marks_success(synthetic_output: Path) -> None:
     assert manifest["stats"]["tokens"] > 0
     assert manifest["taxonomy"]["name"] == "wc2026"
     assert manifest["effective_thresholds"] is not None
-    assert manifest["build_options"] == {"solve_coherence": True, "write_prices": True}
+    assert manifest["build_options"] == {
+        "fast_graph": False,
+        "graph_lookback_days": 30,
+        "solve_coherence": True,
+        "write_prices": True,
+    }
+    assert manifest["stats"]["history_mode"] == "full"
     assert manifest["stage_timings"]["create_input_prices"] >= 0
     assert manifest["stage_timings"]["token_minute_prices"] >= 0
     assert "reports/summary.md" in manifest["reports"]
@@ -276,6 +290,40 @@ def test_build_manifest_marks_success(synthetic_output: Path) -> None:
             assert manifest["stats"][stat_key] == artifact_count
     finally:
         db.close()
+
+
+def test_market_minute_sums_match_market_group_artifact(synthetic_output: Path) -> None:
+    db = DuckDB(synthetic_output / "oddsgraph.duckdb")
+    try:
+        rows = db.rows(f"""
+            WITH market_group_rows AS (
+                SELECT market_id, current_sum_price, mean_sum_price
+                FROM read_parquet('{q(synthetic_output / "market_groups.parquet")}')
+            ),
+            sum_rows AS (
+                SELECT
+                    market_id,
+                    max(CASE WHEN is_current_complete THEN scoring_price_sum END) AS current_sum_price,
+                    avg(scoring_price_sum) FILTER (WHERE is_complete) AS mean_sum_price
+                FROM market_minute_sums
+                GROUP BY market_id
+            )
+            SELECT
+                g.market_id,
+                g.current_sum_price AS artifact_current_sum_price,
+                s.current_sum_price AS table_current_sum_price,
+                g.mean_sum_price AS artifact_mean_sum_price,
+                s.mean_sum_price AS table_mean_sum_price
+            FROM market_group_rows g
+            JOIN sum_rows s USING (market_id)
+        """)
+    finally:
+        db.close()
+
+    assert rows
+    for row in rows:
+        assert row["artifact_current_sum_price"] == pytest.approx(row["table_current_sum_price"])
+        assert row["artifact_mean_sum_price"] == pytest.approx(row["table_mean_sum_price"])
 
 
 def test_taxonomy_loader_round_trip() -> None:
@@ -306,6 +354,23 @@ def test_lp_constraint_senses_preserve_feasible_observations() -> None:
     assert status == "optimal"
     assert distance == pytest.approx(0.0)
     assert list(repaired) == pytest.approx(list(model.observed))
+    assert _constraints_satisfied(model, constraints)
+
+
+def test_batched_lp_constraint_collection_matches_wrapper(synthetic_output: Path) -> None:
+    db = DuckDB(synthetic_output / "oddsgraph.duckdb")
+    try:
+        inputs = _collect_coherence_inputs(db)
+        node_ids = inputs.event_nodes["world-cup-winner"]
+        model = EventModel(
+            "world-cup-winner",
+            node_ids,
+            pytest.importorskip("numpy").array([inputs.current_prices[node_id] for node_id in node_ids]),
+            {node_id: idx for idx, node_id in enumerate(node_ids)},
+        )
+        assert _collect_constraints_from_inputs(inputs, model) == _collect_constraints(db, model)
+    finally:
+        db.close()
 
 
 def test_empirical_confidence_counts_equal_errors_as_at_least_observed() -> None:
@@ -484,7 +549,12 @@ def test_cli_build_can_skip_prices_and_coherence(synthetic_input: Path, tmp_path
     ]) == 0
 
     manifest = json.loads((out / "build_manifest.json").read_text())
-    assert manifest["build_options"] == {"solve_coherence": False, "write_prices": False}
+    assert manifest["build_options"] == {
+        "fast_graph": False,
+        "graph_lookback_days": 30,
+        "solve_coherence": False,
+        "write_prices": False,
+    }
     assert "prices.parquet" not in manifest["artifacts"]
     assert "coherence.parquet" not in manifest["artifacts"]
     assert "coherence_repairs.parquet" not in manifest["artifacts"]
@@ -527,6 +597,10 @@ def test_cli_smoke(synthetic_input: Path, tmp_path: Path, capsys: pytest.Capture
     assert "Candidates:" in captured.err
     assert main(["evaluate", "--out", str(out)]) == 1
     assert "rebuild with --resolutions" in capsys.readouterr().err
+    assert main(["benchmark-summary", "--out", str(out)]) == 0
+    captured = capsys.readouterr()
+    assert "runtime_seconds:" in captured.out
+    assert "top_stage_timings:" in captured.out
 
 
 def test_token_minute_prices_choose_latest_timestamp_per_minute(tmp_path: Path) -> None:
@@ -597,6 +671,73 @@ def test_token_minute_prices_choose_latest_timestamp_per_minute(tmp_path: Path) 
         assert actual == expected
     finally:
         db.close()
+
+
+def test_fast_graph_mode_keeps_query_artifacts(
+    synthetic_input: Path,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    out = tmp_path / "out"
+    assert main([
+        "build",
+        "--input", str(synthetic_input),
+        "--out", str(out),
+        "--fast-graph",
+        "--graph-lookback-days", "1",
+    ]) == 0
+
+    manifest = json.loads((out / "build_manifest.json").read_text())
+    assert manifest["build_options"] == {
+        "fast_graph": True,
+        "graph_lookback_days": 1,
+        "solve_coherence": False,
+        "write_prices": False,
+    }
+    assert manifest["stats"]["history_mode"] == "fast_graph_lookback"
+    assert "prices.parquet" not in manifest["artifacts"]
+    assert "coherence.parquet" not in manifest["artifacts"]
+    assert not (out / "prices.parquet").exists()
+    assert not (out / "coherence.parquet").exists()
+
+    db = DuckDB()
+    try:
+        active_minutes = int(db.scalar(f"""
+            SELECT active_minutes
+            FROM read_parquet('{q(out / "nodes.parquet")}')
+            WHERE node_id = 'comp:Yes'
+        """) or 0)
+    finally:
+        db.close()
+    assert active_minutes == 1
+
+    assert main(["search", "--out", str(out), "--query", "Complement"]) == 0
+    assert "Will Complement pass?" in capsys.readouterr().out
+    assert main(["edges", "--out", str(out), "--top", "3"]) == 0
+    assert "edge_type" in capsys.readouterr().out
+    assert main(["condition", "--out", str(out), "--a", "comp:Yes", "--b", "comp:No"]) == 0
+    assert "exact_complement" in capsys.readouterr().out
+    assert main(["explain", "--out", str(out), "--node", "comp:Yes"]) == 0
+    assert "Same-Market Constraint" in capsys.readouterr().out
+
+
+def test_graph_lookback_days_requires_fast_graph(synthetic_input: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    assert main([
+        "build",
+        "--input", str(synthetic_input),
+        "--out", str(tmp_path / "out"),
+        "--graph-lookback-days", "1",
+    ]) == 1
+    assert "requires --fast-graph" in capsys.readouterr().err
+
+    assert main([
+        "build",
+        "--input", str(synthetic_input),
+        "--out", str(tmp_path / "out"),
+        "--fast-graph",
+        "--graph-lookback-days", "0",
+    ]) == 1
+    assert "must be positive" in capsys.readouterr().err
 
 
 def test_stage_invariants_report_duplicate_token_minutes(tmp_path: Path) -> None:

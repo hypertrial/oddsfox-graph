@@ -22,27 +22,15 @@ def write_constraints(db: DuckDB, out_dir: Path) -> None:
                 GROUP BY market_id
             ),
             market_sums AS (
-                SELECT market_id, avg(sum_price) AS mean_sum_price
-                FROM (
-                    SELECT
-                        p.market_id,
-                        p.odds_minute_epoch,
-                        sum(p.scoring_price) AS sum_price,
-                        count(DISTINCT p.clob_token_id) AS token_count
-                    FROM enriched_minute_prices p
-                    GROUP BY 1, 2
-                ) s
-                JOIN market_token_counts t USING (market_id)
-                WHERE s.token_count = t.expected_tokens
+                SELECT market_id, avg(scoring_price_sum) AS mean_sum_price
+                FROM market_minute_sums
+                WHERE is_complete
                 GROUP BY market_id
             ),
             current_sums AS (
-                SELECT p.market_id, sum(p.scoring_price) AS current_sum_price
-                FROM enriched_minute_prices p
-                JOIN market_complete_epochs e
-                    ON p.market_id = e.market_id
-                    AND p.odds_minute_epoch = e.current_minute_epoch
-                GROUP BY p.market_id
+                SELECT market_id, scoring_price_sum AS current_sum_price
+                FROM market_minute_sums
+                WHERE is_current_complete
             )
             SELECT
                 'market:' || p.market_id AS constraint_id,

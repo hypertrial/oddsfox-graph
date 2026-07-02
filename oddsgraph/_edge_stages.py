@@ -171,9 +171,15 @@ def write_candidates(db: DuckDB, out_dir: Path) -> None:
     db.execute(f"COPY candidate_edges_v TO '{q(out_dir / 'candidate_edges.parquet')}' (FORMAT PARQUET);")
 
 
-def score_edges(db: DuckDB, out_dir: Path, stage: Callable[[str, Callable[[], T_]], T_]) -> None:
+def score_edges(
+    db: DuckDB,
+    out_dir: Path,
+    stage: Callable[[str, Callable[[], T_]], T_],
+    *,
+    lookback_days: int | None = None,
+) -> None:
     del out_dir
-    stage("  scoring_minute_prices", lambda: db.execute(noise.create_scoring_minute_prices_sql()))
+    stage("  scoring_minute_prices", lambda: db.execute(noise.create_scoring_minute_prices_sql(lookback_days)))
     stage("  aligned_edges", lambda: db.execute(noise.create_aligned_edges_sql()))
     stage("  pair_persistence", lambda: db.execute(noise.create_pair_persistence_sql()))
     db.execute(

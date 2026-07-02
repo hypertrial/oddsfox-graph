@@ -25,6 +25,9 @@ completion marker for a coherent output directory.
 - `--skip-coherence`: omits `coherence.parquet` and
   `coherence_repairs.parquet`. Conditional rows fall back to current pair prices,
   and violations omit `global_incoherence` rows.
+- `--fast-graph`: implies `--skip-prices` and `--skip-coherence`, and scopes
+  historical graph stats to `--graph-lookback-days` plus each market's latest
+  complete minute.
 - Skipped artifacts are intentionally absent and are not listed in
   `build_manifest.json`.
 
@@ -113,6 +116,10 @@ completion marker for a coherent output directory.
 ## Methodology Notes
 
 - Pair scoring aligns on deduplicated minute buckets (`token_minute_prices`).
+- Full builds materialize all deduplicated minute buckets. Fast graph builds
+  materialize only the graph lookback window plus current complete market
+  minutes, so historical fields such as `active_minutes`, `mean_price`, and
+  `mean_sum_price` are intentionally lookback-scoped.
 - EW gap stats and overlap counts use a trailing `SCORING_LOOKBACK_DAYS` window
   (default 30 days). Older minutes contribute negligible weight at the 7-day
   half-life but would otherwise multiply pair-minute rows on year-long feeds.
@@ -126,9 +133,10 @@ completion marker for a coherent output directory.
 
 ## Manifest
 
-`build_manifest.json` records input paths, build options, taxonomy hash,
+`build_manifest.json` records input paths, build options (`write_prices`,
+`solve_coherence`, `fast_graph`, `graph_lookback_days`), taxonomy hash,
 effective thresholds, LP warnings, generated artifacts/reports, summary stats,
-and `stage_timings` in seconds. Its artifact list is the contract for that
-build, so omitted optional artifacts are not validation failures. Query commands
-use the manifest to distinguish intentionally skipped artifacts from missing
-or stale output files.
+`stats.history_mode`, and `stage_timings` in seconds. Its artifact list is the
+contract for that build, so omitted optional artifacts are not validation
+failures. Query commands use the manifest to distinguish intentionally skipped
+artifacts from missing or stale output files.

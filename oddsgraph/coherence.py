@@ -32,6 +32,16 @@ class LpConstraint:
     rhs: float
 
 
+@dataclass(frozen=True)
+class CoherenceInputs:
+    event_nodes: dict[str, list[str]]
+    current_prices: dict[str, float]
+    market_nodes: dict[str, list[list[str]]]
+    logic_edges: dict[tuple[str, str], list[tuple[str, str]]]
+    derived_implications: dict[str, list[tuple[str, str]]]
+    family_nodes: dict[str, list[str]]
+
+
 DERIVED_EDGE_COLUMNS = ARTIFACT_COLUMNS["derived_edges.parquet"]
 DERIVED_EDGE_EMPTY_TYPES = ARTIFACT_EMPTY_TYPES["derived_edges.parquet"]
 COHERENCE_COLUMNS = ARTIFACT_COLUMNS["coherence.parquet"]
@@ -95,40 +105,28 @@ def compute_transitive_closure(db: DuckDB, out_dir: Path) -> None:
 
 def solve_event_coherence(db: DuckDB, out_dir: Path) -> list[str]:
     warnings: list[str] = []
-    events = db.rows("""
-        SELECT event_slug, list(node_id ORDER BY node_id) AS node_ids
-        FROM nodes_v
-        WHERE event_slug IS NOT NULL
-        GROUP BY event_slug
-    """)
+    inputs = _collect_coherence_inputs(db)
     coherence_rows: list[dict[str, Any]] = []
     repair_rows: list[dict[str, Any]] = []
 
-    for event in events:
-        slug = event["event_slug"]
-        node_ids = list(event["node_ids"])
+    for slug, node_ids in inputs.event_nodes.items():
         if len(node_ids) > T.LP_MAX_NODES_PER_EVENT:
             warnings.append(f"skipped LP for {slug}: {len(node_ids)} nodes exceeds cap")
             continue
-        prices = {
-            row["node_id"]: float(row["current_price"] or 0.0)
-            for row in db.rows(f"""
-                SELECT node_id, current_price
-                FROM nodes_v
-                WHERE event_slug = '{q(slug)}'
-            """)
-        }
         model = EventModel(
             slug,
             node_ids,
-            np.array([prices[n] for n in node_ids]),
+            np.array([inputs.current_prices[n] for n in node_ids]),
             {n: i for i, n in enumerate(node_ids)},
         )
-        constraints = _collect_constraints(db, model)
+        constraints = _collect_constraints_from_inputs(inputs, model)
         if len(constraints) > T.LP_MAX_CONSTRAINTS_PER_EVENT:
             warnings.append(f"skipped LP for {slug}: {len(constraints)} constraints exceeds cap")
             continue
-        repaired, distance, status = _solve_l1_repair(model, constraints)
+        if _constraints_satisfied(model, constraints):
+            repaired, distance, status = model.observed.copy(), 0.0, "optimal"
+        else:
+            repaired, distance, status = _solve_l1_repair(model, constraints)
         if not math.isfinite(distance):
             distance = 1e6
         solver_status = "optimal" if status == "optimal" else "infeasible"
@@ -169,79 +167,128 @@ def create_empty_coherence_tables(db: DuckDB) -> None:
 
 
 def _collect_constraints(db: DuckDB, model: EventModel) -> list[LpConstraint]:
-    constraints: list[LpConstraint] = []
-    slug = q(model.event_slug)
+    return _collect_constraints_from_inputs(_collect_coherence_inputs(db), model)
 
-    for row in db.rows(f"""
-        SELECT market_id, list(node_id ORDER BY outcome_index) AS node_ids
+
+def _collect_coherence_inputs(db: DuckDB) -> CoherenceInputs:
+    event_nodes: dict[str, list[str]] = defaultdict(list)
+    current_prices: dict[str, float] = {}
+    market_rows: dict[tuple[str, str], list[tuple[int, str]]] = defaultdict(list)
+    family_nodes: dict[str, list[str]] = defaultdict(list)
+
+    for row in db.rows("""
+        SELECT
+            event_slug,
+            market_id,
+            node_id,
+            outcome_index,
+            current_price,
+            is_single_winner_family,
+            outcome_label
         FROM nodes_v
-        WHERE event_slug = '{slug}'
-        GROUP BY market_id
+        WHERE event_slug IS NOT NULL
+        ORDER BY event_slug, node_id
     """):
-        ids = [n for n in row["node_ids"] if n in model.index]
+        event_slug = str(row["event_slug"])
+        node_id = str(row["node_id"])
+        event_nodes[event_slug].append(node_id)
+        current_prices[node_id] = float(row["current_price"] or 0.0)
+        market_rows[(event_slug, str(row["market_id"]))].append((int(row["outcome_index"]), node_id))
+        if row["is_single_winner_family"] and row["outcome_label"] == "Yes":
+            family_nodes[event_slug].append(node_id)
+
+    market_nodes: dict[str, list[list[str]]] = defaultdict(list)
+    for (event_slug, _market_id), rows in market_rows.items():
+        market_nodes[event_slug].append([node_id for _, node_id in sorted(rows)])
+
+    logic_edges: dict[tuple[str, str], list[tuple[str, str]]] = defaultdict(list)
+    for row in db.rows("""
+        SELECT event_slug_src, edge_type, src_node_id, dst_node_id
+        FROM logic_edges_v
+        WHERE event_slug_src IS NOT NULL
+            AND edge_type IN ('complement', 'equivalent', 'implies', 'mutually_exclusive')
+    """):
+        logic_edges[(str(row["event_slug_src"]), str(row["edge_type"]))].append(
+            (str(row["src_node_id"]), str(row["dst_node_id"]))
+        )
+
+    derived_implications: dict[str, list[tuple[str, str]]] = defaultdict(list)
+    for row in db.rows("""
+        SELECT s.event_slug, d.src_node_id, d.dst_node_id
+        FROM derived_edges_v d
+        JOIN nodes_v s ON s.node_id = d.src_node_id
+        WHERE s.event_slug IS NOT NULL AND d.edge_type = 'implies'
+    """):
+        derived_implications[str(row["event_slug"])].append(
+            (str(row["src_node_id"]), str(row["dst_node_id"]))
+        )
+
+    return CoherenceInputs(
+        event_nodes={slug: sorted(nodes) for slug, nodes in event_nodes.items()},
+        current_prices=current_prices,
+        market_nodes=dict(market_nodes),
+        logic_edges=dict(logic_edges),
+        derived_implications=dict(derived_implications),
+        family_nodes={slug: sorted(nodes) for slug, nodes in family_nodes.items()},
+    )
+
+
+def _collect_constraints_from_inputs(
+    inputs: CoherenceInputs,
+    model: EventModel,
+) -> list[LpConstraint]:
+    constraints: list[LpConstraint] = []
+    slug = model.event_slug
+
+    for node_ids in inputs.market_nodes.get(slug, []):
+        ids = [n for n in node_ids if n in model.index]
         if len(ids) < 2:
             continue
         coeffs = [(model.index[n], 1.0) for n in ids]
         constraints.append(LpConstraint("simplex", "eq", coeffs, 1.0))
 
-    for row in db.rows(f"""
-        SELECT src_node_id, dst_node_id
-        FROM logic_edges_v
-        WHERE edge_type = 'complement'
-            AND event_slug_src = '{slug}'
-    """):
-        if row["src_node_id"] in model.index and row["dst_node_id"] in model.index:
-            i, j = model.index[row["src_node_id"]], model.index[row["dst_node_id"]]
+    for src, dst in inputs.logic_edges.get((slug, "complement"), []):
+        if src in model.index and dst in model.index:
+            i, j = model.index[src], model.index[dst]
             constraints.append(LpConstraint("complement", "eq", [(i, 1.0), (j, 1.0)], 1.0))
 
-    for row in db.rows(f"""
-        SELECT src_node_id, dst_node_id
-        FROM logic_edges_v
-        WHERE edge_type = 'equivalent'
-            AND event_slug_src = '{slug}'
-    """):
-        if row["src_node_id"] in model.index and row["dst_node_id"] in model.index:
-            i, j = model.index[row["src_node_id"]], model.index[row["dst_node_id"]]
+    for src, dst in inputs.logic_edges.get((slug, "equivalent"), []):
+        if src in model.index and dst in model.index:
+            i, j = model.index[src], model.index[dst]
             constraints.append(LpConstraint("equivalent", "eq", [(i, 1.0), (j, -1.0)], 0.0))
 
-    for table in ("logic_edges_v", "derived_edges_v"):
-        for row in db.rows(f"""
-            SELECT src_node_id, dst_node_id
-            FROM {table}
-            WHERE edge_type = 'implies'
-                AND event_slug_src = '{slug}'
-        """) if table == "logic_edges_v" else db.rows(f"""
-            SELECT d.src_node_id, d.dst_node_id
-            FROM derived_edges_v d
-            JOIN nodes_v s ON s.node_id = d.src_node_id
-            WHERE d.edge_type = 'implies' AND s.event_slug = '{slug}'
-        """):
-            if row["src_node_id"] in model.index and row["dst_node_id"] in model.index:
-                i, j = model.index[row["src_node_id"]], model.index[row["dst_node_id"]]
-                constraints.append(LpConstraint("implies", "le", [(i, 1.0), (j, -1.0)], 0.0))
+    for src, dst in (
+        inputs.logic_edges.get((slug, "implies"), [])
+        + inputs.derived_implications.get(slug, [])
+    ):
+        if src in model.index and dst in model.index:
+            i, j = model.index[src], model.index[dst]
+            constraints.append(LpConstraint("implies", "le", [(i, 1.0), (j, -1.0)], 0.0))
 
-    for row in db.rows(f"""
-        SELECT src_node_id, dst_node_id
-        FROM logic_edges_v
-        WHERE edge_type = 'mutually_exclusive'
-            AND event_slug_src = '{slug}'
-    """):
-        if row["src_node_id"] in model.index and row["dst_node_id"] in model.index:
-            i, j = model.index[row["src_node_id"]], model.index[row["dst_node_id"]]
+    for src, dst in inputs.logic_edges.get((slug, "mutually_exclusive"), []):
+        if src in model.index and dst in model.index:
+            i, j = model.index[src], model.index[dst]
             constraints.append(LpConstraint("exclusion", "le", [(i, 1.0), (j, 1.0)], 1.0))
 
-    families: dict[str, list[str]] = defaultdict(list)
-    for row in db.rows(f"""
-        SELECT node_id, event_slug
-        FROM nodes_v
-        WHERE event_slug = '{slug}' AND is_single_winner_family AND outcome_label = 'Yes'
-    """):
-        families[row["event_slug"]].append(row["node_id"])
-    for nodes in families.values():
-        coeffs = [(model.index[n], 1.0) for n in nodes if n in model.index]
-        if len(coeffs) >= 2:
-            constraints.append(LpConstraint("family_sum", "le", coeffs, 1.0))
+    coeffs = [(model.index[n], 1.0) for n in inputs.family_nodes.get(slug, []) if n in model.index]
+    if len(coeffs) >= 2:
+        constraints.append(LpConstraint("family_sum", "le", coeffs, 1.0))
     return constraints
+
+
+def _constraints_satisfied(
+    model: EventModel,
+    constraints: list[LpConstraint],
+    *,
+    tolerance: float = 1e-9,
+) -> bool:
+    for constraint in constraints:
+        lhs = sum(model.observed[idx] * weight for idx, weight in constraint.coeffs)
+        if constraint.sense == "eq" and abs(lhs - constraint.rhs) > tolerance:
+            return False
+        if constraint.sense == "le" and lhs > constraint.rhs + tolerance:
+            return False
+    return True
 
 
 def _solve_l1_repair(

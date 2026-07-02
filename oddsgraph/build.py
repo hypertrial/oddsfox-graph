@@ -45,7 +45,13 @@ def build(
     taxonomy_path: Path | None = None,
     write_prices: bool = True,
     solve_coherence: bool = True,
+    fast_graph: bool = False,
+    graph_lookback_days: int = 30,
 ) -> dict[str, str | int | float | None]:
+    if graph_lookback_days <= 0:
+        raise ValueError("graph_lookback_days must be positive")
+    actual_write_prices = write_prices and not fast_graph
+    actual_solve_coherence = solve_coherence and not fast_graph
     start = time.time()
     taxonomy = load_taxonomy(taxonomy_path)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -63,13 +69,31 @@ def build(
         stage("validate_input_schema", lambda: validate_input_schema(db, input_path))
         stage("create_input_prices", lambda: _create_input_prices(db, input_path))
         stage("validate_input", lambda: validate_input_table(db))
-        stage("create_views", lambda: _create_views(db, taxonomy, quotes_path, stage))
-        if write_prices:
+        stage(
+            "create_views",
+            lambda: _create_views(
+                db,
+                taxonomy,
+                quotes_path,
+                stage,
+                fast_graph=fast_graph,
+                graph_lookback_days=graph_lookback_days,
+            ),
+        )
+        if actual_write_prices:
             stage("write_prices", lambda: _write_prices(db, out_dir))
         stage("write_nodes", lambda: _write_nodes(db, out_dir))
         stage("write_market_groups", lambda: _write_market_groups(db, out_dir))
         stage("write_candidates", lambda: write_candidates(db, out_dir))
-        stage("score_edges", lambda: score_edges(db, out_dir, stage))
+        stage(
+            "score_edges",
+            lambda: score_edges(
+                db,
+                out_dir,
+                stage,
+                lookback_days=graph_lookback_days if fast_graph else None,
+            ),
+        )
         effective_thresholds = stage(
             "fit_calibration", lambda: fit_calibration(db, out_dir)
         )[1]
@@ -77,7 +101,7 @@ def build(
         stage("validate_final_edges", lambda: _validate_final_edge_invariants(db))
         stage("write_final_edges", lambda: _write_final_edges(db, out_dir))
         stage("compute_transitive_closure", lambda: compute_transitive_closure(db, out_dir))
-        if solve_coherence:
+        if actual_solve_coherence:
             lp_warnings = stage("solve_event_coherence", lambda: solve_event_coherence(db, out_dir))
         else:
             stage("create_empty_coherence_tables", lambda: create_empty_coherence_tables(db))
@@ -86,7 +110,7 @@ def build(
         stage("write_violations", lambda: write_violations(db, out_dir, effective_thresholds))
         if resolutions_path is not None:
             stage("run_evaluation", lambda: run_evaluation(db, out_dir, resolutions_path))
-        stats = stage("stats", lambda: _stats(db, start))
+        stats = stage("stats", lambda: _stats(db, start, fast_graph=fast_graph))
         stage("write_reports", lambda: write_reports(db, out_dir, stats))
         stage(
             "validate_generated_artifacts",
@@ -94,8 +118,8 @@ def build(
                 db,
                 out_dir,
                 has_evaluation=resolutions_path is not None,
-                has_prices=write_prices,
-                has_coherence=solve_coherence,
+                has_prices=actual_write_prices,
+                has_coherence=actual_solve_coherence,
             ),
         )
         _write_manifest(
@@ -108,8 +132,10 @@ def build(
             effective_thresholds=effective_thresholds,
             lp_warnings=lp_warnings,
             has_evaluation=resolutions_path is not None,
-            has_prices=write_prices,
-            has_coherence=solve_coherence,
+            has_prices=actual_write_prices,
+            has_coherence=actual_solve_coherence,
+            fast_graph=fast_graph,
+            graph_lookback_days=graph_lookback_days,
             stage_timings=stage_timings,
         )
         return stats
@@ -141,6 +167,8 @@ def _write_manifest(
     has_evaluation: bool,
     has_prices: bool,
     has_coherence: bool,
+    fast_graph: bool,
+    graph_lookback_days: int,
     stage_timings: dict[str, float],
 ) -> None:
     manifest = {
@@ -157,6 +185,8 @@ def _write_manifest(
         "build_options": {
             "write_prices": has_prices,
             "solve_coherence": has_coherence,
+            "fast_graph": fast_graph,
+            "graph_lookback_days": graph_lookback_days,
         },
         "artifacts": list(
             parquet_artifacts(
@@ -251,21 +281,98 @@ def _create_views(
     taxonomy: Taxonomy,
     quotes_path: Path | None,
     stage: Callable[[str, Callable[[], T_]], T_],
+    *,
+    fast_graph: bool,
+    graph_lookback_days: int,
 ) -> None:
-    stage("  token_minute_prices", lambda: _create_token_minute_prices(db))
+    stage(
+        "  token_minute_prices",
+        lambda: _create_token_minute_prices(
+            db,
+            fast_graph=fast_graph,
+            graph_lookback_days=graph_lookback_days,
+        ),
+    )
     stage("  validate_token_minute_prices", lambda: _validate_token_minute_prices(db))
     stage("  enriched_minute_prices", lambda: _create_enriched_minute_prices(db, quotes_path))
     stage("  semantic_tables", lambda: _create_semantic_tables(db, taxonomy))
-    stage("  market_completeness", lambda: _create_market_completeness_tables(db))
+    stage("  market_completeness", lambda: _create_market_minute_tables(db))
     stage("  token_stats", lambda: _create_token_stats_tables(db))
     stage("  validate_token_current", lambda: _validate_token_current(db))
     stage("  nodes_view", lambda: _create_nodes_view(db, taxonomy))
     stage("  validate_nodes", lambda: _validate_nodes(db))
 
 
-def _create_token_minute_prices(db: DuckDB) -> None:
+def _create_token_minute_prices(
+    db: DuckDB,
+    *,
+    fast_graph: bool = False,
+    graph_lookback_days: int = 30,
+) -> None:
+    if not fast_graph:
+        db.execute(
+            """
+            CREATE TABLE token_minute_prices AS
+            SELECT
+                market_id,
+                outcome_index,
+                clob_token_id,
+                question,
+                outcome_label,
+                event_slug,
+                is_active,
+                is_closed,
+                market_volume_usd,
+                odds_timestamp,
+                odds_timestamp_epoch,
+                odds_minute_epoch,
+                price
+            FROM (
+                SELECT
+                    *,
+                    row_number() OVER (
+                        PARTITION BY clob_token_id, odds_minute_epoch
+                        ORDER BY odds_timestamp_epoch DESC
+                    ) AS rn
+                FROM input_prices
+            )
+            WHERE rn = 1;
+            """
+        )
+        return
+
+    lookback_seconds = graph_lookback_days * 24 * 3600
+    source_sql = f"""
+        WITH bounds AS (
+            SELECT max(odds_minute_epoch) - {lookback_seconds} AS min_epoch
+            FROM input_prices
+        ),
+        expected AS (
+            SELECT market_id, count(DISTINCT clob_token_id) AS expected_tokens
+            FROM input_prices
+            GROUP BY market_id
+        ),
+        complete_epochs AS (
+            SELECT p.market_id, p.odds_minute_epoch
+            FROM input_prices p
+            JOIN expected e USING (market_id)
+            GROUP BY p.market_id, p.odds_minute_epoch, e.expected_tokens
+            HAVING count(DISTINCT p.clob_token_id) = e.expected_tokens
+        ),
+        current_complete AS (
+            SELECT market_id, max(odds_minute_epoch) AS current_minute_epoch
+            FROM complete_epochs
+            GROUP BY market_id
+        )
+        SELECT p.*
+        FROM input_prices p
+        CROSS JOIN bounds b
+        LEFT JOIN current_complete c USING (market_id)
+        WHERE p.odds_minute_epoch >= b.min_epoch
+            OR p.odds_minute_epoch = c.current_minute_epoch
+    """
     db.execute(
-        """
+        f"""
         CREATE TABLE token_minute_prices AS
         SELECT
             market_id,
@@ -288,7 +395,9 @@ def _create_token_minute_prices(db: DuckDB) -> None:
                     PARTITION BY clob_token_id, odds_minute_epoch
                     ORDER BY odds_timestamp_epoch DESC
                 ) AS rn
-            FROM input_prices
+            FROM (
+                {source_sql}
+            )
         )
         WHERE rn = 1;
         """
@@ -323,7 +432,7 @@ def _create_semantic_tables(db: DuckDB, taxonomy: Taxonomy) -> None:
     )
 
 
-def _create_market_completeness_tables(db: DuckDB) -> None:
+def _create_market_minute_tables(db: DuckDB) -> None:
     db.execute(
         """
         CREATE TABLE market_token_counts AS
@@ -345,6 +454,21 @@ def _create_market_completeness_tables(db: DuckDB) -> None:
         JOIN market_token_counts t USING (market_id)
         WHERE c.token_count = t.expected_tokens
         GROUP BY c.market_id;
+
+        CREATE VIEW market_minute_sums AS
+        SELECT
+            p.market_id,
+            p.odds_minute_epoch,
+            count(*) AS token_count,
+            t.expected_tokens,
+            sum(p.price) AS raw_price_sum,
+            sum(p.scoring_price) AS scoring_price_sum,
+            count(*) = t.expected_tokens AS is_complete,
+            p.odds_minute_epoch = e.current_minute_epoch AS is_current_complete
+        FROM enriched_minute_prices p
+        JOIN market_token_counts t USING (market_id)
+        LEFT JOIN market_complete_epochs e USING (market_id)
+        GROUP BY p.market_id, p.odds_minute_epoch, t.expected_tokens, e.current_minute_epoch;
         """
     )
     _require_zero(db, "markets without complete current minute", """
@@ -595,29 +719,20 @@ def _write_market_groups(db: DuckDB, out_dir: Path) -> None:
         COPY (
             WITH sums AS (
                 SELECT
-                    p.market_id,
-                    p.odds_minute_epoch,
-                    sum(p.scoring_price) AS sum_price,
-                    count(DISTINCT p.clob_token_id) AS token_count
-                FROM enriched_minute_prices p
-                GROUP BY 1, 2
-            ),
-            complete_sums AS (
-                SELECT s.*
-                FROM sums s
-                JOIN market_token_counts t USING (market_id)
-                WHERE s.token_count = t.expected_tokens
+                    market_id,
+                    odds_minute_epoch,
+                    scoring_price_sum AS sum_price
+                FROM market_minute_sums
+                WHERE is_complete
             ),
             current_sums AS (
-                SELECT s.market_id, s.sum_price AS current_sum_price
-                FROM complete_sums s
-                JOIN market_complete_epochs e
-                    ON s.market_id = e.market_id
-                    AND s.odds_minute_epoch = e.current_minute_epoch
+                SELECT market_id, scoring_price_sum AS current_sum_price
+                FROM market_minute_sums
+                WHERE is_current_complete
             ),
             mean_sums AS (
                 SELECT market_id, avg(sum_price) AS mean_sum_price
-                FROM complete_sums
+                FROM sums
                 GROUP BY market_id
             ),
             node_groups AS (
@@ -660,7 +775,12 @@ def _write_market_groups(db: DuckDB, out_dir: Path) -> None:
     )
 
 
-def _stats(db: DuckDB, start: float) -> dict[str, str | int | float | None]:
+def _stats(
+    db: DuckDB,
+    start: float,
+    *,
+    fast_graph: bool = False,
+) -> dict[str, str | int | float | None]:
     row = db.rows(
         """
         SELECT
@@ -680,4 +800,5 @@ def _stats(db: DuckDB, start: float) -> dict[str, str | int | float | None]:
         """
     )[0]
     row["runtime_seconds"] = round(time.time() - start, 3)
+    row["history_mode"] = "fast_graph_lookback" if fast_graph else "full"
     return row

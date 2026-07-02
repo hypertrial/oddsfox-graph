@@ -60,37 +60,52 @@ python -m oddsgraph.cli build \
   --skip-coherence
 ```
 
+For the fastest graph inspection run, use lookback-scoped graph mode. This
+keeps graph/query artifacts but scopes historical node and market stats to the
+lookback window plus each market's latest complete minute:
+
+```bash
+python -m oddsgraph.cli build \
+  --input wc2026_token_minutely_odds_20260702T070755Z.parquet \
+  --out output/wc2026-fast-graph \
+  --fast-graph \
+  --graph-lookback-days 30
+```
+
 On the local WC2026 file, the full build materializes minute-level prices and
 usually takes 6-7 minutes on this machine. The output directory is recreated in
 place for the DuckDB working database and generated artifacts.
 
-Local WC2026 full run, July 2 2026
+Post-PR local WC2026 runs, July 2 2026
 (`wc2026_token_minutely_odds_20260702T070755Z.parquet`):
 
-| metric | value |
-| --- | ---: |
-| input rows | 53,827,798 |
-| markets / tokens | 2,344 / 4,688 |
-| candidate edges | 16,684 |
-| logic edges | 7,842 |
-| price edges | 5,325 |
-| violations | 9 |
-| incoherent events | 9 |
-| runtime | 401.205s |
+| mode | runtime | output size | candidates | logic | price | violations |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| default full | 444.189s | 3.2G | 16,684 | 7,842 | 5,325 | 9 |
+| `--fast-graph --graph-lookback-days 30` | 111.717s | 917M | 15,118 | 7,842 | 5,325 | 0 |
 
-Top stage timings from that run: `token_minute_prices` 154.391s,
-`solve_event_coherence` 71.512s, `enriched_minute_prices` 64.189s,
-`write_prices` 22.278s, and `market_completeness` 20.621s. The attempted
-grouped `arg_max` minute dedupe rewrite was not landed because it exceeded the
-local performance gate.
+The active full-build comparison baseline remains the latest committed
+`401.205s` run. The post-PR full run missed that gate because the unchanged
+full-history window dedupe took 206.043s in this run versus 154.391s in the
+baseline, and price export took 34.206s versus 22.278s. The LP coherence setup
+change still reduced `solve_event_coherence` from 71.512s to 0.8s. The attempted
+max-join minute dedupe and materialized full-history market-minute sums were not
+landed in the default hot path because they exceeded the local performance gate.
 
-Fast graph build with `--skip-prices --skip-coherence` on the same file took
-332.928s and omitted `prices.parquet`, `coherence.parquet`, and
-`coherence_repairs.parquet` from `build_manifest.json`.
+`--fast-graph` replaces the previous `--skip-prices --skip-coherence` graph
+inspection workflow, which took 332.928s on the same file. It omits
+`prices.parquet`, `coherence.parquet`, and `coherence_repairs.parquet` from
+`build_manifest.json`, and historical node/market stats are lookback-scoped.
 
 The artifact reference is in [docs/artifacts.md](docs/artifacts.md).
 Successful builds also write `build_manifest.json` with taxonomy metadata,
 effective calibrated thresholds, stage timings, and summary stats.
+
+Summarize a completed build manifest:
+
+```bash
+python -m oddsgraph.cli benchmark-summary --out output/wc2026
+```
 
 ## Inspect Results
 
@@ -185,7 +200,8 @@ Generated markdown reports are written to `output/wc2026/reports/`, including
   30-day lookback window (`SCORING_LOOKBACK_DAYS` in
   `thresholds.py`) so year-long feeds do not materialize full pair-minute
   history. Use the full default build for archival/research output; use
-  `--skip-prices` and/or `--skip-coherence` for faster graph inspection.
+  `--skip-prices` and/or `--skip-coherence` for compatible graph inspection,
+  or `--fast-graph` when lookback-scoped historical stats are acceptable.
 - Skipped artifact errors: if a command says an artifact was intentionally not
   generated, rebuild without the matching skip flag or with the missing optional
   input, such as `--resolutions` for `evaluation.parquet`.

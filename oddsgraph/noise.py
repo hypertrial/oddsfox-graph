@@ -68,10 +68,7 @@ def create_enriched_minute_prices_sql() -> str:
     return """
         CREATE TABLE enriched_minute_prices AS
         WITH market_sums AS (
-            SELECT
-                market_id,
-                odds_minute_epoch,
-                sum(price) AS market_minute_sum
+            SELECT market_id, odds_minute_epoch, sum(price) AS market_minute_sum
             FROM token_minute_prices
             GROUP BY 1, 2
         ),
@@ -111,8 +108,8 @@ def create_enriched_minute_prices_sql() -> str:
     """
 
 
-def create_scoring_minute_prices_sql() -> str:
-    lookback = T.SCORING_LOOKBACK_DAYS * 24 * 3600
+def create_scoring_minute_prices_sql(lookback_days: int | None = None) -> str:
+    lookback = (lookback_days or T.SCORING_LOOKBACK_DAYS) * 24 * 3600
     return f"""
         CREATE TABLE scoring_minute_prices AS
         SELECT *

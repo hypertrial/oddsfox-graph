@@ -4,6 +4,7 @@ import argparse
 import sys
 from pathlib import Path
 
+from .benchmark import benchmark_summary
 from .build import build
 from .queries import q
 from .search import read_rows, resolve_node, search_nodes
@@ -30,6 +31,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--taxonomy", type=Path, default=None)
     p.add_argument("--skip-prices", action="store_true")
     p.add_argument("--skip-coherence", action="store_true")
+    p.add_argument("--fast-graph", action="store_true")
+    p.add_argument("--graph-lookback-days", type=int, default=None)
+
+    p = sub.add_parser("benchmark-summary")
+    p.add_argument("--out", required=True, type=Path)
 
     p = sub.add_parser("nodes")
     p.add_argument("--out", required=True, type=Path)
@@ -79,6 +85,11 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         if args.cmd == "build":
+            if args.graph_lookback_days is not None and not args.fast_graph:
+                raise ValueError("--graph-lookback-days requires --fast-graph")
+            graph_lookback_days = args.graph_lookback_days if args.graph_lookback_days is not None else 30
+            if graph_lookback_days <= 0:
+                raise ValueError("--graph-lookback-days must be positive")
             stats = build(
                 args.input,
                 args.out,
@@ -87,9 +98,13 @@ def main(argv: list[str] | None = None) -> int:
                 taxonomy_path=args.taxonomy,
                 write_prices=not args.skip_prices,
                 solve_coherence=not args.skip_coherence,
+                fast_graph=args.fast_graph,
+                graph_lookback_days=graph_lookback_days,
             )
             for key, value in stats.items():
                 print(f"{key}: {value}")
+        elif args.cmd == "benchmark-summary":
+            print(benchmark_summary(args.out), end="")
         elif args.cmd == "nodes":
             _print_rows(read_rows(args.out, "nodes.parquet", f"""
                 SELECT node_id, market_id, outcome_label, current_price, canonical_proposition
