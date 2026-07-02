@@ -113,19 +113,68 @@ def _create_views(db: DuckDB, input_path: Path) -> None:
         GROUP BY t.node_id;
 
         CREATE VIEW nodes_v AS
+        WITH enriched AS (
+            SELECT
+                s.*,
+                CASE
+                    WHEN s.outcome_label = 'Yes' THEN s.question
+                    WHEN s.outcome_label = 'No' THEN 'NOT(' || s.question || ')'
+                    ELSE s.question || ' :: ' || s.outcome_label
+                END AS canonical_proposition,
+                CASE
+                    WHEN s.outcome_label IN ('Yes', 'No') THEN 'binary'
+                    ELSE 'named_binary'
+                END AS proposition_type,
+                CASE
+                    WHEN regexp_extract(s.question, '^Will (.*) win the 2026 FIFA World Cup\\?$', 1) != ''
+                        THEN regexp_extract(s.question, '^Will (.*) win the 2026 FIFA World Cup\\?$', 1)
+                    WHEN regexp_extract(s.question, '^Will (.*) reach the 2026 FIFA World Cup final\\?$', 1) != ''
+                        THEN regexp_extract(s.question, '^Will (.*) reach the 2026 FIFA World Cup final\\?$', 1)
+                    WHEN regexp_extract(s.question, '^Will (.*) reach the Semifinals at the 2026 FIFA World Cup\\?$', 1) != ''
+                        THEN regexp_extract(s.question, '^Will (.*) reach the Semifinals at the 2026 FIFA World Cup\\?$', 1)
+                    WHEN regexp_extract(s.question, '^Will (.*) reach the Quarterfinals at the 2026 FIFA World Cup\\?$', 1) != ''
+                        THEN regexp_extract(s.question, '^Will (.*) reach the Quarterfinals at the 2026 FIFA World Cup\\?$', 1)
+                    WHEN regexp_extract(s.question, '^Will (.*) reach the Round of 16 at the 2026 FIFA World Cup\\?$', 1) != ''
+                        THEN regexp_extract(s.question, '^Will (.*) reach the Round of 16 at the 2026 FIFA World Cup\\?$', 1)
+                    ELSE NULL
+                END AS stage_subject,
+                CASE
+                    WHEN regexp_extract(s.question, '^Will (.*) win the 2026 FIFA World Cup\\?$', 1) != '' THEN 5
+                    WHEN regexp_extract(s.question, '^Will (.*) reach the 2026 FIFA World Cup final\\?$', 1) != '' THEN 4
+                    WHEN regexp_extract(s.question, '^Will (.*) reach the Semifinals at the 2026 FIFA World Cup\\?$', 1) != '' THEN 3
+                    WHEN regexp_extract(s.question, '^Will (.*) reach the Quarterfinals at the 2026 FIFA World Cup\\?$', 1) != '' THEN 2
+                    WHEN regexp_extract(s.question, '^Will (.*) reach the Round of 16 at the 2026 FIFA World Cup\\?$', 1) != '' THEN 1
+                    ELSE NULL
+                END AS stage_rank,
+                CASE
+                    WHEN s.event_slug IN (
+                        'world-cup-winner',
+                        'world-cup-golden-boot-winner',
+                        'which-continent-will-win-the-world-cup',
+                        'world-cup-bronze-ball-winner-20260603194938828',
+                        'world-cup-bronze-boot-winner-20260603200444388',
+                        'world-cup-fair-play-award-winner-20260603201520240',
+                        'world-cup-golden-ball-winner-20260603194031758',
+                        'world-cup-golden-glove-winner-20260603195306910',
+                        'world-cup-silver-ball-winner-20260603194459107',
+                        'world-cup-silver-boot-winner-20260603195826159',
+                        'world-cup-young-player-award-winner-20260602160649063'
+                    )
+                    OR s.event_slug LIKE 'world-cup-group-%-winner'
+                    THEN true
+                    ELSE false
+                END AS is_single_winner_family
+            FROM token_stats s
+        )
         SELECT
-            s.*,
+            e.*,
             CASE
-                WHEN s.outcome_label = 'Yes' THEN s.question
-                WHEN s.outcome_label = 'No' THEN 'NOT(' || s.question || ')'
-                ELSE s.question || ' :: ' || s.outcome_label
-            END AS canonical_proposition,
-            CASE
-                WHEN s.outcome_label IN ('Yes', 'No') THEN 'binary'
-                ELSE 'named_binary'
-            END AS proposition_type,
+                WHEN e.is_single_winner_family THEN 'single_winner'
+                WHEN e.stage_rank IS NOT NULL THEN 'stage_progression'
+                ELSE 'unknown'
+            END AS market_family,
             c.current_price
-        FROM token_stats s
+        FROM enriched e
         LEFT JOIN token_current c USING (node_id);
         """
     )
@@ -167,6 +216,7 @@ def _write_nodes(db: DuckDB, out_dir: Path) -> None:
                 is_active,
                 is_closed,
                 market_volume_usd,
+                market_family,
                 canonical_proposition,
                 proposition_type,
                 first_seen_ts,
@@ -203,6 +253,7 @@ def _write_market_groups(db: DuckDB, out_dir: Path) -> None:
                 n.market_id,
                 any_value(n.event_slug) AS event_slug,
                 any_value(n.question) AS question,
+                any_value(n.market_family) AS market_family,
                 count(*) AS num_tokens,
                 list(n.node_id ORDER BY n.outcome_index) AS token_ids,
                 list(n.outcome_label ORDER BY n.outcome_index) AS outcome_labels,
@@ -249,12 +300,71 @@ def _write_candidates(db: DuckDB, out_dir: Path) -> None:
                 AND active_minutes >= {T.MIN_ACTIVE_MINUTES}
                 AND outcome_label = 'Yes'
         ),
-        cross_market AS (
+        exact_duplicates AS (
+            SELECT
+                a.node_id AS src_node_id,
+                b.node_id AS dst_node_id,
+                'equivalence' AS candidate_type,
+                'exact_duplicate_same_event' AS candidate_source,
+                1.0 AS candidate_score,
+                a.market_id AS market_id_src,
+                b.market_id AS market_id_dst,
+                a.event_slug AS event_slug_src,
+                b.event_slug AS event_slug_dst
+            FROM nodes_v a
+            JOIN nodes_v b
+                ON a.event_slug = b.event_slug
+                AND a.canonical_proposition = b.canonical_proposition
+                AND a.market_id < b.market_id
+        ),
+        single_winner AS (
+            SELECT
+                a.node_id AS src_node_id,
+                b.node_id AS dst_node_id,
+                'mutual_exclusion' AS candidate_type,
+                'semantic_single_winner' AS candidate_source,
+                1.0 AS candidate_score,
+                a.market_id AS market_id_src,
+                b.market_id AS market_id_dst,
+                a.event_slug AS event_slug_src,
+                b.event_slug AS event_slug_dst
+            FROM nodes_v a
+            JOIN nodes_v b
+                ON a.event_slug = b.event_slug
+                AND a.market_id < b.market_id
+            WHERE a.outcome_label = 'Yes'
+                AND b.outcome_label = 'Yes'
+                AND a.canonical_proposition != b.canonical_proposition
+                AND a.is_single_winner_family
+                AND b.is_single_winner_family
+        ),
+        stage_progression AS (
+            SELECT
+                a.node_id AS src_node_id,
+                b.node_id AS dst_node_id,
+                'implication' AS candidate_type,
+                'semantic_stage_progression' AS candidate_source,
+                1.0 AS candidate_score,
+                a.market_id AS market_id_src,
+                b.market_id AS market_id_dst,
+                a.event_slug AS event_slug_src,
+                b.event_slug AS event_slug_dst
+            FROM nodes_v a
+            JOIN nodes_v b
+                ON a.stage_subject = b.stage_subject
+                AND a.stage_rank > b.stage_rank
+                AND a.market_id != b.market_id
+            WHERE a.outcome_label = 'Yes'
+                AND b.outcome_label = 'Yes'
+                AND a.stage_subject IS NOT NULL
+                AND b.stage_subject IS NOT NULL
+        ),
+        price_cross_market AS (
             SELECT
                 a.node_id AS src_node_id,
                 b.node_id AS dst_node_id,
                 candidate_type,
-                'same_event_slug' AS candidate_source,
+                'price_same_event_slug' AS candidate_source,
                 0.5 AS candidate_score,
                 a.market_id AS market_id_src,
                 b.market_id AS market_id_dst,
@@ -270,7 +380,7 @@ def _write_candidates(db: DuckDB, out_dir: Path) -> None:
                 a.node_id,
                 b.node_id,
                 'implication',
-                'same_event_slug',
+                'price_same_event_slug',
                 0.5,
                 a.market_id,
                 b.market_id,
@@ -280,23 +390,6 @@ def _write_candidates(db: DuckDB, out_dir: Path) -> None:
             JOIN eligible b
                 ON a.event_slug = b.event_slug
                 AND a.market_id != b.market_id
-        ),
-        duplicate_questions AS (
-            SELECT
-                a.node_id AS src_node_id,
-                b.node_id AS dst_node_id,
-                'equivalence' AS candidate_type,
-                'same_question_text_exact' AS candidate_source,
-                0.9 AS candidate_score,
-                a.market_id AS market_id_src,
-                b.market_id AS market_id_dst,
-                a.event_slug AS event_slug_src,
-                b.event_slug AS event_slug_dst
-            FROM nodes_v a
-            JOIN nodes_v b
-                ON a.question = b.question
-                AND a.outcome_label = b.outcome_label
-                AND a.market_id < b.market_id
         )
         SELECT
             src_node_id,
@@ -310,8 +403,10 @@ def _write_candidates(db: DuckDB, out_dir: Path) -> None:
             any_value(event_slug_dst) AS event_slug_dst
         FROM (
             SELECT * FROM same_market
-            UNION ALL SELECT * FROM cross_market
-            UNION ALL SELECT * FROM duplicate_questions
+            UNION ALL SELECT * FROM exact_duplicates
+            UNION ALL SELECT * FROM single_winner
+            UNION ALL SELECT * FROM stage_progression
+            UNION ALL SELECT * FROM price_cross_market
         )
         GROUP BY 1, 2, 3;
         """
@@ -377,7 +472,7 @@ def _score_edges(db: DuckDB, out_dir: Path) -> None:
         JOIN token_current a ON a.node_id = c.src_node_id
         JOIN token_current b ON b.node_id = c.dst_node_id;
 
-        CREATE TABLE logic_edges_v AS
+        CREATE TABLE scored_edges_v AS
         SELECT
             c.src_node_id,
             c.dst_node_id,
@@ -389,11 +484,18 @@ def _score_edges(db: DuckDB, out_dir: Path) -> None:
                 ELSE 'related'
             END AS edge_type,
             CASE
+                WHEN c.candidate_source = 'same_market' THEN 'same_market'
+                WHEN c.candidate_source = 'exact_duplicate_same_event' THEN 'exact_duplicate'
+                WHEN c.candidate_source = 'semantic_single_winner' THEN 'single_winner_family'
+                WHEN c.candidate_source = 'semantic_stage_progression' THEN 'stage_progression_rule'
+                ELSE 'price_only'
+            END AS edge_basis,
+            CASE
                 WHEN c.candidate_type = 'complement' AND s.overlap_minutes < {T.COMPLEMENT_LOW_OVERLAP_MINUTES} THEN 0.5
                 WHEN c.candidate_type = 'complement' THEN coalesce(greatest(0, 1 - 20 * s.complement_error), 0.5)
-                WHEN c.candidate_type = 'equivalence' THEN greatest(0, 1 - 20 * s.equivalence_error)
-                WHEN c.candidate_type = 'implication' THEN greatest(0, 1 - 50 * s.implication_violation)
-                WHEN c.candidate_type = 'mutual_exclusion' THEN greatest(0, 1 - 50 * s.exclusion_violation)
+                WHEN c.candidate_type = 'equivalence' THEN coalesce(greatest(0, 1 - 20 * s.equivalence_error), 0.5)
+                WHEN c.candidate_type = 'implication' THEN coalesce(greatest(0, 1 - 50 * s.implication_violation), 0.5)
+                WHEN c.candidate_type = 'mutual_exclusion' THEN coalesce(greatest(0, 1 - 50 * s.exclusion_violation), 0.5)
                 ELSE 0.1
             END AS confidence,
             CASE
@@ -421,37 +523,63 @@ def _score_edges(db: DuckDB, out_dir: Path) -> None:
             c.event_slug_dst,
             CASE
                 WHEN c.candidate_type = 'complement' THEN 'same market tokens sum to 1'
-                WHEN c.candidate_type = 'equivalence' THEN 'prices remain close across overlapping minutes'
-                WHEN c.candidate_type = 'implication' THEN 'source price rarely exceeds destination price'
-                WHEN c.candidate_type = 'mutual_exclusion' THEN 'pair sum rarely exceeds 1'
+                WHEN c.candidate_source = 'exact_duplicate_same_event' THEN 'same canonical proposition in the same event'
+                WHEN c.candidate_source = 'semantic_single_winner' THEN 'single-winner family alternatives cannot both occur'
+                WHEN c.candidate_source = 'semantic_stage_progression' THEN 'higher tournament stage implies lower stage'
+                WHEN c.candidate_type = 'equivalence' THEN 'price-threshold only; not accepted as logic'
+                WHEN c.candidate_type = 'implication' THEN 'price-threshold only; not accepted as logic'
+                WHEN c.candidate_type = 'mutual_exclusion' THEN 'price-threshold only; not accepted as logic'
                 ELSE 'candidate-related pair'
             END AS evidence
         FROM candidate_edges_v c
         JOIN aligned_edges s USING (src_node_id, dst_node_id)
-        JOIN current_pair_prices p USING (src_node_id, dst_node_id)
-        WHERE
-            (c.candidate_type = 'complement')
-            OR (
-                c.candidate_type = 'equivalence'
-                AND s.overlap_minutes >= {T.MIN_OVERLAP_MINUTES}
-                AND s.equivalence_error <= {T.EQUIVALENCE_MEAN_ABS_DIFF_MAX}
-                AND abs(p.current_p_src - p.current_p_dst) <= {T.EQUIVALENCE_CURRENT_ABS_DIFF_MAX}
+        JOIN current_pair_prices p USING (src_node_id, dst_node_id);
+
+        CREATE TABLE logic_edges_v AS
+        SELECT *
+        FROM scored_edges_v
+        WHERE edge_basis IN (
+            'same_market',
+            'exact_duplicate',
+            'single_winner_family',
+            'stage_progression_rule'
+        );
+
+        CREATE TABLE price_edges_v AS
+        SELECT *
+        FROM scored_edges_v s
+        WHERE s.edge_basis = 'price_only'
+            AND (
+                (
+                    s.edge_type = 'equivalent'
+                    AND s.overlap_minutes >= {T.MIN_OVERLAP_MINUTES}
+                    AND s.score <= {T.EQUIVALENCE_MEAN_ABS_DIFF_MAX}
+                    AND abs(s.current_p_src - s.current_p_dst) <= {T.EQUIVALENCE_CURRENT_ABS_DIFF_MAX}
+                )
+                OR (
+                    s.edge_type = 'implies'
+                    AND s.overlap_minutes >= {T.MIN_OVERLAP_MINUTES}
+                    AND s.violation_score <= {T.IMPLICATION_VIOLATION_MEAN_MAX}
+                    AND s.current_p_src <= s.current_p_dst + {T.IMPLICATION_CURRENT_SLACK}
+                )
+                OR (
+                    s.edge_type = 'mutually_exclusive'
+                    AND s.overlap_minutes >= {T.MIN_OVERLAP_MINUTES}
+                    AND s.violation_score <= {T.EXCLUSION_VIOLATION_MEAN_MAX}
+                    AND s.current_p_src + s.current_p_dst <= {T.EXCLUSION_CURRENT_SUM_MAX}
+                )
             )
-            OR (
-                c.candidate_type = 'implication'
-                AND s.overlap_minutes >= {T.MIN_OVERLAP_MINUTES}
-                AND s.implication_violation <= {T.IMPLICATION_VIOLATION_MEAN_MAX}
-                AND p.current_p_src <= p.current_p_dst + {T.IMPLICATION_CURRENT_SLACK}
-            )
-            OR (
-                c.candidate_type = 'mutual_exclusion'
-                AND s.overlap_minutes >= {T.MIN_OVERLAP_MINUTES}
-                AND s.exclusion_violation <= {T.EXCLUSION_VIOLATION_MEAN_MAX}
-                AND p.current_p_src + p.current_p_dst <= {T.EXCLUSION_CURRENT_SUM_MAX}
+            AND NOT EXISTS (
+                SELECT 1
+                FROM logic_edges_v l
+                WHERE l.src_node_id = s.src_node_id
+                    AND l.dst_node_id = s.dst_node_id
+                    AND l.edge_type = s.edge_type
             );
         """
     )
     db.execute(f"COPY logic_edges_v TO '{q(out_dir / 'logic_edges.parquet')}' (FORMAT PARQUET);")
+    db.execute(f"COPY price_edges_v TO '{q(out_dir / 'price_edges.parquet')}' (FORMAT PARQUET);")
 
 
 def _write_constraints(db: DuckDB, out_dir: Path) -> None:
@@ -717,6 +845,7 @@ def _stats(db: DuckDB, start: float) -> dict[str, str | int | float | None]:
             (SELECT count(*) FROM (SELECT market_id FROM input_prices GROUP BY market_id HAVING bool_or(is_closed))) AS closed_markets,
             (SELECT count(*) FROM candidate_edges_v) AS candidate_edges,
             (SELECT count(*) FROM logic_edges_v) AS logic_edges,
+            (SELECT count(*) FROM price_edges_v) AS price_edges,
             (SELECT count(*) FROM violations_v) AS violations
         """
     )[0]

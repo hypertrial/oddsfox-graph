@@ -26,6 +26,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--edge-type", default=None)
     p.add_argument("--top", type=int, default=50)
 
+    p = sub.add_parser("price-edges")
+    p.add_argument("--out", required=True, type=Path)
+    p.add_argument("--edge-type", default=None)
+    p.add_argument("--top", type=int, default=50)
+
     p = sub.add_parser("violations")
     p.add_argument("--out", required=True, type=Path)
     p.add_argument("--top", type=int, default=50)
@@ -56,7 +61,16 @@ def main(argv: list[str] | None = None) -> int:
         elif args.cmd == "edges":
             edge_filter = f"WHERE edge_type = '{q(args.edge_type)}'" if args.edge_type else ""
             _print_rows(_artifact_rows(args.out, "logic_edges.parquet", f"""
-                SELECT edge_type, confidence, score, overlap_minutes, src_node_id, dst_node_id
+                SELECT edge_type, edge_basis, confidence, score, overlap_minutes, src_node_id, dst_node_id
+                FROM read_parquet('{{path}}')
+                {edge_filter}
+                ORDER BY confidence DESC, overlap_minutes DESC
+                LIMIT {args.top}
+            """))
+        elif args.cmd == "price-edges":
+            edge_filter = f"WHERE edge_type = '{q(args.edge_type)}'" if args.edge_type else ""
+            _print_rows(_artifact_rows(args.out, "price_edges.parquet", f"""
+                SELECT edge_type, edge_basis, confidence, score, overlap_minutes, src_node_id, dst_node_id
                 FROM read_parquet('{{path}}')
                 {edge_filter}
                 ORDER BY confidence DESC, overlap_minutes DESC

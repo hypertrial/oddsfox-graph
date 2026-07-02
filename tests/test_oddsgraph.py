@@ -15,6 +15,7 @@ ARTIFACTS = {
     "market_groups.parquet",
     "candidate_edges.parquet",
     "logic_edges.parquet",
+    "price_edges.parquet",
     "constraint_hyperedges.parquet",
     "conditional_edges.parquet",
     "violations.parquet",

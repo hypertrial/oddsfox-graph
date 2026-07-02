@@ -17,24 +17,66 @@ def write_reports(db: DuckDB, out_dir: Path, stats: dict[str, object]) -> None:
         LIMIT 50
     """))
     _write(reports / "strongest_implications.md", _query_report(db, "Strongest Implications", """
-        SELECT src_node_id, dst_node_id, confidence, violation_score, overlap_minutes, current_p_src, current_p_dst
-        FROM logic_edges_v
-        WHERE edge_type = 'implies'
-        ORDER BY confidence DESC, overlap_minutes DESC
+        SELECT
+            e.src_node_id,
+            e.dst_node_id,
+            e.edge_basis,
+            s.canonical_proposition AS src_proposition,
+            d.canonical_proposition AS dst_proposition,
+            e.confidence,
+            e.violation_score,
+            e.overlap_minutes,
+            e.current_p_src,
+            e.current_p_dst
+        FROM logic_edges_v e
+        JOIN nodes_v s ON s.node_id = e.src_node_id
+        JOIN nodes_v d ON d.node_id = e.dst_node_id
+        WHERE e.edge_type = 'implies'
+        ORDER BY e.confidence DESC, e.overlap_minutes DESC
         LIMIT 50
     """))
     _write(reports / "strongest_exclusions.md", _query_report(db, "Strongest Exclusions", """
-        SELECT src_node_id, dst_node_id, confidence, violation_score, overlap_minutes, current_p_src, current_p_dst
-        FROM logic_edges_v
-        WHERE edge_type = 'mutually_exclusive'
-        ORDER BY confidence DESC, overlap_minutes DESC
+        SELECT
+            e.src_node_id,
+            e.dst_node_id,
+            e.edge_basis,
+            s.canonical_proposition AS src_proposition,
+            d.canonical_proposition AS dst_proposition,
+            e.confidence,
+            e.violation_score,
+            e.overlap_minutes,
+            e.current_p_src,
+            e.current_p_dst
+        FROM logic_edges_v e
+        JOIN nodes_v s ON s.node_id = e.src_node_id
+        JOIN nodes_v d ON d.node_id = e.dst_node_id
+        WHERE e.edge_type = 'mutually_exclusive'
+        ORDER BY e.confidence DESC, e.overlap_minutes DESC
         LIMIT 50
     """))
     _write(reports / "duplicate_candidates.md", _query_report(db, "Duplicate Candidates", """
         SELECT src_node_id, dst_node_id, candidate_source, candidate_score, market_id_src, market_id_dst
         FROM candidate_edges_v
-        WHERE candidate_source = 'same_question_text_exact'
+        WHERE candidate_source = 'exact_duplicate_same_event'
         ORDER BY candidate_score DESC
+        LIMIT 50
+    """))
+    _write(reports / "price_only_edges.md", _query_report(db, "Price-Only Edges", """
+        SELECT
+            e.edge_type,
+            e.src_node_id,
+            e.dst_node_id,
+            s.canonical_proposition AS src_proposition,
+            d.canonical_proposition AS dst_proposition,
+            e.confidence,
+            e.score,
+            e.overlap_minutes,
+            e.current_p_src,
+            e.current_p_dst
+        FROM price_edges_v e
+        JOIN nodes_v s ON s.node_id = e.src_node_id
+        JOIN nodes_v d ON d.node_id = e.dst_node_id
+        ORDER BY e.confidence DESC, e.overlap_minutes DESC
         LIMIT 50
     """))
     _write(reports / "conditional_examples.md", _query_report(db, "Conditional Examples", """
@@ -57,6 +99,7 @@ def _summary(stats: dict[str, object]) -> str:
         "closed_markets",
         "candidate_edges",
         "logic_edges",
+        "price_edges",
         "violations",
         "runtime_seconds",
     ):

@@ -57,11 +57,12 @@ Latest local WC2026 run:
 | Input rows | 53,827,798 |
 | Markets | 2,344 |
 | Tokens / nodes | 4,688 |
-| Candidate edges | 13,750 |
-| Logic edges | 9,987 |
+| Candidate edges | 16,684 |
+| Logic edges | 7,842 |
+| Price-only edges | 5,285 |
 | Constraint rows | 2,344 |
-| Conditional rows | 21,070 |
-| Violations | 0 |
+| Conditional rows | 18,844 |
+| Violations | 9 |
 
 The artifact reference is in [docs/artifacts.md](docs/artifacts.md).
 
@@ -79,7 +80,7 @@ Show high-volume nodes:
 python -m oddsgraph.cli nodes --out output/wc2026 --top 50
 ```
 
-Show accepted logic edges:
+Show trusted structural or semantic logic edges:
 
 ```bash
 python -m oddsgraph.cli edges --out output/wc2026 --edge-type implies --top 50
@@ -87,6 +88,12 @@ python -m oddsgraph.cli edges --out output/wc2026 --edge-type implies --top 50
 
 Supported edge filters are `complement`, `equivalent`, `implies`, and
 `mutually_exclusive`. Omit `--edge-type` to list all edge types.
+
+Show price-threshold relationships that are not accepted as logic:
+
+```bash
+python -m oddsgraph.cli price-edges --out output/wc2026 --edge-type implies --top 50
+```
 
 Show pricing or logic violations:
 
@@ -115,8 +122,9 @@ Generated markdown reports are written to `output/wc2026/reports/`.
   The build expects uppercase `ODDS_TIMESTAMP` and `ODDS_TIMESTAMP_EPOCH`.
 - Slow build: the MVP writes all minute-level prices. The WC2026 file has
   53,827,798 rows, so `prices.parquet` dominates runtime and disk I/O.
-- `violations` returns `No rows.`: that means no accepted relationship breached
-  the configured v0.1.0 thresholds in the latest build.
+- `violations` returns rows: strict semantic edges can still have current prices
+  that contradict the relationship. Inspect the row before treating it as data
+  corruption.
 - `condition` cannot resolve both nodes: run `search` first and pass the exact
   `node_id` values.
 

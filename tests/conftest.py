@@ -52,6 +52,14 @@ def write_synthetic_input(path: Path) -> None:
         ("low_overlap_b", "Will Low Overlap B happen?", "low-overlap-event", 0.56, 0.56, 0.44, 0.44, 20_000.0, 1000, 130_001),
         ("diff_event_a", "Will Different Event A happen?", "diff-event-a", 0.55, 0.55, 0.45, 0.45, 20_000.0, 1000, 140_000),
         ("diff_event_b", "Will Different Event B happen?", "diff-event-b", 0.56, 0.56, 0.44, 0.44, 20_000.0, 1000, 140_000),
+        ("dup_same_a", "Will Duplicate Semantic happen?", "dup-sem-event", 0.55, 0.55, 0.45, 0.45, 20_000.0, 1000, 150_000),
+        ("dup_same_b", "Will Duplicate Semantic happen?", "dup-sem-event", 0.56, 0.56, 0.44, 0.44, 20_000.0, 1000, 150_000),
+        ("dup_cross_a", "Will Cross Event Duplicate happen?", "dup-cross-a", 0.55, 0.55, 0.45, 0.45, 20_000.0, 1000, 160_000),
+        ("dup_cross_b", "Will Cross Event Duplicate happen?", "dup-cross-b", 0.55, 0.55, 0.45, 0.45, 20_000.0, 1000, 160_000),
+        ("winner_alpha", "Will Alpha win the 2026 FIFA World Cup?", "world-cup-winner", 0.35, 0.35, 0.65, 0.65, 20_000.0, 1000, 170_000),
+        ("winner_beta", "Will Beta win the 2026 FIFA World Cup?", "world-cup-winner", 0.25, 0.25, 0.75, 0.75, 20_000.0, 1000, 170_000),
+        ("alpha_final", "Will Alpha reach the 2026 FIFA World Cup final?", "world-cup-nation-to-reach-final", 0.55, 0.55, 0.45, 0.45, 20_000.0, 1000, 180_000),
+        ("alpha_semis", "Will Alpha reach the Semifinals at the 2026 FIFA World Cup?", "world-cup-nation-to-reach-semifinals", 0.75, 0.75, 0.25, 0.25, 20_000.0, 1000, 190_000),
     ]
     db = DuckDB(path.with_suffix(".duckdb"))
     try:

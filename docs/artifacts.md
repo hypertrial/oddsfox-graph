@@ -12,7 +12,7 @@ directory. The graph node id is always `clob_token_id`, exposed as `node_id`.
 - Purpose: canonical proposition table for graph nodes.
 - Important columns: `node_id`, `market_id`, `outcome_index`, `question`,
   `outcome_label`, `event_slug`, `canonical_proposition`, `proposition_type`,
-  `first_seen_ts`, `last_seen_ts`, `active_minutes`, `current_price`,
+  `market_family`, `first_seen_ts`, `last_seen_ts`, `active_minutes`, `current_price`,
   `mean_price`, `min_price`, `max_price`.
 - Use it to search propositions, map token ids back to market text, and inspect
   current or historical price summaries.
@@ -37,7 +37,8 @@ Canonical proposition rules:
 - Grain: one row per `market_id`.
 - Purpose: market-level grouping and binary sum diagnostics.
 - Important columns: `market_id`, `event_slug`, `question`, `num_tokens`,
-  `token_ids`, `outcome_labels`, `current_sum_price`, `mean_sum_price`.
+  `market_family`, `token_ids`, `outcome_labels`, `current_sum_price`,
+  `mean_sum_price`.
 - Use it to inspect same-market complements and the latest complete market sum.
 
 ### `candidate_edges.parquet`
@@ -46,20 +47,34 @@ Canonical proposition rules:
 - Purpose: narrowed pair universe before scoring.
 - Important columns: `src_node_id`, `dst_node_id`, `candidate_type`,
   `candidate_source`, `candidate_score`, source/destination market and event ids.
-- Candidate sources: `same_market`, `same_event_slug`,
-  `same_question_text_exact`.
+- Candidate sources: `same_market`, `exact_duplicate_same_event`,
+  `semantic_single_winner`, `semantic_stage_progression`,
+  `price_same_event_slug`.
 - Use it to see what was eligible for scoring. The MVP does not generate global
   all-pairs candidates.
 
 ### `logic_edges.parquet`
 
 - Grain: one accepted logical relationship.
-- Purpose: main typed graph edge artifact.
+- Purpose: main typed graph edge artifact. This file is strict: price behavior
+  alone is not accepted as logic.
 - Important columns: `src_node_id`, `dst_node_id`, `edge_type`, `confidence`,
-  `score`, `violation_score`, `overlap_minutes`, current and mean prices,
-  source/destination market and event ids, `evidence`.
+  `edge_basis`, `score`, `violation_score`, `overlap_minutes`, current and mean
+  prices, source/destination market and event ids, `evidence`.
 - Edge types: `complement`, `equivalent`, `implies`, `mutually_exclusive`.
+- Edge bases: `same_market`, `exact_duplicate`, `single_winner_family`,
+  `stage_progression_rule`.
 - Use it as the primary graph edge table.
+
+### `price_edges.parquet`
+
+- Grain: one price-threshold relationship not accepted as logic.
+- Purpose: preserve price-similarity, price-order, and price-exclusion signals
+  without promoting them to logical graph edges.
+- Important columns: same shape as `logic_edges.parquet`, with
+  `edge_basis = 'price_only'`.
+- Edge types: `equivalent`, `implies`, `mutually_exclusive`.
+- Use it for analytical review only. Do not consume it as deterministic logic.
 
 ### `constraint_hyperedges.parquet`
 
@@ -73,18 +88,20 @@ Canonical proposition rules:
 ### `conditional_edges.parquet`
 
 - Grain: one conditional probability or bound for a candidate-related pair.
-- Purpose: query `P(A | B)` when exact logic or Frechet bounds are available.
+- Purpose: query `P(A | B)` when exact strict logic or Frechet bounds are
+  available.
 - Important columns: `a_node_id`, `b_node_id`, `p_a_given_b`, `lower_bound`,
   `upper_bound`, `method`, `confidence`, `evidence`.
 - Methods: `exact_complement`, `exact_exclusion`, `exact_equivalence`,
   `exact_implication`, `exact_implication_reverse`, `bounded_frechet`.
-- Use exact rows directly. For `bounded_frechet`, use `lower_bound` and
-  `upper_bound`; `p_a_given_b` is intentionally null.
+- Use exact rows directly. Price-only relationships only produce
+  `bounded_frechet` rows, where `p_a_given_b` is intentionally null.
 
 ### `violations.parquet`
 
 - Grain: one detected pricing or logic violation.
-- Purpose: rank relationships whose current or mean prices breach thresholds.
+- Purpose: rank market complements or accepted semantic relationships whose
+  current or mean prices breach thresholds.
 - Important columns: `violation_id`, `violation_type`, node ids, market ids,
   `severity`, `current_gap`, `mean_gap`, `confidence`, `description`.
 - Violation types: `complement_violation`, `equivalence_divergence`,
@@ -103,23 +120,26 @@ The build also writes markdown files under `reports/`:
 - `strongest_implications.md`: highest-confidence implication edges.
 - `strongest_exclusions.md`: highest-confidence mutual exclusions.
 - `duplicate_candidates.md`: exact duplicate-question candidates.
+- `price_only_edges.md`: strongest price-threshold relationships not accepted
+  as logic.
 - `conditional_examples.md`: sample conditional rows.
 
-## Scoring Thresholds
+## Logic And Price Rules
 
 Current v0.1.0 thresholds live in `oddsgraph/thresholds.py` and are rendered
-into the build SQL:
+into the build SQL. They gate price-only edges and violation checks, not strict
+logic acceptance:
 
 - Cross-market candidates require both markets to have
   `MIN_MARKET_VOLUME_USD = 10000`, `MIN_ACTIVE_MINUTES = 1000`, matching
   `event_slug`, and `outcome_label = 'Yes'`.
-- Cross-market accepted edges require `MIN_OVERLAP_MINUTES = 1000`.
-- Equivalence accepts when `EQUIVALENCE_MEAN_ABS_DIFF_MAX = 0.02` and
+- Price-only edges require `MIN_OVERLAP_MINUTES = 1000`.
+- Price-only equivalence accepts when `EQUIVALENCE_MEAN_ABS_DIFF_MAX = 0.02` and
   `EQUIVALENCE_CURRENT_ABS_DIFF_MAX = 0.03`.
-- Implication uses `IMPLICATION_EPSILON = 0.01`,
+- Price-only implication uses `IMPLICATION_EPSILON = 0.01`,
   `IMPLICATION_VIOLATION_MEAN_MAX = 0.005`, and
   `IMPLICATION_CURRENT_SLACK = 0.02`.
-- Mutual exclusion uses `EXCLUSION_EPSILON = 0.01`,
+- Price-only mutual exclusion uses `EXCLUSION_EPSILON = 0.01`,
   `EXCLUSION_VIOLATION_MEAN_MAX = 0.005`, and
   `EXCLUSION_CURRENT_SUM_MAX = 1.02`.
 - Complement candidates are always emitted for same-market token pairs.
@@ -127,4 +147,14 @@ into the build SQL:
 - Complement violations use `COMPLEMENT_CURRENT_GAP_VIOLATION_MIN = 0.02` and
   `COMPLEMENT_MEAN_GAP_VIOLATION_MIN = 0.01`.
 
-These thresholds favor precision over coverage in the MVP.
+Strict logic acceptance is deterministic:
+
+- Complements come from same-market token pairs.
+- Equivalents require exact duplicate canonical propositions within the same
+  `event_slug`.
+- Mutual exclusions require an allowlisted single-winner family.
+- Implications require tournament-stage progression templates, such as
+  `win World Cup -> reach final -> reach semifinals -> reach quarterfinals ->
+  reach round of 16`.
+
+These rules favor precision over coverage in the MVP.

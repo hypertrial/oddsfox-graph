@@ -5,7 +5,6 @@ from pathlib import Path
 
 import pytest
 
-from oddsgraph import thresholds as T
 from oddsgraph.queries import DuckDB, q
 
 
@@ -20,16 +19,24 @@ def _oracle_rows(path: Path) -> list[dict[str, str]]:
         return list(csv.DictReader(f))
 
 
-def _edge_set(out: Path) -> set[tuple[str, str, str]]:
+def _artifact_edge_set(out: Path, artifact: str) -> set[tuple[str, str, str]]:
     db = DuckDB()
     try:
         rows = db.rows(f"""
             SELECT src_node_id, dst_node_id, edge_type
-            FROM read_parquet('{q(out / "logic_edges.parquet")}')
+            FROM read_parquet('{q(out / artifact)}')
         """)
     finally:
         db.close()
     return {(row["src_node_id"], row["dst_node_id"], row["edge_type"]) for row in rows}
+
+
+def _edge_set(out: Path) -> set[tuple[str, str, str]]:
+    return _artifact_edge_set(out, "logic_edges.parquet")
+
+
+def _price_edge_set(out: Path) -> set[tuple[str, str, str]]:
+    return _artifact_edge_set(out, "price_edges.parquet")
 
 
 def _scalar(db: DuckDB, sql: str) -> int:
@@ -39,6 +46,7 @@ def _scalar(db: DuckDB, sql: str) -> int:
 def _assert_logic_invariants(out: Path) -> None:
     db = DuckDB()
     logic = q(out / "logic_edges.parquet")
+    price = q(out / "price_edges.parquet")
     try:
         checks = {
             "self edges": f"""
@@ -58,34 +66,25 @@ def _assert_logic_invariants(out: Path) -> None:
                 SELECT count(*) FROM read_parquet('{logic}')
                 WHERE edge_type = 'complement' AND market_id_src != market_id_dst
             """,
-            "low-overlap cross edges": f"""
+            "price-only logic edges": f"""
                 SELECT count(*) FROM read_parquet('{logic}')
-                WHERE edge_type != 'complement'
-                    AND overlap_minutes < {T.MIN_OVERLAP_MINUTES}
+                WHERE edge_basis = 'price_only'
             """,
-            "equivalence threshold breaches": f"""
+            "bad complement basis": f"""
                 SELECT count(*) FROM read_parquet('{logic}')
-                WHERE edge_type = 'equivalent'
-                    AND (
-                        score > {T.EQUIVALENCE_MEAN_ABS_DIFF_MAX}
-                        OR abs(current_p_src - current_p_dst) > {T.EQUIVALENCE_CURRENT_ABS_DIFF_MAX}
-                    )
+                WHERE edge_type = 'complement' AND edge_basis != 'same_market'
             """,
-            "implication threshold breaches": f"""
+            "bad equivalence basis": f"""
                 SELECT count(*) FROM read_parquet('{logic}')
-                WHERE edge_type = 'implies'
-                    AND (
-                        violation_score > {T.IMPLICATION_VIOLATION_MEAN_MAX}
-                        OR current_p_src > current_p_dst + {T.IMPLICATION_CURRENT_SLACK}
-                    )
+                WHERE edge_type = 'equivalent' AND edge_basis != 'exact_duplicate'
             """,
-            "exclusion threshold breaches": f"""
+            "bad implication basis": f"""
                 SELECT count(*) FROM read_parquet('{logic}')
-                WHERE edge_type = 'mutually_exclusive'
-                    AND (
-                        violation_score > {T.EXCLUSION_VIOLATION_MEAN_MAX}
-                        OR current_p_src + current_p_dst > {T.EXCLUSION_CURRENT_SUM_MAX}
-                    )
+                WHERE edge_type = 'implies' AND edge_basis != 'stage_progression_rule'
+            """,
+            "bad exclusion basis": f"""
+                SELECT count(*) FROM read_parquet('{logic}')
+                WHERE edge_type = 'mutually_exclusive' AND edge_basis != 'single_winner_family'
             """,
             "null required metadata": f"""
                 SELECT count(*) FROM read_parquet('{logic}')
@@ -94,6 +93,18 @@ def _assert_logic_invariants(out: Path) -> None:
                     OR market_id_dst IS NULL
                     OR event_slug_src IS NULL
                     OR event_slug_dst IS NULL
+            """,
+            "price non-price basis": f"""
+                SELECT count(*) FROM read_parquet('{price}')
+                WHERE edge_basis != 'price_only'
+            """,
+            "price duplicates logic": f"""
+                SELECT count(*)
+                FROM read_parquet('{price}') p
+                JOIN read_parquet('{logic}') l
+                    ON l.src_node_id = p.src_node_id
+                    AND l.dst_node_id = p.dst_node_id
+                    AND l.edge_type = p.edge_type
             """,
         }
         failures = {name: _scalar(db, sql) for name, sql in checks.items()}
@@ -125,6 +136,8 @@ def _resolve_node(db: DuckDB, out: Path, query: str) -> str:
 def _wc2026_output_or_skip() -> Path:
     if not (WC2026_OUT / "logic_edges.parquet").exists():
         pytest.skip("output/wc2026 is not present")
+    if not (WC2026_OUT / "price_edges.parquet").exists():
+        pytest.skip("output/wc2026 was built before strict edge artifacts")
     return WC2026_OUT
 
 
@@ -149,7 +162,7 @@ def test_edge_oracle_forbidden_edges_absent(synthetic_output: Path) -> None:
 
 
 def test_candidate_gates_reject_low_support_pairs(synthetic_output: Path) -> None:
-    edges = _edge_set(synthetic_output)
+    edges = _edge_set(synthetic_output) | _price_edge_set(synthetic_output)
     gated_pairs = [
         ("low_volume_a:Yes", "low_volume_b:Yes"),
         ("low_active_a:Yes", "low_active_b:Yes"),
@@ -169,19 +182,36 @@ def test_candidate_gates_reject_low_support_pairs(synthetic_output: Path) -> Non
 
 def test_threshold_boundaries_are_precision_first(synthetic_output: Path) -> None:
     edges = _edge_set(synthetic_output)
-    assert ("eq_a:Yes", "eq_b:Yes", "equivalent") in edges
+    assert ("dup_same_a:Yes", "dup_same_b:Yes", "equivalent") in edges
+    assert ("winner_alpha:Yes", "winner_beta:Yes", "mutually_exclusive") in edges
+    assert ("winner_alpha:Yes", "alpha_final:Yes", "implies") in edges
+    assert ("alpha_final:Yes", "alpha_semis:Yes", "implies") in edges
+
+    assert ("eq_a:Yes", "eq_b:Yes", "equivalent") not in edges
     assert ("eq_shift_a:Yes", "eq_shift_b:Yes", "equivalent") not in edges
     assert ("eq_spike_a:Yes", "eq_spike_b:Yes", "equivalent") not in edges
-    assert ("imp_a:Yes", "imp_b:Yes", "implies") in edges
+    assert ("imp_a:Yes", "imp_b:Yes", "implies") not in edges
     assert ("imp_current_bad_a:Yes", "imp_current_bad_b:Yes", "implies") not in edges
-    assert ("excl_a:Yes", "excl_b:Yes", "mutually_exclusive") in edges
+    assert ("excl_a:Yes", "excl_b:Yes", "mutually_exclusive") not in edges
     assert ("excl_current_bad_a:Yes", "excl_current_bad_b:Yes", "mutually_exclusive") not in edges
+    assert ("dup_cross_a:Yes", "dup_cross_b:Yes", "equivalent") not in edges
+
+
+def test_price_only_edges_are_demoted(synthetic_output: Path) -> None:
+    price_edges = _price_edge_set(synthetic_output)
+    assert ("eq_a:Yes", "eq_b:Yes", "equivalent") in price_edges
+    assert ("imp_a:Yes", "imp_b:Yes", "implies") in price_edges
+    assert ("excl_a:Yes", "excl_b:Yes", "mutually_exclusive") in price_edges
+
+    assert ("eq_shift_a:Yes", "eq_shift_b:Yes", "equivalent") not in price_edges
+    assert ("imp_current_bad_a:Yes", "imp_current_bad_b:Yes", "implies") not in price_edges
+    assert ("excl_current_bad_a:Yes", "excl_current_bad_b:Yes", "mutually_exclusive") not in price_edges
 
 
 def test_implication_is_directional(synthetic_output: Path) -> None:
     edges = _edge_set(synthetic_output)
-    assert ("imp_a:Yes", "imp_b:Yes", "implies") in edges
-    assert ("imp_b:Yes", "imp_a:Yes", "implies") not in edges
+    assert ("winner_alpha:Yes", "alpha_final:Yes", "implies") in edges
+    assert ("alpha_final:Yes", "winner_alpha:Yes", "implies") not in edges
 
 
 def test_full_output_invariants_on_synthetic_build(synthetic_output: Path) -> None:

@@ -1,11 +1,17 @@
 src_node_id,dst_node_id,edge_type,expectation,reason
 comp:Yes,comp:No,complement,required,same-market binary complement
-eq_a:Yes,eq_b:Yes,equivalent,required,mean and current prices are within equivalence thresholds
-imp_a:Yes,imp_b:Yes,implies,required,source price remains below broader destination price
-excl_a:Yes,excl_b:Yes,mutually_exclusive,required,pair sum stays within exclusion threshold
-eq_shift_a:Yes,eq_shift_b:Yes,equivalent,forbidden,mean price gap exceeds equivalence threshold
-eq_spike_a:Yes,eq_spike_b:Yes,equivalent,forbidden,current price gap exceeds equivalence threshold
-imp_b:Yes,imp_a:Yes,implies,forbidden,implication is directional
+dup_same_a:Yes,dup_same_b:Yes,equivalent,required,same-event exact duplicate canonical proposition
+winner_alpha:Yes,winner_beta:Yes,mutually_exclusive,required,single-winner family alternatives
+winner_alpha:Yes,alpha_final:Yes,implies,required,winning the tournament implies reaching the final
+alpha_final:Yes,alpha_semis:Yes,implies,required,reaching the final implies reaching the semifinals
+eq_a:Yes,eq_b:Yes,equivalent,forbidden,price-only equivalence is not trusted logic
+imp_a:Yes,imp_b:Yes,implies,forbidden,price-only implication is not trusted logic
+excl_a:Yes,excl_b:Yes,mutually_exclusive,forbidden,price-only exclusion is not trusted logic
+dup_cross_a:Yes,dup_cross_b:Yes,equivalent,forbidden,exact duplicate text across different events is not trusted
+alpha_final:Yes,winner_alpha:Yes,implies,forbidden,stage implication is directional
+eq_shift_a:Yes,eq_shift_b:Yes,equivalent,forbidden,mean price gap exceeds price threshold
+eq_spike_a:Yes,eq_spike_b:Yes,equivalent,forbidden,current price gap exceeds price threshold
+imp_b:Yes,imp_a:Yes,implies,forbidden,price-only implication is directional even outside logic
 imp_mean_bad_a:Yes,imp_mean_bad_b:Yes,implies,forbidden,mean implication violation exceeds threshold
 imp_current_bad_a:Yes,imp_current_bad_b:Yes,implies,forbidden,current implication violation exceeds threshold
 excl_mean_bad_a:Yes,excl_mean_bad_b:Yes,mutually_exclusive,forbidden,mean exclusion violation exceeds threshold
@@ -16,9 +22,9 @@ low_volume_a:Yes,low_volume_b:Yes,mutually_exclusive,forbidden,market volume gat
 low_active_a:Yes,low_active_b:Yes,equivalent,forbidden,active-minutes gate should reject cross-market candidate
 low_active_a:Yes,low_active_b:Yes,implies,forbidden,active-minutes gate should reject cross-market candidate
 low_active_a:Yes,low_active_b:Yes,mutually_exclusive,forbidden,active-minutes gate should reject cross-market candidate
-low_overlap_a:Yes,low_overlap_b:Yes,equivalent,forbidden,overlap-minutes gate should reject accepted edge
-low_overlap_a:Yes,low_overlap_b:Yes,implies,forbidden,overlap-minutes gate should reject accepted edge
-low_overlap_a:Yes,low_overlap_b:Yes,mutually_exclusive,forbidden,overlap-minutes gate should reject accepted edge
+low_overlap_a:Yes,low_overlap_b:Yes,equivalent,forbidden,overlap-minutes gate should reject accepted price edge
+low_overlap_a:Yes,low_overlap_b:Yes,implies,forbidden,overlap-minutes gate should reject accepted price edge
+low_overlap_a:Yes,low_overlap_b:Yes,mutually_exclusive,forbidden,overlap-minutes gate should reject accepted price edge
 diff_event_a:Yes,diff_event_b:Yes,equivalent,forbidden,event gate should reject cross-market candidate
 diff_event_a:Yes,diff_event_b:Yes,implies,forbidden,event gate should reject cross-market candidate
 diff_event_a:Yes,diff_event_b:Yes,mutually_exclusive,forbidden,event gate should reject cross-market candidate
