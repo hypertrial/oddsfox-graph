@@ -8,13 +8,16 @@ version = "0.1.0"
 description = "Build logical graph artifacts from token-level odds parquet."
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = ["duckdb>=1.0"]
+dependencies = ["duckdb>=1.0", "pytz"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
 
 [project.scripts]
 oddsgraph = "oddsgraph.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["oddsgraph*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
