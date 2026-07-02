@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Build logical graph artifacts from token-level odds parquet."
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = ["duckdb>=1.0", "pytz"]
+dependencies = ["duckdb>=1.0"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]

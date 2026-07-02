@@ -1,20 +1,44 @@
 from __future__ import annotations
 
+import json
 import time
 from pathlib import Path
 
+from . import rules
 from .queries import DuckDB, q
 from .reports import write_reports
 from .schema import validate_input
 from . import thresholds as T
 
 
+GENERATED_PARQUET_ARTIFACTS = (
+    "nodes.parquet",
+    "prices.parquet",
+    "market_groups.parquet",
+    "candidate_edges.parquet",
+    "logic_edges.parquet",
+    "price_edges.parquet",
+    "constraint_hyperedges.parquet",
+    "conditional_edges.parquet",
+    "violations.parquet",
+)
+
+GENERATED_REPORTS = (
+    "summary.md",
+    "top_complement_violations.md",
+    "strongest_implications.md",
+    "strongest_exclusions.md",
+    "duplicate_candidates.md",
+    "price_only_edges.md",
+    "conditional_examples.md",
+)
+
+
 def build(input_path: Path, out_dir: Path) -> dict[str, str | int | float | None]:
     start = time.time()
     out_dir.mkdir(parents=True, exist_ok=True)
+    _clear_generated(out_dir)
     db_path = out_dir / "oddsgraph.duckdb"
-    if db_path.exists():
-        db_path.unlink()
     db = DuckDB(db_path)
     try:
         validate_input(db, input_path)
@@ -29,9 +53,34 @@ def build(input_path: Path, out_dir: Path) -> dict[str, str | int | float | None
         _write_violations(db, out_dir)
         stats = _stats(db, start)
         write_reports(db, out_dir, stats)
+        _write_manifest(input_path, out_dir, stats)
         return stats
     finally:
         db.close()
+
+
+def _clear_generated(out_dir: Path) -> None:
+    for name in (*GENERATED_PARQUET_ARTIFACTS, "build_manifest.json", "oddsgraph.duckdb"):
+        path = out_dir / name
+        if path.exists():
+            path.unlink()
+    for name in GENERATED_REPORTS:
+        path = out_dir / "reports" / name
+        if path.exists():
+            path.unlink()
+
+
+def _write_manifest(input_path: Path, out_dir: Path, stats: dict[str, object]) -> None:
+    manifest = {
+        "input": str(input_path),
+        "artifacts": list(GENERATED_PARQUET_ARTIFACTS),
+        "reports": [f"reports/{name}" for name in GENERATED_REPORTS],
+        "stats": stats,
+    }
+    (out_dir / "build_manifest.json").write_text(
+        json.dumps(manifest, indent=2, sort_keys=True, default=str) + "\n",
+        encoding="utf-8",
+    )
 
 
 def _create_views(db: DuckDB, input_path: Path) -> None:
@@ -51,16 +100,55 @@ def _create_views(db: DuckDB, input_path: Path) -> None:
             market_volume_usd,
             ODDS_TIMESTAMP AS odds_timestamp,
             ODDS_TIMESTAMP_EPOCH AS odds_timestamp_epoch,
+            CAST(floor(ODDS_TIMESTAMP_EPOCH / 60) * 60 AS BIGINT) AS odds_minute_epoch,
             price
         FROM read_parquet('{src}');
+
+        CREATE TABLE token_minute_prices AS
+        SELECT
+            market_id,
+            outcome_index,
+            clob_token_id,
+            question,
+            outcome_label,
+            event_slug,
+            is_active,
+            is_closed,
+            market_volume_usd,
+            odds_timestamp,
+            odds_timestamp_epoch,
+            odds_minute_epoch,
+            price
+        FROM (
+            SELECT
+                *,
+                row_number() OVER (
+                    PARTITION BY clob_token_id, odds_minute_epoch
+                    ORDER BY odds_timestamp_epoch DESC
+                ) AS rn
+            FROM input_prices
+        )
+        WHERE rn = 1;
+
+        CREATE TABLE semantic_stage_rules AS
+        SELECT *
+        FROM (VALUES
+            {rules.stage_rules_values_sql()}
+        ) AS t(rule_pattern, stage_rank);
+
+        CREATE TABLE semantic_single_winner_slugs AS
+        SELECT *
+        FROM (VALUES
+            {rules.single_winner_values_sql()}
+        ) AS t(event_slug);
 
         CREATE TABLE market_complete_epochs AS
         WITH counts AS (
             SELECT
                 market_id,
-                odds_timestamp_epoch,
+                odds_minute_epoch,
                 count(DISTINCT clob_token_id) AS token_count
-            FROM input_prices
+            FROM token_minute_prices
             GROUP BY 1, 2
         ),
         market_tokens AS (
@@ -68,7 +156,7 @@ def _create_views(db: DuckDB, input_path: Path) -> None:
             FROM input_prices
             GROUP BY 1
         )
-        SELECT c.market_id, max(c.odds_timestamp_epoch) AS current_epoch
+        SELECT c.market_id, max(c.odds_minute_epoch) AS current_minute_epoch
         FROM counts c
         JOIN market_tokens t USING (market_id)
         WHERE c.token_count = t.expected_tokens
@@ -106,14 +194,28 @@ def _create_views(db: DuckDB, input_path: Path) -> None:
             FROM input_prices
         ) t
         LEFT JOIN market_complete_epochs e ON t.market_id = e.market_id
-        LEFT JOIN input_prices p
+        LEFT JOIN token_minute_prices p
             ON p.market_id = t.market_id
             AND p.clob_token_id = t.node_id
-            AND p.odds_timestamp_epoch = e.current_epoch
+            AND p.odds_minute_epoch = e.current_minute_epoch
         GROUP BY t.node_id;
 
         CREATE VIEW nodes_v AS
-        WITH enriched AS (
+        WITH stage_matches AS (
+            SELECT node_id, stage_subject, stage_rank
+            FROM (
+                SELECT
+                    s.node_id,
+                    regexp_extract(s.question, r.rule_pattern, 1) AS stage_subject,
+                    r.stage_rank,
+                    row_number() OVER (PARTITION BY s.node_id ORDER BY r.stage_rank DESC) AS rn
+                FROM token_stats s
+                JOIN semantic_stage_rules r
+                    ON regexp_extract(s.question, r.rule_pattern, 1) != ''
+            )
+            WHERE rn = 1
+        ),
+        enriched AS (
             SELECT
                 s.*,
                 CASE
@@ -125,46 +227,16 @@ def _create_views(db: DuckDB, input_path: Path) -> None:
                     WHEN s.outcome_label IN ('Yes', 'No') THEN 'binary'
                     ELSE 'named_binary'
                 END AS proposition_type,
+                m.stage_subject,
+                m.stage_rank,
                 CASE
-                    WHEN regexp_extract(s.question, '^Will (.*) win the 2026 FIFA World Cup\\?$', 1) != ''
-                        THEN regexp_extract(s.question, '^Will (.*) win the 2026 FIFA World Cup\\?$', 1)
-                    WHEN regexp_extract(s.question, '^Will (.*) reach the 2026 FIFA World Cup final\\?$', 1) != ''
-                        THEN regexp_extract(s.question, '^Will (.*) reach the 2026 FIFA World Cup final\\?$', 1)
-                    WHEN regexp_extract(s.question, '^Will (.*) reach the Semifinals at the 2026 FIFA World Cup\\?$', 1) != ''
-                        THEN regexp_extract(s.question, '^Will (.*) reach the Semifinals at the 2026 FIFA World Cup\\?$', 1)
-                    WHEN regexp_extract(s.question, '^Will (.*) reach the Quarterfinals at the 2026 FIFA World Cup\\?$', 1) != ''
-                        THEN regexp_extract(s.question, '^Will (.*) reach the Quarterfinals at the 2026 FIFA World Cup\\?$', 1)
-                    WHEN regexp_extract(s.question, '^Will (.*) reach the Round of 16 at the 2026 FIFA World Cup\\?$', 1) != ''
-                        THEN regexp_extract(s.question, '^Will (.*) reach the Round of 16 at the 2026 FIFA World Cup\\?$', 1)
-                    ELSE NULL
-                END AS stage_subject,
-                CASE
-                    WHEN regexp_extract(s.question, '^Will (.*) win the 2026 FIFA World Cup\\?$', 1) != '' THEN 5
-                    WHEN regexp_extract(s.question, '^Will (.*) reach the 2026 FIFA World Cup final\\?$', 1) != '' THEN 4
-                    WHEN regexp_extract(s.question, '^Will (.*) reach the Semifinals at the 2026 FIFA World Cup\\?$', 1) != '' THEN 3
-                    WHEN regexp_extract(s.question, '^Will (.*) reach the Quarterfinals at the 2026 FIFA World Cup\\?$', 1) != '' THEN 2
-                    WHEN regexp_extract(s.question, '^Will (.*) reach the Round of 16 at the 2026 FIFA World Cup\\?$', 1) != '' THEN 1
-                    ELSE NULL
-                END AS stage_rank,
-                CASE
-                    WHEN s.event_slug IN (
-                        'world-cup-winner',
-                        'world-cup-golden-boot-winner',
-                        'which-continent-will-win-the-world-cup',
-                        'world-cup-bronze-ball-winner-20260603194938828',
-                        'world-cup-bronze-boot-winner-20260603200444388',
-                        'world-cup-fair-play-award-winner-20260603201520240',
-                        'world-cup-golden-ball-winner-20260603194031758',
-                        'world-cup-golden-glove-winner-20260603195306910',
-                        'world-cup-silver-ball-winner-20260603194459107',
-                        'world-cup-silver-boot-winner-20260603195826159',
-                        'world-cup-young-player-award-winner-20260602160649063'
-                    )
-                    OR s.event_slug LIKE 'world-cup-group-%-winner'
-                    THEN true
+                    WHEN w.event_slug IS NOT NULL OR {rules.single_winner_pattern_sql("s.event_slug")} THEN true
                     ELSE false
                 END AS is_single_winner_family
             FROM token_stats s
+            LEFT JOIN stage_matches m USING (node_id)
+            LEFT JOIN semantic_single_winner_slugs w
+                ON w.event_slug = s.event_slug
         )
         SELECT
             e.*,
@@ -237,8 +309,8 @@ def _write_market_groups(db: DuckDB, out_dir: Path) -> None:
         f"""
         COPY (
             WITH sums AS (
-                SELECT p.market_id, p.odds_timestamp_epoch, sum(p.price) AS sum_price
-                FROM input_prices p
+                SELECT p.market_id, p.odds_minute_epoch, sum(p.price) AS sum_price
+                FROM token_minute_prices p
                 GROUP BY 1, 2
                 HAVING count(DISTINCT p.clob_token_id) = 2
             ),
@@ -247,7 +319,7 @@ def _write_market_groups(db: DuckDB, out_dir: Path) -> None:
                 FROM sums s
                 JOIN market_complete_epochs e
                     ON s.market_id = e.market_id
-                    AND s.odds_timestamp_epoch = e.current_epoch
+                    AND s.odds_minute_epoch = e.current_minute_epoch
             )
             SELECT
                 n.market_id,
@@ -598,8 +670,8 @@ def _write_constraints(db: DuckDB, out_dir: Path) -> None:
             market_sums AS (
                 SELECT market_id, avg(sum_price) AS mean_sum_price
                 FROM (
-                    SELECT market_id, odds_timestamp_epoch, sum(price) AS sum_price
-                    FROM input_prices
+                    SELECT market_id, odds_minute_epoch, sum(price) AS sum_price
+                    FROM token_minute_prices
                     GROUP BY 1, 2
                     HAVING count(DISTINCT clob_token_id) = 2
                 )
@@ -607,10 +679,10 @@ def _write_constraints(db: DuckDB, out_dir: Path) -> None:
             ),
             current_sums AS (
                 SELECT p.market_id, sum(p.price) AS current_sum_price
-                FROM input_prices p
+                FROM token_minute_prices p
                 JOIN market_complete_epochs e
                     ON p.market_id = e.market_id
-                    AND p.odds_timestamp_epoch = e.current_epoch
+                    AND p.odds_minute_epoch = e.current_minute_epoch
                 GROUP BY p.market_id
             )
             SELECT

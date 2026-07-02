@@ -3,6 +3,8 @@
 The build writes parquet artifacts and markdown reports under the `--out`
 directory. The graph node id is always `clob_token_id`, exposed as `node_id`.
 `market_id` is a market container, not the graph node.
+Successful builds write `build_manifest.json` last. Treat its presence as the
+completion marker for a coherent output directory.
 
 ## Generated Parquet Files
 
@@ -123,6 +125,12 @@ The build also writes markdown files under `reports/`:
 - `price_only_edges.md`: strongest price-threshold relationships not accepted
   as logic.
 - `conditional_examples.md`: sample conditional rows.
+
+## Manifest
+
+`build_manifest.json` records the input path, generated parquet files, generated
+reports, and summary stats from the completed build. If validation or artifact
+generation fails, the manifest is not written.
 
 ## Logic And Price Rules
 

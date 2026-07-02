@@ -129,7 +129,7 @@ def write_synthetic_input(path: Path) -> None:
                 UNION ALL SELECT 'stale', 1, 'stale:No', 'Will stale pass?', 'No', 'stale-event', true, false, 1.0,
                     to_timestamp(210000), 210000::BIGINT, 0.8
                 UNION ALL SELECT 'stale', 0, 'stale:Yes', 'Will stale pass?', 'Yes', 'stale-event', true, false, 1.0,
-                    to_timestamp(210001), 210001::BIGINT, 0.9
+                    to_timestamp(210061), 210061::BIGINT, 0.9
             )
             SELECT * FROM binary_rows
             UNION ALL SELECT * FROM named_rows

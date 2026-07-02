@@ -84,10 +84,10 @@ def main(argv: list[str] | None = None) -> int:
                 LIMIT {args.top}
             """))
         elif args.cmd == "condition":
-            a = resolve_node(args.out, args.a)
-            b = resolve_node(args.out, args.b)
+            a = resolve_node(args.out, args.a, require_unique=True)
+            b = resolve_node(args.out, args.b, require_unique=True)
             if not a or not b:
-                raise SystemExit("Could not resolve both nodes")
+                raise ValueError("Could not resolve both nodes")
             _print_rows(_artifact_rows(args.out, "conditional_edges.parquet", f"""
                 SELECT *
                 FROM read_parquet('{{path}}')

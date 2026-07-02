@@ -51,6 +51,11 @@ coverage.xml
 .pytest_cache/
 cover/
 
+# oddsgraph local data and generated outputs
+output/
+*.duckdb
+wc2026_token_minutely_odds_20260702T070755Z.parquet
+
 # Translations
 *.mo
 *.pot

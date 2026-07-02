@@ -65,6 +65,8 @@ Latest local WC2026 run:
 | Violations | 9 |
 
 The artifact reference is in [docs/artifacts.md](docs/artifacts.md).
+Successful builds also write `build_manifest.json` after every artifact and
+report has been written.
 
 ## Inspect Results
 
@@ -102,7 +104,7 @@ python -m oddsgraph.cli violations --out output/wc2026 --top 50
 ```
 
 Ask for a conditional probability row between two nodes. Each side can be a
-full token id or search text:
+full token id or search text that resolves to exactly one node:
 
 ```bash
 python -m oddsgraph.cli condition \
@@ -120,13 +122,16 @@ Generated markdown reports are written to `output/wc2026/reports/`.
 - `Input parquet missing required columns`: compare the input with
   [wc2026_token_minutely_odds_20260702T070755Z.md](wc2026_token_minutely_odds_20260702T070755Z.md).
   The build expects uppercase `ODDS_TIMESTAMP` and `ODDS_TIMESTAMP_EPOCH`.
+- `Input parquet failed validation`: fix the reported nulls, invalid prices,
+  duplicate token timestamps, unstable token metadata, non-binary markets, or
+  markets without a complete current minute.
 - Slow build: the MVP writes all minute-level prices. The WC2026 file has
   53,827,798 rows, so `prices.parquet` dominates runtime and disk I/O.
 - `violations` returns rows: strict semantic edges can still have current prices
   that contradict the relationship. Inspect the row before treating it as data
   corruption.
-- `condition` cannot resolve both nodes: run `search` first and pass the exact
-  `node_id` values.
+- `condition` cannot resolve or reports an ambiguous query: run `search` first
+  and pass exact `node_id` values.
 
 ## Development Check
 

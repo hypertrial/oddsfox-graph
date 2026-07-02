@@ -32,7 +32,7 @@ def search_nodes(out_dir: Path, query: str, top: int = 20) -> list[dict[str, obj
     )
 
 
-def resolve_node(out_dir: Path, text: str) -> str | None:
+def resolve_node(out_dir: Path, text: str, *, require_unique: bool = False) -> str | None:
     exact = read_rows(
         out_dir,
         "nodes.parquet",
@@ -45,5 +45,13 @@ def resolve_node(out_dir: Path, text: str) -> str | None:
     )
     if exact:
         return str(exact[0]["node_id"])
+    if require_unique:
+        matches = search_nodes(out_dir, text, 6)
+        if len(matches) == 1:
+            return str(matches[0]["node_id"])
+        if matches:
+            candidates = ", ".join(str(row["node_id"]) for row in matches[:5])
+            raise ValueError(f"Ambiguous node query {text!r}; use a node_id. Candidates: {candidates}")
+        return None
     matches = search_nodes(out_dir, text, 1)
     return str(matches[0]["node_id"]) if matches else None
