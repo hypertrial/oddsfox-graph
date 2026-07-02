@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from oddsgraph.build import build
+from oddsgraph.artifacts import ARTIFACT_COLUMNS, PARQUET_ARTIFACTS
+from oddsgraph.build import _validate_generated_artifacts, build
+from oddsgraph.calibration import _empirical_confidence
 from oddsgraph.cli import main
 from oddsgraph.coherence import EventModel, LpConstraint, _solve_l1_repair
 from oddsgraph.queries import DuckDB, q
@@ -16,81 +19,7 @@ from oddsgraph.sql import sql_literal
 from tests.synthetic import write_synthetic_resolutions
 
 
-ARTIFACTS = {
-    "nodes.parquet",
-    "prices.parquet",
-    "market_groups.parquet",
-    "candidate_edges.parquet",
-    "logic_edges.parquet",
-    "price_edges.parquet",
-    "derived_edges.parquet",
-    "constraint_hyperedges.parquet",
-    "conditional_edges.parquet",
-    "violations.parquet",
-    "calibration.parquet",
-    "coherence.parquet",
-    "coherence_repairs.parquet",
-}
-
-ARTIFACT_COLUMNS = {
-    "nodes.parquet": [
-        "node_id", "market_id", "outcome_index", "clob_token_id", "question",
-        "outcome_label", "event_slug", "is_active", "is_closed", "market_volume_usd",
-        "market_family", "canonical_proposition", "proposition_type", "expected_tokens",
-        "first_seen_ts", "last_seen_ts", "active_minutes", "current_price", "current_price_devig",
-        "mean_price", "mean_price_devig", "min_price", "max_price",
-    ],
-    "prices.parquet": [
-        "node_id", "market_id", "odds_timestamp", "odds_timestamp_epoch", "price", "price_devig",
-        "scoring_price", "is_active", "is_closed", "market_volume_usd", "logit_price", "price_return_1m",
-    ],
-    "market_groups.parquet": [
-        "market_id", "event_slug", "question", "market_family", "num_tokens", "token_ids",
-        "outcome_labels", "is_active", "is_closed", "market_volume_usd", "first_seen_ts",
-        "last_seen_ts", "current_sum_price", "mean_sum_price",
-    ],
-    "candidate_edges.parquet": [
-        "src_node_id", "dst_node_id", "candidate_type", "candidate_source", "candidate_score",
-        "market_id_src", "market_id_dst", "event_slug_src", "event_slug_dst",
-    ],
-    "logic_edges.parquet": [
-        "src_node_id", "dst_node_id", "edge_type", "edge_basis", "confidence", "score",
-        "violation_score", "overlap_minutes", "current_p_src", "current_p_dst", "mean_p_src",
-        "mean_p_dst", "market_id_src", "market_id_dst", "event_slug_src", "event_slug_dst", "evidence",
-    ],
-    "price_edges.parquet": [
-        "src_node_id", "dst_node_id", "edge_type", "edge_basis", "confidence", "score",
-        "violation_score", "overlap_minutes", "current_p_src", "current_p_dst", "mean_p_src",
-        "mean_p_dst", "market_id_src", "market_id_dst", "event_slug_src", "event_slug_dst", "evidence",
-    ],
-    "derived_edges.parquet": [
-        "src_node_id", "dst_node_id", "edge_type", "edge_basis", "confidence", "path", "evidence",
-    ],
-    "constraint_hyperedges.parquet": [
-        "constraint_id", "constraint_type", "market_id", "event_slug", "question", "node_ids",
-        "current_sum_price", "mean_sum_price", "expected_sum_price", "violation_score",
-        "confidence", "evidence",
-    ],
-    "conditional_edges.parquet": [
-        "a_node_id", "b_node_id", "p_a_given_b", "lower_bound", "upper_bound", "method",
-        "confidence", "as_of_ts", "evidence",
-    ],
-    "violations.parquet": [
-        "violation_id", "violation_type", "src_node_id", "dst_node_id", "market_id_src",
-        "market_id_dst", "event_slug_src", "event_slug_dst", "severity", "current_gap",
-        "mean_gap", "confidence", "first_seen_ts", "last_seen_ts", "description",
-    ],
-    "calibration.parquet": [
-        "bucket_id", "volume_min", "volume_max", "sample_count", "complement_p50",
-        "complement_p95", "equivalence_p95", "implication_p95", "exclusion_p95",
-    ],
-    "coherence.parquet": [
-        "event_slug", "node_count", "constraint_count", "incoherence_distance", "solver_status",
-    ],
-    "coherence_repairs.parquet": [
-        "event_slug", "node_id", "observed_price", "repaired_price", "adjustment",
-    ],
-}
+ARTIFACTS = set(PARQUET_ARTIFACTS)
 
 BASE_ROWS = [
     ("m1", 0, "m1:Yes", "Will M1 pass?", "Yes", "event-1", True, False, 1.0, 1, 0.4),
@@ -236,9 +165,36 @@ def test_build_outputs_artifacts_and_core_logic(synthetic_output: Path) -> None:
 def test_artifact_schemas_match_contract(synthetic_output: Path) -> None:
     db = DuckDB()
     try:
-        for artifact, expected in ARTIFACT_COLUMNS.items():
+        for artifact in PARQUET_ARTIFACTS:
+            expected = ARTIFACT_COLUMNS[artifact]
             rows = db.rows(f"DESCRIBE SELECT * FROM read_parquet('{q(synthetic_output / artifact)}')")
             assert [row["column_name"] for row in rows] == expected
+    finally:
+        db.close()
+
+
+def test_generated_artifact_validation_reports_missing_files(tmp_path: Path) -> None:
+    db = DuckDB()
+    try:
+        with pytest.raises(RuntimeError, match="Missing generated artifacts"):
+            _validate_generated_artifacts(db, tmp_path, has_evaluation=False)
+    finally:
+        db.close()
+
+
+def test_generated_artifact_validation_reports_schema_drift(
+    synthetic_output: Path,
+    tmp_path: Path,
+) -> None:
+    out = tmp_path / "out"
+    out.mkdir()
+    for artifact in PARQUET_ARTIFACTS:
+        shutil.copy2(synthetic_output / artifact, out / artifact)
+    db = DuckDB()
+    try:
+        db.execute(f"COPY (SELECT 'bad' AS node_id) TO '{q(out / 'nodes.parquet')}' (FORMAT PARQUET)")
+        with pytest.raises(RuntimeError, match=r"nodes\.parquet schema drift"):
+            _validate_generated_artifacts(db, out, has_evaluation=False)
     finally:
         db.close()
 
@@ -326,6 +282,12 @@ def test_lp_constraint_senses_preserve_feasible_observations() -> None:
     assert list(repaired) == pytest.approx(list(model.observed))
 
 
+def test_empirical_confidence_counts_equal_errors_as_at_least_observed() -> None:
+    errors = [0.1, 0.2, 0.2, 0.4]
+    assert _empirical_confidence(errors, 0.2) == pytest.approx(0.25)
+    assert _empirical_confidence(errors, 0.3) == pytest.approx(0.75)
+
+
 def test_evaluation_with_resolutions(synthetic_input: Path, tmp_path: Path) -> None:
     out = tmp_path / "out"
     resolutions = tmp_path / "resolutions.parquet"
@@ -333,6 +295,12 @@ def test_evaluation_with_resolutions(synthetic_input: Path, tmp_path: Path) -> N
     build(synthetic_input, out, resolutions_path=resolutions)
     assert (out / "evaluation.parquet").exists()
     assert (out / "reports" / "evaluation.md").exists()
+    db = DuckDB()
+    try:
+        rows = db.rows(f"DESCRIBE SELECT * FROM read_parquet('{q(out / 'evaluation.parquet')}')")
+        assert [row["column_name"] for row in rows] == ARTIFACT_COLUMNS["evaluation.parquet"]
+    finally:
+        db.close()
 
 
 def test_failed_build_removes_success_manifest(tmp_path: Path) -> None:
@@ -417,6 +385,50 @@ def test_cli_explain_smoke(synthetic_output: Path, capsys: pytest.CaptureFixture
     assert "stage_progression_rule" not in captured.out
 
 
+def test_search_treats_like_wildcards_and_quotes_as_literal_input(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    out = tmp_path / "cli_fixture"
+    _write_cli_param_fixture(out)
+
+    assert main(["search", "--out", str(out), "--query", "%"]) == 0
+    captured = capsys.readouterr()
+    assert "literal%_node" in captured.out
+    assert "quote'node" not in captured.out
+
+    assert main(["search", "--out", str(out), "--query", "_"]) == 0
+    captured = capsys.readouterr()
+    assert "literal%_node" in captured.out
+    assert "quote'node" not in captured.out
+
+    assert main(["search", "--out", str(out), "--query", "quote'"]) == 0
+    captured = capsys.readouterr()
+    assert "quote'node" in captured.out
+
+
+def test_condition_and_explain_accept_quoted_node_ids(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    out = tmp_path / "cli_fixture"
+    _write_cli_param_fixture(out)
+
+    assert main([
+        "condition",
+        "--out", str(out),
+        "--a", "quote'node",
+        "--b", "literal%_node",
+    ]) == 0
+    captured = capsys.readouterr()
+    assert "quoted_fixture" in captured.out
+
+    assert main(["explain", "--out", str(out), "--node", "quote'node"]) == 0
+    captured = capsys.readouterr()
+    assert "Same-Market Constraint" in captured.out
+    assert "literal%_node" in captured.out
+
+
 def _write_input(path: Path, rows: list[tuple[Any, ...]]) -> None:
     db = DuckDB(path.with_suffix(".duckdb"))
     try:
@@ -459,3 +471,104 @@ def _write_input(path: Path, rows: list[tuple[Any, ...]]) -> None:
 
 def _values(rows: list[tuple[Any, ...]]) -> str:
     return ", ".join("(" + ", ".join(sql_literal(value) for value in row) + ")" for row in rows)
+
+
+def _write_cli_param_fixture(out: Path) -> None:
+    out.mkdir()
+    db = DuckDB(out / "fixture.duckdb")
+    try:
+        _copy_query(db, out, "nodes.parquet", """
+            SELECT *
+            FROM (VALUES
+                (
+                    'quote''node',
+                    'm_cli',
+                    0,
+                    'Will Quote''s fixture resolve?',
+                    'Quoted',
+                    'cli-event',
+                    'unknown',
+                    0.40,
+                    0.40,
+                    120,
+                    'Quote''s exact proposition'
+                ),
+                (
+                    'literal%_node',
+                    'm_cli',
+                    1,
+                    'Will literal %_ fixture resolve?',
+                    'Literal',
+                    'cli-event',
+                    'unknown',
+                    0.60,
+                    0.60,
+                    120,
+                    'Literal %_ proposition'
+                )
+            ) AS t(
+                node_id,
+                market_id,
+                outcome_index,
+                question,
+                outcome_label,
+                event_slug,
+                market_family,
+                current_price,
+                mean_price,
+                active_minutes,
+                canonical_proposition
+            )
+        """)
+        _copy_query(db, out, "market_groups.parquet", """
+            SELECT
+                'm_cli' AS market_id,
+                1.0::DOUBLE AS current_sum_price,
+                1.0::DOUBLE AS mean_sum_price
+        """)
+        _copy_query(db, out, "logic_edges.parquet", _empty_edge_query())
+        _copy_query(db, out, "price_edges.parquet", _empty_edge_query())
+        _copy_query(db, out, "violations.parquet", """
+            SELECT
+                NULL::VARCHAR AS violation_type,
+                NULL::DOUBLE AS severity,
+                NULL::DOUBLE AS current_gap,
+                NULL::DOUBLE AS mean_gap,
+                NULL::VARCHAR AS src_node_id,
+                NULL::VARCHAR AS dst_node_id,
+                NULL::VARCHAR AS description
+            WHERE false
+        """)
+        _copy_query(db, out, "conditional_edges.parquet", """
+            SELECT
+                'quote''node' AS a_node_id,
+                'literal%_node' AS b_node_id,
+                0.25::DOUBLE AS p_a_given_b,
+                0.0::DOUBLE AS lower_bound,
+                1.0::DOUBLE AS upper_bound,
+                'quoted_fixture' AS method,
+                0.90::DOUBLE AS confidence,
+                to_timestamp(0) AS as_of_ts,
+                'parameter fixture' AS evidence
+        """)
+    finally:
+        db.close()
+
+
+def _copy_query(db: DuckDB, out: Path, artifact: str, sql: str) -> None:
+    db.execute(f"COPY ({sql}) TO '{q(out / artifact)}' (FORMAT PARQUET)")
+
+
+def _empty_edge_query() -> str:
+    return """
+        SELECT
+            NULL::VARCHAR AS edge_type,
+            NULL::VARCHAR AS edge_basis,
+            NULL::DOUBLE AS confidence,
+            NULL::DOUBLE AS score,
+            NULL::BIGINT AS overlap_minutes,
+            NULL::VARCHAR AS src_node_id,
+            NULL::VARCHAR AS dst_node_id,
+            NULL::VARCHAR AS evidence
+        WHERE false
+    """

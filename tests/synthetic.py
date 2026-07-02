@@ -21,6 +21,19 @@ MARKET_COLUMNS = [
     "start_epoch",
 ]
 
+MINI_WC2026_MARKET_COLUMNS = [
+    "market_id",
+    "question",
+    "event_slug",
+    "yes_token",
+    "no_token",
+    "yes_price",
+    "no_price",
+    "volume",
+    "minute_count",
+    "start_epoch",
+]
+
 
 def _values(rows: list[tuple[Any, ...]], columns: list[str]) -> str:
     return values_rows_sql([dict(zip(columns, row, strict=True)) for row in rows], columns)
@@ -191,5 +204,143 @@ def write_synthetic_resolutions(path: Path) -> None:
                     AS t(clob_token_id, market_id, outcome_label, payout, resolved_epoch)
             ) TO '{q(path)}' (FORMAT PARQUET);
         """)
+    finally:
+        db.close()
+
+
+def write_mini_wc2026_oracle_input(path: Path) -> None:
+    markets: list[tuple[Any, ...]] = []
+
+    def add_market(
+        market_id: str,
+        question: str,
+        event_slug: str,
+        yes_token: str,
+        no_token: str,
+        yes_price: float,
+        *,
+        start_epoch: int,
+    ) -> None:
+        markets.append((
+            market_id,
+            question,
+            event_slug,
+            yes_token,
+            no_token,
+            yes_price,
+            1.0 - yes_price,
+            20_000.0,
+            1000,
+            start_epoch,
+        ))
+
+    add_market(
+        "mini_brazil_round_16",
+        "Will Brazil reach the Round of 16 at the 2026 FIFA World Cup?",
+        "mini-brazil-round-16",
+        "60941235333934119537308581623022145063589498358463811604437431757990716193139",
+        "69254358704504551873876012384649223770132435379419074198292590735170180021451",
+        0.42,
+        start_epoch=0,
+    )
+    add_market(
+        "mini_announcer_source",
+        "Will the opening match announcer mention the host city before kickoff?",
+        "mini-unrelated-announcer-event",
+        "43210016944742792301737134223300418595113462948362079532359960011115262422579",
+        "mini_announcer_source:no",
+        0.41,
+        start_epoch=100_000,
+    )
+    add_market(
+        "mini_announcer_destination",
+        "Will a halftime broadcast graphic show attendance above sixty thousand?",
+        "mini-unrelated-announcer-event",
+        "27853601490370072812708927706802149718970975520996501176000797916279903304531",
+        "mini_announcer_destination:no",
+        0.62,
+        start_epoch=100_000,
+    )
+
+    price_only_pairs = [
+        (
+            "91399166209216163431231173062786395215620442056888296437823451282732143924332",
+            "66265680142177294497572235248200066124169304713332831132816781431445413907569",
+        ),
+        (
+            "90538013438399246674125939147272424357773921253199632436930218305581040235987",
+            "23542782083949026234898323432000742558288032327930681121040136746492993951914",
+        ),
+        (
+            "33747305042007778221968790541070114008811587676172030120559423448386310500957",
+            "97239126062673310243763617236644392945530356142765650402171508075574679292913",
+        ),
+    ]
+    for idx, (src_token, dst_token) in enumerate(price_only_pairs):
+        event_slug = f"mini-price-only-implication-{idx}"
+        start_epoch = 200_000 + idx * 10_000
+        add_market(
+            f"mini_price_src_{idx}",
+            f"Will mini price source {idx} happen?",
+            event_slug,
+            src_token,
+            f"mini_price_src_{idx}:no",
+            0.30,
+            start_epoch=start_epoch,
+        )
+        add_market(
+            f"mini_price_dst_{idx}",
+            f"Will mini price destination {idx} happen?",
+            event_slug,
+            dst_token,
+            f"mini_price_dst_{idx}:no",
+            0.70,
+            start_epoch=start_epoch,
+        )
+
+    db = DuckDB(path.with_suffix(".duckdb"))
+    try:
+        db.execute(
+            f"""
+            CREATE TABLE mini_wc2026_fixture AS
+            WITH market_defs(
+                market_id,
+                question,
+                event_slug,
+                yes_token,
+                no_token,
+                yes_price,
+                no_price,
+                volume,
+                minute_count,
+                start_epoch
+            ) AS (
+                VALUES
+                {_values(markets, MINI_WC2026_MARKET_COLUMNS)}
+            ),
+            minute AS (
+                SELECT range::BIGINT AS i
+                FROM range(1000)
+            )
+            SELECT
+                market_id,
+                outcome_index,
+                CASE outcome_label WHEN 'Yes' THEN yes_token ELSE no_token END AS clob_token_id,
+                question,
+                outcome_label,
+                event_slug,
+                true AS is_active,
+                false AS is_closed,
+                volume AS market_volume_usd,
+                to_timestamp(start_epoch + i * 60) AS ODDS_TIMESTAMP,
+                (start_epoch + i * 60)::BIGINT AS ODDS_TIMESTAMP_EPOCH,
+                CASE outcome_label WHEN 'Yes' THEN yes_price ELSE no_price END AS price
+            FROM market_defs
+            JOIN minute ON i < minute_count
+            CROSS JOIN (VALUES (0, 'Yes'), (1, 'No')) AS o(outcome_index, outcome_label);
+
+            COPY mini_wc2026_fixture TO '{q(path)}' (FORMAT PARQUET);
+            """
+        )
     finally:
         db.close()

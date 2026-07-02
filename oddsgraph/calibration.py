@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from bisect import bisect_left
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -236,8 +237,7 @@ def apply_calibration_confidence(db: DuckDB, effective: EffectiveThresholds) -> 
         elif len(complement_errors) < T.MIN_CALIBRATION_SAMPLES:
             confidence = max(0.05, 1.0 - 20.0 * float(observed))
         else:
-            ge = sum(1 for e in complement_errors if e >= float(observed))
-            confidence = 1.0 - ge / len(complement_errors)
+            confidence = _empirical_confidence(complement_errors, float(observed))
         updated.append({**row, "confidence": confidence})
 
     db.execute("DROP TABLE IF EXISTS scored_edges_v")
@@ -247,6 +247,11 @@ def apply_calibration_confidence(db: DuckDB, effective: EffectiveThresholds) -> 
 
 def thresholds_as_dict(effective: EffectiveThresholds) -> dict[str, float]:
     return asdict(effective)
+
+
+def _empirical_confidence(sorted_errors: list[float], observed: float) -> float:
+    ge = len(sorted_errors) - bisect_left(sorted_errors, observed)
+    return 1.0 - ge / len(sorted_errors)
 
 
 def _rebuild_edge_tables(db: DuckDB, effective: EffectiveThresholds) -> None:

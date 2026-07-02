@@ -91,45 +91,47 @@ def main(argv: list[str] | None = None) -> int:
                 SELECT node_id, market_id, outcome_label, current_price, canonical_proposition
                 FROM read_parquet('{{path}}')
                 ORDER BY market_volume_usd DESC, current_price DESC NULLS LAST
-                LIMIT {args.top}
+                LIMIT {int(args.top)}
             """))
         elif args.cmd == "edges":
-            edge_filter = f"WHERE edge_type = '{q(args.edge_type)}'" if args.edge_type else ""
+            edge_filter = "WHERE edge_type = ?" if args.edge_type else ""
+            params = [args.edge_type] if args.edge_type else None
             _print_rows(read_rows(args.out, "logic_edges.parquet", f"""
                 SELECT edge_type, edge_basis, confidence, score, overlap_minutes, src_node_id, dst_node_id
                 FROM read_parquet('{{path}}')
                 {edge_filter}
                 ORDER BY confidence DESC, overlap_minutes DESC
-                LIMIT {args.top}
-            """))
+                LIMIT {int(args.top)}
+            """, params))
         elif args.cmd == "price-edges":
-            edge_filter = f"WHERE edge_type = '{q(args.edge_type)}'" if args.edge_type else ""
+            edge_filter = "WHERE edge_type = ?" if args.edge_type else ""
+            params = [args.edge_type] if args.edge_type else None
             _print_rows(read_rows(args.out, "price_edges.parquet", f"""
                 SELECT edge_type, edge_basis, confidence, score, overlap_minutes, src_node_id, dst_node_id
                 FROM read_parquet('{{path}}')
                 {edge_filter}
                 ORDER BY confidence DESC, overlap_minutes DESC
-                LIMIT {args.top}
-            """))
+                LIMIT {int(args.top)}
+            """, params))
         elif args.cmd == "violations":
             _print_rows(read_rows(args.out, "violations.parquet", f"""
                 SELECT violation_type, severity, current_gap, mean_gap, src_node_id, dst_node_id
                 FROM read_parquet('{{path}}')
                 ORDER BY current_gap DESC, mean_gap DESC
-                LIMIT {args.top}
+                LIMIT {int(args.top)}
             """))
         elif args.cmd == "coherence":
             _print_rows(read_rows(args.out, "coherence.parquet", f"""
                 SELECT event_slug, node_count, constraint_count, incoherence_distance, solver_status
                 FROM read_parquet('{{path}}')
                 ORDER BY incoherence_distance DESC
-                LIMIT {args.top}
+                LIMIT {int(args.top)}
             """))
             _print_section("Repairs", read_rows(args.out, "coherence_repairs.parquet", f"""
                 SELECT event_slug, node_id, observed_price, repaired_price, adjustment
                 FROM read_parquet('{{path}}')
                 ORDER BY abs(adjustment) DESC
-                LIMIT {args.top}
+                LIMIT {int(args.top)}
             """))
         elif args.cmd == "evaluate":
             _print_rows(read_rows(args.out, "evaluation.parquet", f"""
@@ -146,9 +148,9 @@ def main(argv: list[str] | None = None) -> int:
             _print_rows(read_rows(args.out, "conditional_edges.parquet", f"""
                 SELECT *
                 FROM read_parquet('{{path}}')
-                WHERE a_node_id = '{q(a)}' AND b_node_id = '{q(b)}'
+                WHERE a_node_id = ? AND b_node_id = ?
                 LIMIT 20
-            """))
+            """, [a, b]))
         elif args.cmd == "explain":
             node = _resolve_required(args.out, args.node)
             _print_explain_node(args.out, node)
@@ -172,7 +174,6 @@ def _resolve_required(out_dir: Path, text: str) -> str:
 
 
 def _print_explain_node(out_dir: Path, node: str) -> None:
-    n = q(node)
     _print_section("Node", read_rows(out_dir, "nodes.parquet", f"""
         SELECT
             node_id,
@@ -185,8 +186,8 @@ def _print_explain_node(out_dir: Path, node: str) -> None:
             active_minutes,
             canonical_proposition
         FROM read_parquet('{{path}}')
-        WHERE node_id = '{n}'
-    """))
+        WHERE node_id = ?
+    """, [node]))
     _print_section("Same-Market Constraint", read_rows(out_dir, "nodes.parquet", f"""
         SELECT
             n.node_id AS sibling_node_id,
@@ -198,92 +199,91 @@ def _print_explain_node(out_dir: Path, node: str) -> None:
         FROM read_parquet('{{path}}') n
         JOIN read_parquet('{q(out_dir / "market_groups.parquet")}') g USING (market_id)
         WHERE n.market_id = (
-            SELECT market_id FROM read_parquet('{{path}}') WHERE node_id = '{n}'
+            SELECT market_id FROM read_parquet('{{path}}') WHERE node_id = ?
         )
-            AND n.node_id != '{n}'
+            AND n.node_id != ?
         ORDER BY n.outcome_index
-    """))
+    """, [node, node]))
     _print_section("Logic Edges", _touching_edges(out_dir, "logic_edges.parquet", node))
     _print_section("Price-Only Edges", _touching_edges(out_dir, "price_edges.parquet", node))
     _print_section("Violations", read_rows(out_dir, "violations.parquet", f"""
         SELECT violation_type, severity, current_gap, mean_gap, src_node_id, dst_node_id, description
         FROM read_parquet('{{path}}')
-        WHERE src_node_id = '{n}' OR dst_node_id = '{n}'
+        WHERE src_node_id = ? OR dst_node_id = ?
         ORDER BY current_gap DESC, mean_gap DESC
         LIMIT 20
-    """))
+    """, [node, node]))
     _print_section("Conditionals", read_rows(out_dir, "conditional_edges.parquet", f"""
         SELECT a_node_id, b_node_id, method, p_a_given_b, lower_bound, upper_bound, confidence
         FROM read_parquet('{{path}}')
-        WHERE a_node_id = '{n}' OR b_node_id = '{n}'
+        WHERE a_node_id = ? OR b_node_id = ?
         ORDER BY confidence DESC, method
         LIMIT 20
-    """))
+    """, [node, node]))
 
 
 def _touching_edges(out_dir: Path, artifact: str, node: str) -> list[dict[str, object]]:
-    n = q(node)
     return read_rows(out_dir, artifact, f"""
         SELECT edge_type, edge_basis, confidence, score, overlap_minutes, src_node_id, dst_node_id, evidence
         FROM read_parquet('{{path}}')
-        WHERE src_node_id = '{n}' OR dst_node_id = '{n}'
+        WHERE src_node_id = ? OR dst_node_id = ?
         ORDER BY confidence DESC, overlap_minutes DESC
         LIMIT 20
-    """)
+    """, [node, node])
 
 
 def _print_explain_edge(out_dir: Path, src: str, dst: str, edge_type: str) -> None:
-    edge_where = _edge_where(src, dst, edge_type)
-    pair_where = _edge_where(src, dst, "complement")
+    edge_where, edge_params = _edge_where(src, dst, edge_type)
+    pair_where, pair_params = _edge_where(src, dst, "complement")
     conditional_where = (
-        f"(a_node_id = '{q(src)}' AND b_node_id = '{q(dst)}')"
-        f" OR (a_node_id = '{q(dst)}' AND b_node_id = '{q(src)}')"
+        "(a_node_id = ? AND b_node_id = ?)"
+        " OR (a_node_id = ? AND b_node_id = ?)"
     )
     _print_section("Logic Edge", read_rows(out_dir, "logic_edges.parquet", f"""
         SELECT edge_type, edge_basis, confidence, score, violation_score, overlap_minutes,
             current_p_src, current_p_dst, src_node_id, dst_node_id, evidence
         FROM read_parquet('{{path}}')
-        WHERE edge_type = '{q(edge_type)}' AND ({edge_where})
+        WHERE edge_type = ? AND ({edge_where})
         ORDER BY confidence DESC
         LIMIT 20
-    """))
+    """, [edge_type, *edge_params]))
     _print_section("Price-Only Edge", read_rows(out_dir, "price_edges.parquet", f"""
         SELECT edge_type, edge_basis, confidence, score, violation_score, overlap_minutes,
             current_p_src, current_p_dst, src_node_id, dst_node_id, evidence
         FROM read_parquet('{{path}}')
-        WHERE edge_type = '{q(edge_type)}' AND ({edge_where})
+        WHERE edge_type = ? AND ({edge_where})
         ORDER BY confidence DESC
         LIMIT 20
-    """))
+    """, [edge_type, *edge_params]))
     _print_section("Candidate", read_rows(out_dir, "candidate_edges.parquet", f"""
         SELECT candidate_type, candidate_source, candidate_score, src_node_id, dst_node_id
         FROM read_parquet('{{path}}')
-        WHERE candidate_type = '{q(EDGE_TO_CANDIDATE[edge_type])}' AND ({edge_where})
+        WHERE candidate_type = ? AND ({edge_where})
         ORDER BY candidate_score DESC
         LIMIT 20
-    """))
+    """, [EDGE_TO_CANDIDATE[edge_type], *edge_params]))
     _print_section("Violations", read_rows(out_dir, "violations.parquet", f"""
         SELECT violation_type, severity, current_gap, mean_gap, src_node_id, dst_node_id, description
         FROM read_parquet('{{path}}')
         WHERE {pair_where}
         ORDER BY current_gap DESC, mean_gap DESC
         LIMIT 20
-    """))
+    """, pair_params))
     _print_section("Conditionals", read_rows(out_dir, "conditional_edges.parquet", f"""
         SELECT a_node_id, b_node_id, method, p_a_given_b, lower_bound, upper_bound, confidence
         FROM read_parquet('{{path}}')
         WHERE {conditional_where}
         ORDER BY confidence DESC, method
         LIMIT 20
-    """))
+    """, [src, dst, dst, src]))
 
 
-def _edge_where(src: str, dst: str, edge_type: str) -> str:
-    forward = f"src_node_id = '{q(src)}' AND dst_node_id = '{q(dst)}'"
+def _edge_where(src: str, dst: str, edge_type: str) -> tuple[str, list[str]]:
+    forward = "src_node_id = ? AND dst_node_id = ?"
     if edge_type == "implies":
-        return forward
-    reverse = f"src_node_id = '{q(dst)}' AND dst_node_id = '{q(src)}'"
-    return f"({forward}) OR ({reverse})"
+        return forward, [src, dst]
+    reverse = "src_node_id = ? AND dst_node_id = ?"
+    return f"({forward}) OR ({reverse})", [src, dst, dst, src]
 
 
 def _print_section(title: str, rows: list[dict[str, object]]) -> None:

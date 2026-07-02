@@ -5,7 +5,9 @@ from pathlib import Path
 
 import pytest
 
+from oddsgraph.build import build
 from oddsgraph.queries import DuckDB, q
+from tests.synthetic import write_mini_wc2026_oracle_input
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -142,6 +144,16 @@ def _wc2026_output_or_skip() -> Path:
     return WC2026_OUT
 
 
+@pytest.fixture(scope="session")
+def mini_wc2026_output(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    base = tmp_path_factory.mktemp("mini_wc2026")
+    input_path = base / "mini_wc2026.parquet"
+    out = base / "out"
+    write_mini_wc2026_oracle_input(input_path)
+    build(input_path, out)
+    return out
+
+
 def test_edge_oracle_required_edges_present(synthetic_output: Path) -> None:
     edges = _edge_set(synthetic_output)
     required = [row for row in _oracle_rows(SYNTHETIC_ORACLE) if row["expectation"] == "required"]
@@ -224,9 +236,7 @@ def test_full_output_invariants_on_wc2026_if_available() -> None:
     _assert_logic_invariants(_wc2026_output_or_skip())
 
 
-@pytest.mark.full_output
-def test_wc2026_oracle_if_available() -> None:
-    out = _wc2026_output_or_skip()
+def _assert_wc2026_oracle(out: Path) -> None:
     edges = _edge_set(out)
     db = DuckDB()
     try:
@@ -251,3 +261,12 @@ def test_wc2026_oracle_if_available() -> None:
     ]
     assert required_missing == []
     assert forbidden_present == []
+
+
+def test_wc2026_oracle_on_mini_fixture(mini_wc2026_output: Path) -> None:
+    _assert_wc2026_oracle(mini_wc2026_output)
+
+
+@pytest.mark.full_output
+def test_wc2026_oracle_if_available() -> None:
+    _assert_wc2026_oracle(_wc2026_output_or_skip())
