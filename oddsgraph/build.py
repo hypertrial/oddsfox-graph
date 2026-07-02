@@ -21,11 +21,18 @@ from .rules import Taxonomy, load_taxonomy, single_winner_pattern_sql, single_wi
 from .schema import validate_input_schema, validate_input_table
 
 
-def _stage(name: str, fn: Callable[[], T_]) -> T_:
+def _stage(
+    name: str,
+    fn: Callable[[], T_],
+    timings: dict[str, float] | None = None,
+) -> T_:
     t0 = time.time()
     print(f"[oddsgraph] {name} ...", file=sys.stderr, flush=True)
     result = fn()
-    print(f"[oddsgraph] {name} done in {time.time() - t0:.1f}s", file=sys.stderr, flush=True)
+    elapsed = time.time() - t0
+    if timings is not None:
+        timings[name.strip()] = round(elapsed, 3)
+    print(f"[oddsgraph] {name} done in {elapsed:.1f}s", file=sys.stderr, flush=True)
     return result
 
 
@@ -47,35 +54,41 @@ def build(
     db = DuckDB(db_path)
     effective_thresholds = None
     lp_warnings: list[str] = []
+    stage_timings: dict[str, float] = {}
+
+    def stage(name: str, fn: Callable[[], T_]) -> T_:
+        return _stage(name, fn, stage_timings)
+
     try:
-        _stage("validate_input_schema", lambda: validate_input_schema(db, input_path))
-        _stage("create_input_prices", lambda: _create_input_prices(db, input_path))
-        _stage("validate_input", lambda: validate_input_table(db))
-        _stage("create_views", lambda: _create_views(db, taxonomy, quotes_path))
+        stage("validate_input_schema", lambda: validate_input_schema(db, input_path))
+        stage("create_input_prices", lambda: _create_input_prices(db, input_path))
+        stage("validate_input", lambda: validate_input_table(db))
+        stage("create_views", lambda: _create_views(db, taxonomy, quotes_path, stage))
         if write_prices:
-            _stage("write_prices", lambda: _write_prices(db, out_dir))
-        _stage("write_nodes", lambda: _write_nodes(db, out_dir))
-        _stage("write_market_groups", lambda: _write_market_groups(db, out_dir))
-        _stage("write_candidates", lambda: write_candidates(db, out_dir))
-        _stage("score_edges", lambda: score_edges(db, out_dir, _stage))
-        effective_thresholds = _stage(
+            stage("write_prices", lambda: _write_prices(db, out_dir))
+        stage("write_nodes", lambda: _write_nodes(db, out_dir))
+        stage("write_market_groups", lambda: _write_market_groups(db, out_dir))
+        stage("write_candidates", lambda: write_candidates(db, out_dir))
+        stage("score_edges", lambda: score_edges(db, out_dir, stage))
+        effective_thresholds = stage(
             "fit_calibration", lambda: fit_calibration(db, out_dir)
         )[1]
-        _stage("apply_calibration_confidence", lambda: apply_calibration_confidence(db, effective_thresholds))
-        _stage("write_final_edges", lambda: _write_final_edges(db, out_dir))
-        _stage("compute_transitive_closure", lambda: compute_transitive_closure(db, out_dir))
+        stage("apply_calibration_confidence", lambda: apply_calibration_confidence(db, effective_thresholds))
+        stage("validate_final_edges", lambda: _validate_final_edge_invariants(db))
+        stage("write_final_edges", lambda: _write_final_edges(db, out_dir))
+        stage("compute_transitive_closure", lambda: compute_transitive_closure(db, out_dir))
         if solve_coherence:
-            lp_warnings = _stage("solve_event_coherence", lambda: solve_event_coherence(db, out_dir))
+            lp_warnings = stage("solve_event_coherence", lambda: solve_event_coherence(db, out_dir))
         else:
-            _stage("create_empty_coherence_tables", lambda: create_empty_coherence_tables(db))
-        _stage("write_constraints", lambda: write_constraints(db, out_dir))
-        _stage("write_conditionals", lambda: write_conditionals(db, out_dir))
-        _stage("write_violations", lambda: write_violations(db, out_dir, effective_thresholds))
+            stage("create_empty_coherence_tables", lambda: create_empty_coherence_tables(db))
+        stage("write_constraints", lambda: write_constraints(db, out_dir))
+        stage("write_conditionals", lambda: write_conditionals(db, out_dir))
+        stage("write_violations", lambda: write_violations(db, out_dir, effective_thresholds))
         if resolutions_path is not None:
-            _stage("run_evaluation", lambda: run_evaluation(db, out_dir, resolutions_path))
-        stats = _stage("stats", lambda: _stats(db, start))
-        _stage("write_reports", lambda: write_reports(db, out_dir, stats))
-        _stage(
+            stage("run_evaluation", lambda: run_evaluation(db, out_dir, resolutions_path))
+        stats = stage("stats", lambda: _stats(db, start))
+        stage("write_reports", lambda: write_reports(db, out_dir, stats))
+        stage(
             "validate_generated_artifacts",
             lambda: _validate_generated_artifacts(
                 db,
@@ -97,6 +110,7 @@ def build(
             has_evaluation=resolutions_path is not None,
             has_prices=write_prices,
             has_coherence=solve_coherence,
+            stage_timings=stage_timings,
         )
         return stats
     finally:
@@ -127,6 +141,7 @@ def _write_manifest(
     has_evaluation: bool,
     has_prices: bool,
     has_coherence: bool,
+    stage_timings: dict[str, float],
 ) -> None:
     manifest = {
         "input": str(input_path),
@@ -152,6 +167,7 @@ def _write_manifest(
         ),
         "reports": list(reports(has_evaluation=has_evaluation)),
         "stats": stats,
+        "stage_timings": stage_timings,
     }
     (out_dir / "build_manifest.json").write_text(
         json.dumps(manifest, indent=2, sort_keys=True, default=str) + "\n",
@@ -234,49 +250,62 @@ def _create_views(
     db: DuckDB,
     taxonomy: Taxonomy,
     quotes_path: Path | None,
+    stage: Callable[[str, Callable[[], T_]], T_],
 ) -> None:
-    quotes_sql = q(quotes_path) if quotes_path else None
-    _stage(
-        "  token_minute_prices",
-        lambda: db.execute(
-            """
-            CREATE TABLE token_minute_prices AS
+    stage("  token_minute_prices", lambda: _create_token_minute_prices(db))
+    stage("  validate_token_minute_prices", lambda: _validate_token_minute_prices(db))
+    stage("  enriched_minute_prices", lambda: _create_enriched_minute_prices(db, quotes_path))
+    stage("  semantic_tables", lambda: _create_semantic_tables(db, taxonomy))
+    stage("  market_completeness", lambda: _create_market_completeness_tables(db))
+    stage("  token_stats", lambda: _create_token_stats_tables(db))
+    stage("  validate_token_current", lambda: _validate_token_current(db))
+    stage("  nodes_view", lambda: _create_nodes_view(db, taxonomy))
+    stage("  validate_nodes", lambda: _validate_nodes(db))
+
+
+def _create_token_minute_prices(db: DuckDB) -> None:
+    db.execute(
+        """
+        CREATE TABLE token_minute_prices AS
+        SELECT
+            market_id,
+            outcome_index,
+            clob_token_id,
+            question,
+            outcome_label,
+            event_slug,
+            is_active,
+            is_closed,
+            market_volume_usd,
+            odds_timestamp,
+            odds_timestamp_epoch,
+            odds_minute_epoch,
+            price
+        FROM (
             SELECT
-                market_id,
-                outcome_index,
-                clob_token_id,
-                question,
-                outcome_label,
-                event_slug,
-                is_active,
-                is_closed,
-                market_volume_usd,
-                odds_timestamp,
-                odds_timestamp_epoch,
-                odds_minute_epoch,
-                price
-            FROM (
-                SELECT
-                    *,
-                    row_number() OVER (
-                        PARTITION BY clob_token_id, odds_minute_epoch
-                        ORDER BY odds_timestamp_epoch DESC
-                    ) AS rn
-                FROM input_prices
-            )
-            WHERE rn = 1;
-            """
-        ),
+                *,
+                row_number() OVER (
+                    PARTITION BY clob_token_id, odds_minute_epoch
+                    ORDER BY odds_timestamp_epoch DESC
+                ) AS rn
+            FROM input_prices
+        )
+        WHERE rn = 1;
+        """
     )
-    _stage(
-        "  enriched_minute_prices",
-        lambda: db.execute(
-            f"""
-            {noise.create_quote_views_sql(quotes_sql)}
-            {noise.create_enriched_minute_prices_sql()}
-            """
-        ),
+
+
+def _create_enriched_minute_prices(db: DuckDB, quotes_path: Path | None) -> None:
+    quotes_sql = q(quotes_path) if quotes_path else None
+    db.execute(
+        f"""
+        {noise.create_quote_views_sql(quotes_sql)}
+        {noise.create_enriched_minute_prices_sql()}
+        """
     )
+
+
+def _create_semantic_tables(db: DuckDB, taxonomy: Taxonomy) -> None:
     db.execute(
         f"""
         CREATE TABLE semantic_stage_rules AS
@@ -290,7 +319,13 @@ def _create_views(
         FROM (VALUES
             {single_winner_values_sql(taxonomy)}
         ) AS t(event_slug);
+        """
+    )
 
+
+def _create_market_completeness_tables(db: DuckDB) -> None:
+    db.execute(
+        """
         CREATE TABLE market_token_counts AS
         SELECT market_id, count(DISTINCT clob_token_id) AS expected_tokens
         FROM input_prices
@@ -310,7 +345,19 @@ def _create_views(
         JOIN market_token_counts t USING (market_id)
         WHERE c.token_count = t.expected_tokens
         GROUP BY c.market_id;
+        """
+    )
+    _require_zero(db, "markets without complete current minute", """
+        SELECT count(*)
+        FROM market_token_counts t
+        LEFT JOIN market_complete_epochs e USING (market_id)
+        WHERE e.market_id IS NULL
+    """)
 
+
+def _create_token_stats_tables(db: DuckDB) -> None:
+    db.execute(
+        """
         CREATE TABLE token_stats AS
         SELECT
             clob_token_id AS node_id,
@@ -350,7 +397,13 @@ def _create_views(
             AND p.clob_token_id = t.node_id
             AND p.odds_minute_epoch = e.current_minute_epoch
         GROUP BY t.node_id;
+        """
+    )
 
+
+def _create_nodes_view(db: DuckDB, taxonomy: Taxonomy) -> None:
+    db.execute(
+        f"""
         CREATE VIEW nodes_v AS
         WITH stage_matches AS (
             SELECT node_id, stage_subject, stage_rank
@@ -405,6 +458,94 @@ def _create_views(
         LEFT JOIN token_current c USING (node_id);
         """
     )
+
+
+def _validate_token_minute_prices(db: DuckDB) -> None:
+    _require_zero(db, "duplicate token-minute rows", """
+        SELECT count(*)
+        FROM (
+            SELECT clob_token_id, odds_minute_epoch
+            FROM token_minute_prices
+            GROUP BY 1, 2
+            HAVING count(*) > 1
+        )
+    """)
+
+
+def _validate_token_current(db: DuckDB) -> None:
+    _require_zero(db, "tokens without current prices", """
+        SELECT count(*)
+        FROM token_current
+        WHERE current_epoch IS NULL OR current_price IS NULL
+    """)
+
+
+def _validate_nodes(db: DuckDB) -> None:
+    _require_zero(db, "duplicate nodes", """
+        SELECT count(*)
+        FROM (
+            SELECT node_id
+            FROM nodes_v
+            GROUP BY 1
+            HAVING count(*) > 1
+        )
+    """)
+    _require_zero(db, "node/token mismatch", """
+        WITH input_tokens AS (
+            SELECT DISTINCT clob_token_id AS node_id FROM input_prices
+        ),
+        nodes AS (
+            SELECT node_id FROM nodes_v
+        )
+        SELECT count(*)
+        FROM input_tokens i
+        FULL OUTER JOIN nodes n USING (node_id)
+        WHERE i.node_id IS NULL OR n.node_id IS NULL
+    """)
+
+
+def _validate_final_edge_invariants(db: DuckDB) -> None:
+    failures = [
+        ("duplicate logic edges", _count_invariant(db, """
+            SELECT count(*)
+            FROM (
+                SELECT src_node_id, dst_node_id, edge_type
+                FROM logic_edges_v
+                GROUP BY 1, 2, 3
+                HAVING count(*) > 1
+            )
+        """)),
+        ("duplicate price edges", _count_invariant(db, """
+            SELECT count(*)
+            FROM (
+                SELECT src_node_id, dst_node_id, edge_type
+                FROM price_edges_v
+                GROUP BY 1, 2, 3
+                HAVING count(*) > 1
+            )
+        """)),
+        ("logic/price edge overlap", _count_invariant(db, """
+            SELECT count(*)
+            FROM logic_edges_v l
+            JOIN price_edges_v p
+                ON l.src_node_id = p.src_node_id
+                AND l.dst_node_id = p.dst_node_id
+                AND l.edge_type = p.edge_type
+        """)),
+    ]
+    failed = [f"{name}: {count}" for name, count in failures if count]
+    if failed:
+        raise RuntimeError("Final edge invariant failed: " + "; ".join(failed))
+
+
+def _require_zero(db: DuckDB, name: str, sql: str) -> None:
+    count = _count_invariant(db, sql)
+    if count:
+        raise RuntimeError(f"{name}: {count}")
+
+
+def _count_invariant(db: DuckDB, sql: str) -> int:
+    return int(db.scalar(sql) or 0)
 
 
 def _write_prices(db: DuckDB, out_dir: Path) -> None:

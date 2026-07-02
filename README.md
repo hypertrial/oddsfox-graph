@@ -60,27 +60,37 @@ python -m oddsgraph.cli build \
   --skip-coherence
 ```
 
-On the local WC2026 file, the full build rewrites minute-level `prices.parquet`
-and usually takes about 5 minutes on this machine (LP coherence adds per-event
-solve time). The output directory is recreated in place for the DuckDB working
-database and generated artifacts.
+On the local WC2026 file, the full build materializes minute-level prices and
+usually takes 6-7 minutes on this machine. The output directory is recreated in
+place for the DuckDB working database and generated artifacts.
 
-Latest local WC2026 run (`wc2026_token_minutely_odds_20260702T070755Z.parquet`):
+Local WC2026 full run, July 2 2026
+(`wc2026_token_minutely_odds_20260702T070755Z.parquet`):
 
 | metric | value |
 | --- | ---: |
 | input rows | 53,827,798 |
 | markets / tokens | 2,344 / 4,688 |
 | candidate edges | 16,684 |
-| logic edges | 12,886 |
-| price edges | 12,137 |
-| violations | 10 |
-| incoherent events | 10 |
-| runtime | 290s |
+| logic edges | 7,842 |
+| price edges | 5,325 |
+| violations | 9 |
+| incoherent events | 9 |
+| runtime | 401.205s |
+
+Top stage timings from that run: `token_minute_prices` 154.391s,
+`solve_event_coherence` 71.512s, `enriched_minute_prices` 64.189s,
+`write_prices` 22.278s, and `market_completeness` 20.621s. The attempted
+grouped `arg_max` minute dedupe rewrite was not landed because it exceeded the
+local performance gate.
+
+Fast graph build with `--skip-prices --skip-coherence` on the same file took
+332.928s and omitted `prices.parquet`, `coherence.parquet`, and
+`coherence_repairs.parquet` from `build_manifest.json`.
 
 The artifact reference is in [docs/artifacts.md](docs/artifacts.md).
 Successful builds also write `build_manifest.json` with taxonomy metadata,
-effective calibrated thresholds, and summary stats.
+effective calibrated thresholds, stage timings, and summary stats.
 
 ## Inspect Results
 
@@ -169,12 +179,16 @@ Generated markdown reports are written to `output/wc2026/reports/`, including
 - `Input parquet failed validation`: fix the reported nulls, invalid prices,
   duplicate token timestamps, unstable token metadata, markets with fewer than two
   tokens, or markets without a complete current minute.
-- Slow build: the MVP writes all minute-level prices. The WC2026 file has
-  53,827,798 rows, so `prices.parquet` dominates runtime and disk I/O. Pair
-  scoring uses a 30-day lookback window (`SCORING_LOOKBACK_DAYS` in
+- Slow build: the MVP deduplicates and enriches all minute-level rows before
+  graph scoring. The WC2026 file has 53,827,798 rows, so minute materialization,
+  `prices.parquet`, and LP coherence dominate runtime. Pair scoring uses a
+  30-day lookback window (`SCORING_LOOKBACK_DAYS` in
   `thresholds.py`) so year-long feeds do not materialize full pair-minute
   history. Use the full default build for archival/research output; use
   `--skip-prices` and/or `--skip-coherence` for faster graph inspection.
+- Skipped artifact errors: if a command says an artifact was intentionally not
+  generated, rebuild without the matching skip flag or with the missing optional
+  input, such as `--resolutions` for `evaluation.parquet`.
 - `violations` returns rows: strict semantic edges can still have current prices
   that contradict the relationship. Inspect the row before treating it as data
   corruption.

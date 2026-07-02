@@ -11,6 +11,7 @@ from scipy.optimize import linprog
 from scipy.sparse import csr_matrix
 
 from . import thresholds as T
+from .artifacts import ARTIFACT_COLUMNS, ARTIFACT_EMPTY_TYPES
 from .queries import DuckDB, q
 from .sql import create_table_from_rows_sql, values_rows_sql
 
@@ -31,57 +32,12 @@ class LpConstraint:
     rhs: float
 
 
-DERIVED_EDGE_COLUMNS = [
-    "src_node_id",
-    "dst_node_id",
-    "edge_type",
-    "edge_basis",
-    "confidence",
-    "path",
-    "evidence",
-]
-
-DERIVED_EDGE_EMPTY_TYPES = {
-    "src_node_id": "VARCHAR",
-    "dst_node_id": "VARCHAR",
-    "edge_type": "VARCHAR",
-    "edge_basis": "VARCHAR",
-    "confidence": "DOUBLE",
-    "path": "VARCHAR",
-    "evidence": "VARCHAR",
-}
-
-COHERENCE_COLUMNS = [
-    "event_slug",
-    "node_count",
-    "constraint_count",
-    "incoherence_distance",
-    "solver_status",
-]
-
-COHERENCE_EMPTY_TYPES = {
-    "event_slug": "VARCHAR",
-    "node_count": "BIGINT",
-    "constraint_count": "BIGINT",
-    "incoherence_distance": "DOUBLE",
-    "solver_status": "VARCHAR",
-}
-
-REPAIR_COLUMNS = [
-    "event_slug",
-    "node_id",
-    "observed_price",
-    "repaired_price",
-    "adjustment",
-]
-
-REPAIR_EMPTY_TYPES = {
-    "event_slug": "VARCHAR",
-    "node_id": "VARCHAR",
-    "observed_price": "DOUBLE",
-    "repaired_price": "DOUBLE",
-    "adjustment": "DOUBLE",
-}
+DERIVED_EDGE_COLUMNS = ARTIFACT_COLUMNS["derived_edges.parquet"]
+DERIVED_EDGE_EMPTY_TYPES = ARTIFACT_EMPTY_TYPES["derived_edges.parquet"]
+COHERENCE_COLUMNS = ARTIFACT_COLUMNS["coherence.parquet"]
+COHERENCE_EMPTY_TYPES = ARTIFACT_EMPTY_TYPES["coherence.parquet"]
+REPAIR_COLUMNS = ARTIFACT_COLUMNS["coherence_repairs.parquet"]
+REPAIR_EMPTY_TYPES = ARTIFACT_EMPTY_TYPES["coherence_repairs.parquet"]
 
 
 def compute_transitive_closure(db: DuckDB, out_dir: Path) -> None:

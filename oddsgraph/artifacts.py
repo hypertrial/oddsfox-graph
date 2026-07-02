@@ -100,6 +100,53 @@ ARTIFACT_COLUMNS = {
     ],
 }
 
+ARTIFACT_EMPTY_TYPES = {
+    "derived_edges.parquet": {
+        "src_node_id": "VARCHAR",
+        "dst_node_id": "VARCHAR",
+        "edge_type": "VARCHAR",
+        "edge_basis": "VARCHAR",
+        "confidence": "DOUBLE",
+        "path": "VARCHAR",
+        "evidence": "VARCHAR",
+    },
+    "calibration.parquet": {
+        "bucket_id": "INTEGER",
+        "volume_min": "DOUBLE",
+        "volume_max": "DOUBLE",
+        "sample_count": "BIGINT",
+        "complement_p50": "DOUBLE",
+        "complement_p95": "DOUBLE",
+        "equivalence_p95": "DOUBLE",
+        "implication_p95": "DOUBLE",
+        "exclusion_p95": "DOUBLE",
+    },
+    "coherence.parquet": {
+        "event_slug": "VARCHAR",
+        "node_count": "BIGINT",
+        "constraint_count": "BIGINT",
+        "incoherence_distance": "DOUBLE",
+        "solver_status": "VARCHAR",
+    },
+    "coherence_repairs.parquet": {
+        "event_slug": "VARCHAR",
+        "node_id": "VARCHAR",
+        "observed_price": "DOUBLE",
+        "repaired_price": "DOUBLE",
+        "adjustment": "DOUBLE",
+    },
+    "evaluation.parquet": {
+        "metric_type": "VARCHAR",
+        "artifact": "VARCHAR",
+        "edge_basis": "VARCHAR",
+        "edge_type": "VARCHAR",
+        "violation_type": "VARCHAR",
+        "liquidity_bucket": "INTEGER",
+        "edge_count": "BIGINT",
+        "value": "DOUBLE",
+    },
+}
+
 
 def parquet_artifacts(
     *,

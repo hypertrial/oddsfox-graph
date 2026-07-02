@@ -127,6 +127,8 @@ completion marker for a coherent output directory.
 ## Manifest
 
 `build_manifest.json` records input paths, build options, taxonomy hash,
-effective thresholds, LP warnings, generated artifacts/reports, and summary
-stats. Its artifact list is the contract for that build, so omitted optional
-artifacts are not validation failures.
+effective thresholds, LP warnings, generated artifacts/reports, summary stats,
+and `stage_timings` in seconds. Its artifact list is the contract for that
+build, so omitted optional artifacts are not validation failures. Query commands
+use the manifest to distinguish intentionally skipped artifacts from missing
+or stale output files.

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -14,10 +15,35 @@ def read_rows(
 ) -> list[dict[str, object]]:
     db = DuckDB()
     try:
-        path = q(out_dir / artifact)
+        path = q(require_artifact(out_dir, artifact))
         return db.rows(sql.format(path=path), params)
     finally:
         db.close()
+
+
+def require_artifact(out_dir: Path, artifact: str) -> Path:
+    path = out_dir / artifact
+    manifest_path = out_dir / "build_manifest.json"
+    if manifest_path.exists():
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        artifacts = manifest.get("artifacts")
+        if isinstance(artifacts, list) and artifact not in set(artifacts):
+            raise FileNotFoundError(_skipped_artifact_message(artifact))
+
+    if path.exists():
+        return path
+
+    raise FileNotFoundError(f"Missing artifact {artifact} in {out_dir}")
+
+
+def _skipped_artifact_message(artifact: str) -> str:
+    if artifact in {"coherence.parquet", "coherence_repairs.parquet"}:
+        return f"{artifact} was intentionally not generated; rebuild without --skip-coherence"
+    if artifact == "evaluation.parquet":
+        return "evaluation.parquet was not generated; rebuild with --resolutions"
+    if artifact == "prices.parquet":
+        return "prices.parquet was intentionally not generated; rebuild without --skip-prices"
+    return f"{artifact} was not generated for this build"
 
 
 def search_nodes(out_dir: Path, query: str, top: int = 20) -> list[dict[str, object]]:

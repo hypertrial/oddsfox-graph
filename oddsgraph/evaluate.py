@@ -3,31 +3,13 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from .artifacts import ARTIFACT_COLUMNS, ARTIFACT_EMPTY_TYPES
 from .queries import DuckDB, q
 from .sql import create_table_from_rows_sql
 
 
-EVALUATION_COLUMNS = [
-    "metric_type",
-    "artifact",
-    "edge_basis",
-    "edge_type",
-    "violation_type",
-    "liquidity_bucket",
-    "edge_count",
-    "value",
-]
-
-EVALUATION_EMPTY_TYPES = {
-    "metric_type": "VARCHAR",
-    "artifact": "VARCHAR",
-    "edge_basis": "VARCHAR",
-    "edge_type": "VARCHAR",
-    "violation_type": "VARCHAR",
-    "liquidity_bucket": "INTEGER",
-    "edge_count": "BIGINT",
-    "value": "DOUBLE",
-}
+EVALUATION_COLUMNS = ARTIFACT_COLUMNS["evaluation.parquet"]
+EVALUATION_EMPTY_TYPES = ARTIFACT_EMPTY_TYPES["evaluation.parquet"]
 
 
 def run_evaluation(db: DuckDB, out_dir: Path, resolutions_path: Path) -> None:

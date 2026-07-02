@@ -7,9 +7,15 @@ from typing import Any
 
 import pytest
 
-from oddsgraph.artifacts import ARTIFACT_COLUMNS, PARQUET_ARTIFACTS
-from oddsgraph.build import _validate_generated_artifacts, build
-from oddsgraph.calibration import _empirical_confidence
+from oddsgraph.artifacts import ARTIFACT_COLUMNS, ARTIFACT_EMPTY_TYPES, PARQUET_ARTIFACTS
+from oddsgraph.build import (
+    _create_token_minute_prices,
+    _validate_final_edge_invariants,
+    _validate_generated_artifacts,
+    _validate_token_minute_prices,
+    build,
+)
+from oddsgraph.calibration import _empirical_confidence, apply_calibration_confidence, default_thresholds
 from oddsgraph.cli import main
 from oddsgraph.coherence import EventModel, LpConstraint, _solve_l1_repair
 from oddsgraph.queries import DuckDB, q
@@ -185,6 +191,11 @@ def test_artifact_schemas_match_contract(synthetic_output: Path) -> None:
         db.close()
 
 
+def test_artifact_empty_type_contracts_match_columns() -> None:
+    for artifact, empty_types in ARTIFACT_EMPTY_TYPES.items():
+        assert list(empty_types) == ARTIFACT_COLUMNS[artifact]
+
+
 def test_generated_artifact_validation_reports_missing_files(tmp_path: Path) -> None:
     db = DuckDB()
     try:
@@ -248,6 +259,8 @@ def test_build_manifest_marks_success(synthetic_output: Path) -> None:
     assert manifest["taxonomy"]["name"] == "wc2026"
     assert manifest["effective_thresholds"] is not None
     assert manifest["build_options"] == {"solve_coherence": True, "write_prices": True}
+    assert manifest["stage_timings"]["create_input_prices"] >= 0
+    assert manifest["stage_timings"]["token_minute_prices"] >= 0
     assert "reports/summary.md" in manifest["reports"]
     assert "reports/coverage.md" in manifest["reports"]
     db = DuckDB()
@@ -299,6 +312,90 @@ def test_empirical_confidence_counts_equal_errors_as_at_least_observed() -> None
     errors = [0.1, 0.2, 0.2, 0.4]
     assert _empirical_confidence(errors, 0.2) == pytest.approx(0.25)
     assert _empirical_confidence(errors, 0.3) == pytest.approx(0.75)
+
+
+def test_sql_calibration_confidence_counts_equal_errors_as_at_least_observed(tmp_path: Path) -> None:
+    db = DuckDB(tmp_path / "calibration.duckdb")
+    try:
+        db.execute("""
+            CREATE TABLE candidate_edges_v AS
+            SELECT
+                range AS sample_idx,
+                'sample_src_' || range::VARCHAR AS src_node_id,
+                'sample_dst_' || range::VARCHAR AS dst_node_id,
+                'complement' AS candidate_type
+            FROM range(50);
+
+            CREATE TABLE aligned_edges AS
+            SELECT
+                src_node_id,
+                dst_node_id,
+                candidate_type,
+                CASE
+                    WHEN sample_idx < 10 THEN 0.1
+                    WHEN sample_idx < 30 THEN 0.2
+                    ELSE 0.4
+                END AS complement_error_raw
+            FROM candidate_edges_v;
+
+            CREATE TABLE scored_edges_v AS
+            SELECT
+                'target_src' AS src_node_id,
+                'target_dst' AS dst_node_id,
+                'complement' AS candidate_type,
+                'complement' AS edge_type,
+                'same_market' AS edge_basis,
+                0.0 AS confidence,
+                0.2 AS score,
+                0.2 AS violation_score,
+                1000::BIGINT AS overlap_minutes,
+                0.5 AS current_p_src,
+                0.5 AS current_p_dst,
+                0.5 AS mean_p_src,
+                0.5 AS mean_p_dst,
+                'm1' AS market_id_src,
+                'm1' AS market_id_dst,
+                'event-1' AS event_slug_src,
+                'event-1' AS event_slug_dst,
+                'test edge' AS evidence,
+                0.2 AS complement_error_raw,
+                NULL::DOUBLE AS equivalence_error_raw,
+                NULL::DOUBLE AS implication_violation_raw,
+                NULL::DOUBLE AS exclusion_violation_raw
+            UNION ALL
+            SELECT
+                'float_src' AS src_node_id,
+                'float_dst' AS dst_node_id,
+                'implication' AS candidate_type,
+                'implies' AS edge_type,
+                'price_only' AS edge_basis,
+                0.0 AS confidence,
+                0.001 AS score,
+                0.001 AS violation_score,
+                1000::BIGINT AS overlap_minutes,
+                0.225 AS current_p_src,
+                0.205 AS current_p_dst,
+                0.2 AS mean_p_src,
+                0.3 AS mean_p_dst,
+                'm2' AS market_id_src,
+                'm3' AS market_id_dst,
+                'event-2' AS event_slug_src,
+                'event-2' AS event_slug_dst,
+                'float boundary edge' AS evidence,
+                NULL::DOUBLE AS complement_error_raw,
+                NULL::DOUBLE AS equivalence_error_raw,
+                0.001 AS implication_violation_raw,
+                NULL::DOUBLE AS exclusion_violation_raw;
+        """)
+
+        apply_calibration_confidence(db, default_thresholds())
+
+        confidence = float(db.scalar("SELECT confidence FROM scored_edges_v WHERE src_node_id = 'target_src'") or 0)
+        assert confidence == pytest.approx(0.2)
+        price_edges = int(db.scalar("SELECT count(*) FROM price_edges_v WHERE src_node_id = 'float_src'") or 0)
+        assert price_edges == 1
+    finally:
+        db.close()
 
 
 def test_evaluation_with_resolutions(synthetic_input: Path, tmp_path: Path) -> None:
@@ -369,6 +466,11 @@ def test_build_can_skip_coherence_and_keep_conditionals(
     assert "violation_type" in capsys.readouterr().out
     assert main(["condition", "--out", str(out), "--a", "comp:Yes", "--b", "comp:No"]) == 0
     assert "exact_complement" in capsys.readouterr().out
+    assert main(["coherence", "--out", str(out), "--top", "5"]) == 1
+    assert "rebuild without --skip-coherence" in capsys.readouterr().err
+    (out / "coherence.parquet").write_text("stale\n", encoding="utf-8")
+    assert main(["coherence", "--out", str(out), "--top", "5"]) == 1
+    assert "rebuild without --skip-coherence" in capsys.readouterr().err
 
 
 def test_cli_build_can_skip_prices_and_coherence(synthetic_input: Path, tmp_path: Path) -> None:
@@ -423,6 +525,112 @@ def test_cli_smoke(synthetic_input: Path, tmp_path: Path, capsys: pytest.Capture
     captured = capsys.readouterr()
     assert "Ambiguous node query" in captured.err
     assert "Candidates:" in captured.err
+    assert main(["evaluate", "--out", str(out)]) == 1
+    assert "rebuild with --resolutions" in capsys.readouterr().err
+
+
+def test_token_minute_prices_choose_latest_timestamp_per_minute(tmp_path: Path) -> None:
+    db = DuckDB(tmp_path / "dedupe.duckdb")
+    try:
+        db.execute("""
+            CREATE TABLE input_prices AS
+            SELECT *
+            FROM (VALUES
+                ('m1', 0, 'a', 'Question A', 'Yes', 'event-1', true, false, 1.0, to_timestamp(1), 1::BIGINT, 0::BIGINT, 0.40),
+                ('m1', 0, 'a', 'Question A', 'Yes', 'event-1', true, false, 1.0, to_timestamp(45), 45::BIGINT, 0::BIGINT, 0.45),
+                ('m1', 0, 'a', 'Question A', 'Yes', 'event-1', true, false, 1.0, to_timestamp(75), 75::BIGINT, 60::BIGINT, 0.50),
+                ('m1', 1, 'b', 'Question A', 'No', 'event-1', true, false, 1.0, to_timestamp(2), 2::BIGINT, 0::BIGINT, 0.60),
+                ('m1', 1, 'b', 'Question A', 'No', 'event-1', true, false, 1.0, to_timestamp(55), 55::BIGINT, 0::BIGINT, 0.55)
+            ) AS t(
+                market_id,
+                outcome_index,
+                clob_token_id,
+                question,
+                outcome_label,
+                event_slug,
+                is_active,
+                is_closed,
+                market_volume_usd,
+                odds_timestamp,
+                odds_timestamp_epoch,
+                odds_minute_epoch,
+                price
+            );
+
+            CREATE TABLE token_minute_reference AS
+            SELECT
+                market_id,
+                outcome_index,
+                clob_token_id,
+                question,
+                outcome_label,
+                event_slug,
+                is_active,
+                is_closed,
+                market_volume_usd,
+                odds_timestamp,
+                odds_timestamp_epoch,
+                odds_minute_epoch,
+                price
+            FROM (
+                SELECT
+                    *,
+                    row_number() OVER (
+                        PARTITION BY clob_token_id, odds_minute_epoch
+                        ORDER BY odds_timestamp_epoch DESC
+                    ) AS rn
+                FROM input_prices
+            )
+            WHERE rn = 1;
+        """)
+
+        _create_token_minute_prices(db)
+
+        actual = db.rows("""
+            SELECT * FROM token_minute_prices
+            ORDER BY clob_token_id, odds_minute_epoch
+        """)
+        expected = db.rows("""
+            SELECT * FROM token_minute_reference
+            ORDER BY clob_token_id, odds_minute_epoch
+        """)
+        assert actual == expected
+    finally:
+        db.close()
+
+
+def test_stage_invariants_report_duplicate_token_minutes(tmp_path: Path) -> None:
+    db = DuckDB(tmp_path / "invariants.duckdb")
+    try:
+        db.execute("""
+            CREATE TABLE token_minute_prices AS
+            SELECT 'a' AS clob_token_id, 0::BIGINT AS odds_minute_epoch
+            UNION ALL
+            SELECT 'a', 0::BIGINT
+        """)
+        with pytest.raises(RuntimeError, match="duplicate token-minute rows: 1"):
+            _validate_token_minute_prices(db)
+    finally:
+        db.close()
+
+
+def test_stage_invariants_report_duplicate_final_edges(tmp_path: Path) -> None:
+    db = DuckDB(tmp_path / "edge_invariants.duckdb")
+    try:
+        db.execute("""
+            CREATE TABLE logic_edges_v AS
+            SELECT 'a' AS src_node_id, 'b' AS dst_node_id, 'implies' AS edge_type
+            UNION ALL
+            SELECT 'a', 'b', 'implies';
+
+            CREATE TABLE price_edges_v AS
+            SELECT 'c' AS src_node_id, 'd' AS dst_node_id, 'equivalent' AS edge_type
+            WHERE false;
+        """)
+        with pytest.raises(RuntimeError, match="duplicate logic edges: 1"):
+            _validate_final_edge_invariants(db)
+    finally:
+        db.close()
 
 
 def test_cli_explain_smoke(synthetic_output: Path, capsys: pytest.CaptureFixture[str]) -> None:
