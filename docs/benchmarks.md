@@ -9,13 +9,13 @@ can all move timings materially.
 Use a fresh ignored output directory for each run:
 
 ```bash
-python -m oddsgraph.cli build \
+python -m oddsfox_graph.cli build \
   --input selected_token_hourly_odds_20260703T095031Z.parquet \
   --out output/perf_full
 ```
 
 ```bash
-python -m oddsgraph.cli build \
+python -m oddsfox_graph.cli build \
   --input selected_token_hourly_odds_20260703T095031Z.parquet \
   --out output/perf_fast_graph \
   --fast-graph \
@@ -25,13 +25,13 @@ python -m oddsgraph.cli build \
 Summarize a completed run:
 
 ```bash
-python -m oddsgraph.cli benchmark-summary --out output/perf_fast_graph
+python -m oddsfox_graph.cli benchmark-summary --out output/perf_fast_graph
 ```
 
 Run a paired full/fast graph comparison:
 
 ```bash
-python -m oddsgraph.cli benchmark-compare \
+python -m oddsfox_graph.cli benchmark-compare \
   --input selected_token_hourly_odds_20260703T095031Z.parquet \
   --out-root output/debt_pr_benchmark \
   --graph-lookback-days 30

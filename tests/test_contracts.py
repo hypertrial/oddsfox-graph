@@ -4,13 +4,13 @@ from pathlib import Path
 
 import pytest
 
-from oddsgraph.build import (
+from oddsfox_graph.build import (
     _create_token_minute_prices,
     _validate_final_edge_invariants,
     _validate_token_minute_prices,
 )
-from oddsgraph.contracts import validate_relation_columns
-from oddsgraph.queries import DuckDB
+from oddsfox_graph.contracts import validate_relation_columns
+from oddsfox_graph.queries import DuckDB
 
 
 def test_token_minute_prices_choose_latest_timestamp_per_minute(tmp_path: Path) -> None:

@@ -5,9 +5,9 @@ from typing import Any
 
 import pytest
 
-from oddsgraph.queries import DuckDB, q
-from oddsgraph.schema import detect_input_format, validate_input
-from oddsgraph.sql import sql_literal
+from oddsfox_graph.queries import DuckDB, q
+from oddsfox_graph.schema import detect_input_format, validate_input
+from oddsfox_graph.sql import sql_literal
 
 
 BASE_ROWS = [

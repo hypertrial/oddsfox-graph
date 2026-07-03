@@ -1,4 +1,4 @@
-# oddsgraph Docs
+# oddsfox-graph Docs
 
 This handbook keeps stable user guidance separate from dated benchmark notes
 and low-level artifact schemas.

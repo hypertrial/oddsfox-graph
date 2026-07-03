@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "oddsgraph"
+name = "oddsfox-graph"
 version = "0.1.1"
 description = "Build logical graph artifacts from token-level odds parquet."
 readme = "README.md"
@@ -17,20 +17,20 @@ classifiers = [
 ]
 
 [project.urls]
-Repository = "https://github.com/hypertrial/oddsgraph"
-DataPipeline = "https://github.com/hypertrial/oddsfox"
+Repository = "https://github.com/hypertrial/oddsfox-graph"
+DataPipeline = "https://github.com/hypertrial/oddsfox-pipeline"
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
 
 [project.scripts]
-oddsgraph = "oddsgraph.cli:main"
+oddsfox-graph = "oddsfox_graph.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["oddsgraph*"]
+include = ["oddsfox_graph*"]
 
 [tool.setuptools.package-data]
-oddsgraph = ["taxonomies/*.json"]
+oddsfox_graph = ["taxonomies/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

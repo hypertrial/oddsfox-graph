@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from oddsgraph.artifacts import ARTIFACT_COLUMNS
-from oddsgraph.build import build
-from oddsgraph.evaluate import _write_evaluation_report
-from oddsgraph.queries import DuckDB, q
-from oddsgraph.reports import markdown_table
+from oddsfox_graph.artifacts import ARTIFACT_COLUMNS
+from oddsfox_graph.build import build
+from oddsfox_graph.evaluate import _write_evaluation_report
+from oddsfox_graph.queries import DuckDB, q
+from oddsfox_graph.reports import markdown_table
 from tests.synthetic import write_synthetic_resolutions
 
 

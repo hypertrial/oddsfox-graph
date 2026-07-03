@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from oddsgraph.build import build
-from oddsgraph.queries import DuckDB, q
+from oddsfox_graph.build import build
+from oddsfox_graph.queries import DuckDB, q
 from tests.synthetic import write_mini_wc2026_oracle_input
 
 

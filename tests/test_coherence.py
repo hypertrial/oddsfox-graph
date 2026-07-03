@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from oddsgraph.coherence import (
+from oddsfox_graph.coherence import (
     EventModel,
     LpConstraint,
     _collect_coherence_inputs,
@@ -13,7 +13,7 @@ from oddsgraph.coherence import (
     _constraints_satisfied,
     _solve_l1_repair,
 )
-from oddsgraph.queries import DuckDB
+from oddsfox_graph.queries import DuckDB
 
 
 def test_lp_constraint_senses_preserve_feasible_observations() -> None:
@@ -40,7 +40,7 @@ def test_lp_constraint_senses_preserve_feasible_observations() -> None:
     assert _constraints_satisfied(model, constraints)
 
 def test_batched_lp_constraint_collection_matches_wrapper(synthetic_output: Path) -> None:
-    db = DuckDB(synthetic_output / "oddsgraph.duckdb")
+    db = DuckDB(synthetic_output / "oddsfox_graph.duckdb")
     try:
         inputs = _collect_coherence_inputs(db)
         node_ids = inputs.event_nodes["world-cup-winner"]

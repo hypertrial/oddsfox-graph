@@ -89,7 +89,7 @@ def write_reports(db: DuckDB, out_dir: Path, stats: dict[str, object]) -> None:
 
 
 def _summary(stats: dict[str, object]) -> str:
-    lines = ["# oddsgraph build summary", ""]
+    lines = ["# oddsfox-graph build summary", ""]
     for key in (
         "input_rows",
         "markets",

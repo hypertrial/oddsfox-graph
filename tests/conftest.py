@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from oddsgraph.build import build
+from oddsfox_graph.build import build
 from tests.synthetic import write_synthetic_input
 
 

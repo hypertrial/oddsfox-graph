@@ -3,11 +3,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from oddsgraph.artifacts import ARTIFACT_COLUMNS, PARQUET_ARTIFACTS
-from oddsgraph.build import build
-from oddsgraph.cli import main
-from oddsgraph.queries import DuckDB, q
-from oddsgraph.thresholds import bucket_counts
+from oddsfox_graph.artifacts import ARTIFACT_COLUMNS, PARQUET_ARTIFACTS
+from oddsfox_graph.build import build
+from oddsfox_graph.cli import main
+from oddsfox_graph.queries import DuckDB, q
+from oddsfox_graph.thresholds import bucket_counts
 from tests.synthetic import (
     write_hourly_synthetic_input,
     write_stale_current_hourly_input,

@@ -3,8 +3,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from oddsgraph.artifacts import ARTIFACT_COLUMNS, OPTIONAL_PARQUET_ARTIFACTS, PARQUET_ARTIFACTS, REPORTS
-from oddsgraph.cli import build_parser
+from oddsfox_graph.artifacts import ARTIFACT_COLUMNS, OPTIONAL_PARQUET_ARTIFACTS, PARQUET_ARTIFACTS, REPORTS
+from oddsfox_graph.cli import build_parser
 
 
 ROOT = Path(__file__).resolve().parents[1]

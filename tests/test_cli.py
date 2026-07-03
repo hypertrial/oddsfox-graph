@@ -5,9 +5,9 @@ from pathlib import Path
 
 import pytest
 
-from oddsgraph.benchmark import _comparison_deltas
-from oddsgraph.cli import main
-from oddsgraph.queries import DuckDB, q
+from oddsfox_graph.benchmark import _comparison_deltas
+from oddsfox_graph.cli import main
+from oddsfox_graph.queries import DuckDB, q
 
 
 def test_cli_smoke(synthetic_input: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

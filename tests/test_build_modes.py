@@ -5,9 +5,9 @@ from pathlib import Path
 
 import pytest
 
-from oddsgraph.build import build
-from oddsgraph.cli import main
-from oddsgraph.queries import DuckDB, q
+from oddsfox_graph.build import build
+from oddsfox_graph.cli import main
+from oddsfox_graph.queries import DuckDB, q
 
 
 def test_build_can_skip_prices_and_keep_query_artifacts(

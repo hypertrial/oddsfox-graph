@@ -1,6 +1,6 @@
-# oddsgraph
+# oddsfox-graph
 
-`oddsgraph` turns token-hour Polymarket odds into graph-ready parquet
+`oddsfox-graph` turns token-hour Polymarket odds into graph-ready parquet
 artifacts. Each `clob_token_id` becomes a proposition node, then the batch build
 emits market groups, logical edges, price-only edges, derived implications,
 conditional probabilities, constraint rows, violations, optional coherence and
@@ -22,14 +22,14 @@ stay outside source control.
 
 ## Get The Parquet
 
-Use [hypertrial/oddsfox](https://github.com/hypertrial/oddsfox) to build and
+Use [hypertrial/oddsfox-pipeline](https://github.com/hypertrial/oddsfox-pipeline) to build and
 export the source data. OddsFox documents the local pipeline in its
-[quickstart](https://github.com/hypertrial/oddsfox/blob/main/docs/quickstart.md).
+[quickstart](https://github.com/hypertrial/oddsfox-pipeline/blob/main/docs/quickstart.md).
 For graph builds, export
 `polymarket_marts.selected_token_live_hourly_odds` as parquet from OddsFox
 (`scripts/export_selected_hourly_odds.py --live-current`). The historical
 `selected_token_hourly_odds` export remains useful for audits and backtests;
-`oddsgraph` also defensively filters stale or closed markets by default.
+`oddsfox-graph` also defensively filters stale or closed markets by default.
 
 The exported parquet should match the schema in
 [selected_token_hourly_odds_20260703T095031Z.md](selected_token_hourly_odds_20260703T095031Z.md).
@@ -47,7 +47,7 @@ python -m pip install -e ".[dev]"
 Run a full build when you want the complete artifact set:
 
 ```bash
-python -m oddsgraph.cli build \
+python -m oddsfox_graph.cli build \
   --input selected_token_live_hourly_odds_20260703T095031Z.parquet \
   --out output/wc2026
 ```
@@ -56,7 +56,7 @@ Run fast graph mode when you want graph/query artifacts quickly and can accept
 lookback-scoped historical node and market statistics:
 
 ```bash
-python -m oddsgraph.cli build \
+python -m oddsfox_graph.cli build \
   --input selected_token_live_hourly_odds_20260703T095031Z.parquet \
   --out output/wc2026-fast-graph \
   --fast-graph \
@@ -71,43 +71,43 @@ completion marker for a coherent output directory.
 Search nodes:
 
 ```bash
-python -m oddsgraph.cli search --out output/wc2026 --query "Brazil"
+python -m oddsfox_graph.cli search --out output/wc2026 --query "Brazil"
 ```
 
 Show high-volume nodes:
 
 ```bash
-python -m oddsgraph.cli nodes --out output/wc2026 --top 50
+python -m oddsfox_graph.cli nodes --out output/wc2026 --top 50
 ```
 
 Show trusted structural or semantic logic edges:
 
 ```bash
-python -m oddsgraph.cli edges --out output/wc2026 --edge-type implies --top 50
+python -m oddsfox_graph.cli edges --out output/wc2026 --edge-type implies --top 50
 ```
 
 Show price-threshold relationships that are not accepted as logic:
 
 ```bash
-python -m oddsgraph.cli price-edges --out output/wc2026 --edge-type implies --top 50
+python -m oddsfox_graph.cli price-edges --out output/wc2026 --edge-type implies --top 50
 ```
 
 Show pricing or logic violations:
 
 ```bash
-python -m oddsgraph.cli violations --out output/wc2026 --top 50
+python -m oddsfox_graph.cli violations --out output/wc2026 --top 50
 ```
 
 Explain a node:
 
 ```bash
-python -m oddsgraph.cli explain --out output/wc2026 --node "<token id or unique text>"
+python -m oddsfox_graph.cli explain --out output/wc2026 --node "<token id or unique text>"
 ```
 
 Ask for a conditional probability row:
 
 ```bash
-python -m oddsgraph.cli condition \
+python -m oddsfox_graph.cli condition \
   --out output/wc2026 \
   --a 60941235333934119537308581623022145063589498358463811604437431757990716193139 \
   --b 69254358704504551873876012384649223770132435379419074198292590735170180021451
@@ -116,7 +116,7 @@ python -m oddsgraph.cli condition \
 Summarize a completed build manifest:
 
 ```bash
-python -m oddsgraph.cli benchmark-summary --out output/wc2026
+python -m oddsfox_graph.cli benchmark-summary --out output/wc2026
 ```
 
 ## Documentation Map
@@ -137,7 +137,7 @@ python -m oddsgraph.cli benchmark-summary --out output/wc2026
 
 ```bash
 pytest -q
-python -m oddsgraph.cli --help
+python -m oddsfox_graph.cli --help
 ```
 
 The docs contract checks are part of `pytest -q`; there is no docs generator or

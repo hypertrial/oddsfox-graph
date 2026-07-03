@@ -38,12 +38,12 @@ def _stage(
     timings: dict[str, float] | None = None,
 ) -> T_:
     t0 = time.time()
-    print(f"[oddsgraph] {name} ...", file=sys.stderr, flush=True)
+    print(f"[oddsfox-graph] {name} ...", file=sys.stderr, flush=True)
     result = fn()
     elapsed = time.time() - t0
     if timings is not None:
         timings[name.strip()] = round(elapsed, 3)
-    print(f"[oddsgraph] {name} done in {elapsed:.1f}s", file=sys.stderr, flush=True)
+    print(f"[oddsfox-graph] {name} done in {elapsed:.1f}s", file=sys.stderr, flush=True)
     return result
 
 
@@ -70,7 +70,7 @@ def build(
     taxonomy = load_taxonomy(taxonomy_path)
     out_dir.mkdir(parents=True, exist_ok=True)
     _clear_generated(out_dir)
-    db_path = out_dir / "oddsgraph.duckdb"
+    db_path = out_dir / "oddsfox_graph.duckdb"
     db = DuckDB(db_path)
     effective_thresholds = None
     lp_warnings: list[str] = []
@@ -178,7 +178,7 @@ def build(
 
 
 def _clear_generated(out_dir: Path) -> None:
-    for name in (*parquet_artifacts(has_evaluation=True), "build_manifest.json", "oddsgraph.duckdb"):
+    for name in (*parquet_artifacts(has_evaluation=True), "build_manifest.json", "oddsfox_graph.duckdb"):
         path = out_dir / name
         if path.exists():
             path.unlink()

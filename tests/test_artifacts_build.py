@@ -6,10 +6,10 @@ from pathlib import Path
 
 import pytest
 
-from oddsgraph.artifacts import ARTIFACT_COLUMNS, ARTIFACT_EMPTY_TYPES, PARQUET_ARTIFACTS, artifact_projection
-from oddsgraph.build import _validate_generated_artifacts, build
-from oddsgraph.queries import DuckDB, q
-from oddsgraph.rules import load_taxonomy
+from oddsfox_graph.artifacts import ARTIFACT_COLUMNS, ARTIFACT_EMPTY_TYPES, PARQUET_ARTIFACTS, artifact_projection
+from oddsfox_graph.build import _validate_generated_artifacts, build
+from oddsfox_graph.queries import DuckDB, q
+from oddsfox_graph.rules import load_taxonomy
 
 
 ARTIFACTS = set(PARQUET_ARTIFACTS)
@@ -225,7 +225,7 @@ def test_build_manifest_marks_success(synthetic_output: Path) -> None:
         db.close()
 
 def test_market_minute_sums_match_market_group_artifact(synthetic_output: Path) -> None:
-    db = DuckDB(synthetic_output / "oddsgraph.duckdb")
+    db = DuckDB(synthetic_output / "oddsfox_graph.duckdb")
     try:
         rows = db.rows(f"""
             WITH market_group_rows AS (

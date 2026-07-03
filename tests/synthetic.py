@@ -3,9 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from oddsgraph import thresholds as T
-from oddsgraph.queries import DuckDB, q
-from oddsgraph.sql import values_rows_sql
+from oddsfox_graph import thresholds as T
+from oddsfox_graph.queries import DuckDB, q
+from oddsfox_graph.sql import values_rows_sql
 
 
 MARKET_COLUMNS = [

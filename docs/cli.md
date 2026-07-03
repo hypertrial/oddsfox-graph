@@ -1,6 +1,6 @@
 # CLI Reference
 
-Run commands from the repo root with `python -m oddsgraph.cli ...`.
+Run commands from the repo root with `python -m oddsfox_graph.cli ...`.
 
 ## Build Commands
 
@@ -38,13 +38,13 @@ Optional flags:
 Examples:
 
 ```bash
-python -m oddsgraph.cli build \
+python -m oddsfox_graph.cli build \
   --input selected_token_live_hourly_odds_20260703T095031Z.parquet \
   --out output/wc2026
 ```
 
 ```bash
-python -m oddsgraph.cli build \
+python -m oddsfox_graph.cli build \
   --input selected_token_live_hourly_odds_20260703T095031Z.parquet \
   --out output/wc2026-fast-graph \
   --fast-graph \
@@ -58,7 +58,7 @@ runtime, build options, graph counts, artifact count, and the slowest recorded
 build stages.
 
 ```bash
-python -m oddsgraph.cli benchmark-summary --out output/wc2026
+python -m oddsfox_graph.cli benchmark-summary --out output/wc2026
 ```
 
 ### `benchmark-compare`
@@ -76,7 +76,7 @@ Flags:
 - `--baseline-json PATH`: optional previous comparison JSON for numeric deltas.
 
 ```bash
-python -m oddsgraph.cli benchmark-compare \
+python -m oddsfox_graph.cli benchmark-compare \
   --input selected_token_hourly_odds_20260703T095031Z.parquet \
   --out-root output/benchmark_compare \
   --graph-lookback-days 30

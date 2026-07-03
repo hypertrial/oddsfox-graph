@@ -20,7 +20,7 @@ EDGE_TO_CANDIDATE = {
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="oddsgraph")
+    parser = argparse.ArgumentParser(prog="oddsfox-graph")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     p = sub.add_parser("build")

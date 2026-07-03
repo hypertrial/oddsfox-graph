@@ -4,9 +4,9 @@ from pathlib import Path
 
 import pytest
 
-from oddsgraph.calibration import _empirical_confidence, apply_calibration_confidence, default_thresholds
-from oddsgraph.queries import DuckDB
-from oddsgraph.thresholds import bucket_counts
+from oddsfox_graph.calibration import _empirical_confidence, apply_calibration_confidence, default_thresholds
+from oddsfox_graph.queries import DuckDB
+from oddsfox_graph.thresholds import bucket_counts
 
 
 def test_empirical_confidence_counts_equal_errors_as_at_least_observed() -> None:

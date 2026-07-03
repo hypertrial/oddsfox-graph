@@ -1,6 +1,6 @@
 # Architecture
 
-`oddsgraph` is a sequential DuckDB build. The code keeps data in DuckDB tables
+`oddsfox-graph` is a sequential DuckDB build. The code keeps data in DuckDB tables
 and views until final parquet exports, with Python used for orchestration,
 taxonomy rules, calibration thresholds, and event-level LP coherence.
 

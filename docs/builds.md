@@ -7,8 +7,8 @@ otherwise.
 ## Source Parquet
 
 Generate the odds parquet with
-[hypertrial/oddsfox](https://github.com/hypertrial/oddsfox). Follow its
-[quickstart](https://github.com/hypertrial/oddsfox/blob/main/docs/quickstart.md),
+[hypertrial/oddsfox-pipeline](https://github.com/hypertrial/oddsfox-pipeline). Follow its
+[quickstart](https://github.com/hypertrial/oddsfox-pipeline/blob/main/docs/quickstart.md),
 then export `polymarket_marts.selected_token_live_hourly_odds` as parquet with
 `scripts/export_selected_hourly_odds.py --live-current`.
 
@@ -23,7 +23,7 @@ Legacy minutely parquet with `odds_timestamp`, `odds_timestamp_epoch`, and
 ## Full Build
 
 ```bash
-python -m oddsgraph.cli build \
+python -m oddsfox_graph.cli build \
   --input selected_token_live_hourly_odds_20260703T095031Z.parquet \
   --out output/wc2026
 ```
@@ -71,7 +71,7 @@ minutes.
   `resolved_at`. When provided, the build writes `evaluation.parquet` and
   `reports/evaluation.md`.
 - `--taxonomy path.json`: event taxonomy for stage progression and
-  single-winner families. Defaults to `oddsgraph/taxonomies/wc2026.json`.
+  single-winner families. Defaults to `oddsfox_graph/taxonomies/wc2026.json`.
 
 ## Live-Current Eligibility
 
