@@ -4,6 +4,17 @@ The default build remains the compatibility contract. It writes the full current
 artifact set and keeps historical statistics full-history unless a mode says
 otherwise.
 
+## Source Parquet
+
+Generate the odds parquet with
+[hypertrial/oddsfox](https://github.com/hypertrial/oddsfox). Follow its
+[quickstart](https://github.com/hypertrial/oddsfox/blob/main/docs/quickstart.md),
+then run `scripts/export_selected_minutely_odds.py` to export
+`polymarket_marts.selected_token_minutely_odds`.
+
+The exported file should match the schema documented in
+[`wc2026_token_minutely_odds_20260702T070755Z.md`](../wc2026_token_minutely_odds_20260702T070755Z.md).
+
 ## Full Build
 
 ```bash

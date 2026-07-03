@@ -20,6 +20,17 @@ The local WC2026 parquet is a large sample, about 621 MB. It is useful for
 reproducing the project results, but generated outputs and large datasets should
 stay outside source control.
 
+## Get The Parquet
+
+Use [hypertrial/oddsfox](https://github.com/hypertrial/oddsfox) to build and
+export the source data. OddsFox documents the local pipeline in its
+[quickstart](https://github.com/hypertrial/oddsfox/blob/main/docs/quickstart.md)
+and exports `polymarket_marts.selected_token_minutely_odds` with
+`scripts/export_selected_minutely_odds.py`.
+
+The exported parquet should match the schema in
+[wc2026_token_minutely_odds_20260702T070755Z.md](wc2026_token_minutely_odds_20260702T070755Z.md).
+
 ## Setup
 
 From the repo root:
