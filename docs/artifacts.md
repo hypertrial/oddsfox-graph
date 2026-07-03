@@ -14,6 +14,14 @@ provided.
 Build-mode behavior is documented in [Build Modes](builds.md). Pipeline behavior
 is documented in [Architecture](architecture.md).
 
+Several column names keep legacy minute wording for schema compatibility.
+For hourly input, `active_minutes`, `overlap_minutes`,
+`trailing_breach_minutes`, `trailing_window_minutes`, and `price_return_1m`
+mean source price buckets and adjacent-bucket returns rather than literal
+minutes. `build_manifest.json` records `input_format`,
+`input_granularity_seconds`, and `threshold_bucket_counts` so consumers can
+interpret those fields correctly.
+
 ## Parquet Artifacts
 
 ### `nodes.parquet`
@@ -31,9 +39,11 @@ Columns: `node_id`, `market_id`, `outcome_index`, `clob_token_id`, `question`,
 
 ### `prices.parquet`
 
-Grain: one row per `(node_id, odds_minute_epoch)` after deduplication.
+Grain: one row per `(node_id, odds_minute_epoch)` after deduplication. For
+hourly input, `odds_minute_epoch` stores the source hour epoch for
+compatibility.
 
-Purpose: minute-level price series with devig and scoring prices.
+Purpose: price-bucket series with devig and scoring prices.
 
 Columns: `node_id`, `market_id`, `odds_timestamp`, `odds_timestamp_epoch`,
 `price`, `price_devig`, `scoring_price`, `is_active`, `is_closed`,

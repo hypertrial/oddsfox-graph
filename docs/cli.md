@@ -6,7 +6,7 @@ Run commands from the repo root with `python -m oddsgraph.cli ...`.
 
 ### `build`
 
-Builds an output directory from token-minute odds parquet.
+Builds an output directory from token-hour odds parquet.
 
 Required flags:
 
@@ -34,13 +34,13 @@ Examples:
 
 ```bash
 python -m oddsgraph.cli build \
-  --input wc2026_token_minutely_odds_20260702T070755Z.parquet \
+  --input selected_token_hourly_odds_20260703T095031Z.parquet \
   --out output/wc2026
 ```
 
 ```bash
 python -m oddsgraph.cli build \
-  --input wc2026_token_minutely_odds_20260702T070755Z.parquet \
+  --input selected_token_hourly_odds_20260703T095031Z.parquet \
   --out output/wc2026-fast-graph \
   --fast-graph \
   --graph-lookback-days 30
@@ -72,7 +72,7 @@ Flags:
 
 ```bash
 python -m oddsgraph.cli benchmark-compare \
-  --input wc2026_token_minutely_odds_20260702T070755Z.parquet \
+  --input selected_token_hourly_odds_20260703T095031Z.parquet \
   --out-root output/benchmark_compare \
   --graph-lookback-days 30
 ```

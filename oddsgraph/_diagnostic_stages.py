@@ -7,6 +7,7 @@ from . import thresholds as T
 from .artifacts import artifact_projection
 from .contracts import validate_relation_columns
 from .queries import DuckDB, q
+from .thresholds import ThresholdBucketCounts
 
 
 def write_constraints(db: DuckDB, out_dir: Path) -> None:
@@ -207,7 +208,12 @@ def write_conditionals(db: DuckDB, out_dir: Path) -> None:
     )
 
 
-def write_violations(db: DuckDB, out_dir: Path, effective: Any) -> None:
+def write_violations(
+    db: DuckDB,
+    out_dir: Path,
+    effective: Any,
+    threshold_bucket_counts: ThresholdBucketCounts,
+) -> None:
     comp_current = effective.complement_current_gap_violation_min
     comp_mean = effective.complement_mean_gap_violation_min
     eq_current = effective.equivalence_current_abs_diff_max
@@ -241,7 +247,7 @@ def write_violations(db: DuckDB, out_dir: Path, effective: Any) -> None:
                 AND pers.dst_node_id = c.dst_node_id
                 AND pers.candidate_type = c.candidate_type
             WHERE c.candidate_type = 'complement'
-                AND pers.trailing_breach_minutes >= {T.VIOLATION_MIN_PERSISTENCE_MINUTES}
+                AND pers.trailing_breach_minutes >= {threshold_bucket_counts.violation_persistence_buckets}
                 AND (
                     abs(p.current_p_src + p.current_p_dst - 1) >= greatest(
                         {comp_current}, {T.K_SIGMA} * coalesce(s.pair_noise_floor, 0.01))
@@ -281,7 +287,7 @@ def write_violations(db: DuckDB, out_dir: Path, effective: Any) -> None:
                     WHEN 'mutually_exclusive' THEN 'mutual_exclusion'
                     ELSE 'complement'
                 END
-            WHERE pers.trailing_breach_minutes >= {T.VIOLATION_MIN_PERSISTENCE_MINUTES}
+            WHERE pers.trailing_breach_minutes >= {threshold_bucket_counts.violation_persistence_buckets}
                 AND (
                     (e.edge_type = 'equivalent' AND abs(e.current_p_src - e.current_p_dst) > {eq_current})
                     OR (e.edge_type = 'implies' AND e.current_p_src > e.current_p_dst + {imp_slack})

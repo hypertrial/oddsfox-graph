@@ -22,6 +22,11 @@
       "rank": 1
     }
   ],
+  "stage_subject_aliases": {
+    "Bosnia-Herzegovina": "Bosnia and Herzegovina",
+    "Congo DR": "DR Congo",
+    "Curaçao": "Curacao"
+  },
   "single_winner_slugs": [
     "world-cup-winner",
     "world-cup-golden-boot-winner",

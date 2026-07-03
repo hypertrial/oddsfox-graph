@@ -6,7 +6,7 @@ from typing import Any
 import pytest
 
 from oddsgraph.queries import DuckDB, q
-from oddsgraph.schema import validate_input
+from oddsgraph.schema import detect_input_format, validate_input
 from oddsgraph.sql import sql_literal
 
 
@@ -25,6 +25,73 @@ def test_schema_rejects_missing_columns(tmp_path: Path) -> None:
             validate_input(db, path)
     finally:
         db.close()
+
+
+def test_schema_detects_minutely_input(tmp_path: Path) -> None:
+    path = tmp_path / "minutely.parquet"
+    _write_input(path, BASE_ROWS)
+    db = DuckDB(tmp_path / "minutely.duckdb")
+    try:
+        input_format = detect_input_format(db, path)
+        assert input_format.name == "minutely"
+        assert input_format.granularity_seconds == 60
+    finally:
+        db.close()
+
+
+def test_schema_accepts_hourly_input(tmp_path: Path) -> None:
+    path = tmp_path / "hourly.parquet"
+    db = DuckDB(tmp_path / "hourly.duckdb")
+    try:
+        db.execute(f"""
+            COPY (
+                SELECT
+                    market_id,
+                    outcome_index,
+                    clob_token_id,
+                    question,
+                    outcome_label,
+                    event_slug,
+                    is_active,
+                    is_closed,
+                    market_volume_usd,
+                    to_timestamp(3600) AS odds_hour_utc,
+                    3600::BIGINT AS odds_hour_epoch,
+                    price AS open_price,
+                    price AS high_price,
+                    price AS low_price,
+                    price AS close_price,
+                    price AS avg_price,
+                    1::BIGINT AS observed_points,
+                    3600::BIGINT AS first_timestamp,
+                    to_timestamp(3600) AS first_observed_at,
+                    3600::BIGINT AS last_timestamp,
+                    to_timestamp(3600) AS last_observed_at
+                FROM (
+                    VALUES
+                        ('m1', 0, 'm1:Yes', 'Will M1 pass?', 'Yes', 'event-1', true, false, 1.0, 0.4),
+                        ('m1', 1, 'm1:No', 'Will M1 pass?', 'No', 'event-1', true, false, 1.0, 0.6)
+                ) AS rows(
+                    market_id,
+                    outcome_index,
+                    clob_token_id,
+                    question,
+                    outcome_label,
+                    event_slug,
+                    is_active,
+                    is_closed,
+                    market_volume_usd,
+                    price
+                )
+            ) TO '{q(path)}' (FORMAT PARQUET)
+        """)
+        input_format = detect_input_format(db, path)
+        assert input_format.name == "hourly"
+        assert input_format.granularity_seconds == 3600
+        validate_input(db, path)
+    finally:
+        db.close()
+
 
 @pytest.mark.parametrize(
     ("rows", "message"),

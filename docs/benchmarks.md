@@ -10,13 +10,13 @@ Use a fresh ignored output directory for each run:
 
 ```bash
 python -m oddsgraph.cli build \
-  --input wc2026_token_minutely_odds_20260702T070755Z.parquet \
+  --input selected_token_hourly_odds_20260703T095031Z.parquet \
   --out output/perf_full
 ```
 
 ```bash
 python -m oddsgraph.cli build \
-  --input wc2026_token_minutely_odds_20260702T070755Z.parquet \
+  --input selected_token_hourly_odds_20260703T095031Z.parquet \
   --out output/perf_fast_graph \
   --fast-graph \
   --graph-lookback-days 30
@@ -32,7 +32,7 @@ Run a paired full/fast graph comparison:
 
 ```bash
 python -m oddsgraph.cli benchmark-compare \
-  --input wc2026_token_minutely_odds_20260702T070755Z.parquet \
+  --input selected_token_hourly_odds_20260703T095031Z.parquet \
   --out-root output/debt_pr_benchmark \
   --graph-lookback-days 30
 ```
@@ -54,40 +54,52 @@ Record:
 ## Latest Local WC2026 Results
 
 Source:
-`wc2026_token_minutely_odds_20260702T070755Z.parquet`, 53,827,798 input rows.
+`selected_token_hourly_odds_20260703T095031Z.parquet`, 1,094,140 input rows.
 
-Date: July 2 2026. Commit context: post fast-graph performance PR.
+Date: July 3 2026. Commit context: local working tree with duration-scaled
+hourly thresholds and WC2026 stage aliases.
 
 | mode | output dir | runtime | size | candidates | logic | price | violations | history mode |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
-| full | `output/perf_after_full_final3` | 444.189s | 3.2G | 16,684 | 7,842 | 5,325 | 9 | `full` |
-| fast graph, 30 days | `output/perf_after_fast_graph_final` | 111.717s | 917M | 15,118 | 7,842 | 5,325 | 0 | `fast_graph_lookback` |
+| full | `output/hourly_pr_full` | 9.069s | 108M | 29,937 | 7,375 | 12,785 | 7 | `full` |
+| fast graph, 30 days | `output/hourly_pr_fast` | 5.807s | 52M | 29,478 | 7,375 | 12,785 | 0 | `fast_graph_lookback` |
+
+The manifest recorded `input_format = "hourly"`,
+`input_granularity_seconds = 3600`, and duration-scaled thresholds:
+`active_buckets = 17`, `overlap_buckets = 17`,
+`complement_low_overlap_buckets = 1`, `violation_persistence_buckets = 1`, and
+`persistence_lookback_buckets = 3`.
+
+Compared with the first hourly migration run, price-only edges increased from
+`0` to `12,785`. The earlier run interpreted the 1000-minute overlap threshold
+as 1000 hourly buckets; this run converts the same duration intent to 17 hourly
+buckets.
 
 Top full-build stages:
 
 | stage | seconds |
 | --- | ---: |
-| `create_views` | 317.752 |
-| `token_minute_prices` | 206.043 |
-| `enriched_minute_prices` | 76.067 |
-| `score_edges` | 39.754 |
-| `write_prices` | 34.206 |
-| `market_completeness` | 26.490 |
-| `create_input_prices` | 20.319 |
-| `scoring_minute_prices` | 16.179 |
+| `create_views` | 3.471 |
+| `score_edges` | 1.915 |
+| `enriched_minute_prices` | 1.844 |
+| `token_minute_prices` | 1.182 |
+| `write_reports` | 0.931 |
+| `apply_calibration_confidence` | 0.848 |
+| `write_candidates` | 0.678 |
+| `scoring_minute_prices` | 0.659 |
 
 Top fast-graph stages:
 
 | stage | seconds |
 | --- | ---: |
-| `create_views` | 40.824 |
-| `score_edges` | 33.756 |
-| `create_input_prices` | 20.241 |
-| `token_minute_prices` | 20.136 |
-| `enriched_minute_prices` | 16.050 |
-| `aligned_edges` | 14.180 |
-| `scoring_minute_prices` | 12.540 |
-| `validate_input` | 12.274 |
+| `score_edges` | 1.853 |
+| `create_views` | 1.364 |
+| `write_reports` | 0.925 |
+| `apply_calibration_confidence` | 0.889 |
+| `write_candidates` | 0.669 |
+| `aligned_edges` | 0.606 |
+| `scoring_minute_prices` | 0.596 |
+| `enriched_minute_prices` | 0.512 |
 
 ## Historical Baselines
 
@@ -95,10 +107,14 @@ Top fast-graph stages:
 - Earlier full-build benchmark: 363.454s.
 - Previous graph-inspection workflow with `--skip-prices --skip-coherence`:
   332.928s.
+- Last minutely full result before the hourly input switch:
+  `wc2026_token_minutely_odds_20260702T070755Z.parquet` with 53,827,798 input
+  rows, 444.189s full runtime, and 111.717s fast-graph runtime.
 
-The post fast-graph full run did not beat the active 401.205s gate. The main
-regressions were full-history token-minute dedupe at 206.043s versus a 154.391s
-baseline and `prices.parquet` export at 34.206s versus a 22.278s baseline.
+In that last minutely run, the post fast-graph full build did not beat the
+active 401.205s gate. The main regressions were full-history token-minute
+dedupe at 206.043s versus a 154.391s baseline and `prices.parquet` export at
+34.206s versus a 22.278s baseline.
 
 ## Accepted And Rejected Optimizations
 

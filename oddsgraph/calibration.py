@@ -10,6 +10,7 @@ from .artifacts import ARTIFACT_COLUMNS, ARTIFACT_EMPTY_TYPES, artifact_projecti
 from .contracts import SCORED_EDGES_COLUMNS, validate_relation_columns
 from .queries import DuckDB, q
 from .sql import create_table_from_rows_sql
+from .thresholds import ThresholdBucketCounts
 
 
 @dataclass(frozen=True)
@@ -143,7 +144,11 @@ def fit_calibration(db: DuckDB, out_dir: Path) -> tuple[list[dict[str, Any]], Ef
     return calibration_rows, effective
 
 
-def apply_calibration_confidence(db: DuckDB, effective: EffectiveThresholds) -> None:
+def apply_calibration_confidence(
+    db: DuckDB,
+    effective: EffectiveThresholds,
+    threshold_bucket_counts: ThresholdBucketCounts,
+) -> None:
     db.execute(f"""
         DROP TABLE IF EXISTS scored_edges_recalibrated;
 
@@ -193,7 +198,7 @@ def apply_calibration_confidence(db: DuckDB, effective: EffectiveThresholds) -> 
             scored.edge_basis,
             CASE
                 WHEN scored.candidate_type = 'complement'
-                    AND scored.overlap_minutes < {T.COMPLEMENT_LOW_OVERLAP_MINUTES}
+                    AND scored.overlap_minutes < {threshold_bucket_counts.complement_low_overlap_buckets}
                     THEN 0.5
                 WHEN scored.observed_error IS NULL THEN 0.1
                 WHEN sample_count.n < {T.MIN_CALIBRATION_SAMPLES}
@@ -223,7 +228,7 @@ def apply_calibration_confidence(db: DuckDB, effective: EffectiveThresholds) -> 
         ALTER TABLE scored_edges_recalibrated RENAME TO scored_edges_v;
     """)
     validate_relation_columns(db, "scored_edges_v", SCORED_EDGES_COLUMNS)
-    _rebuild_edge_tables(db, effective)
+    _rebuild_edge_tables(db, effective, threshold_bucket_counts)
 
 
 def thresholds_as_dict(effective: EffectiveThresholds) -> dict[str, float]:
@@ -235,7 +240,11 @@ def _empirical_confidence(sorted_errors: list[float], observed: float) -> float:
     return 1.0 - ge / len(sorted_errors)
 
 
-def _rebuild_edge_tables(db: DuckDB, effective: EffectiveThresholds) -> None:
+def _rebuild_edge_tables(
+    db: DuckDB,
+    effective: EffectiveThresholds,
+    threshold_bucket_counts: ThresholdBucketCounts,
+) -> None:
     db.execute(f"""
         CREATE OR REPLACE TABLE logic_edges_v AS
         SELECT
@@ -257,19 +266,19 @@ def _rebuild_edge_tables(db: DuckDB, effective: EffectiveThresholds) -> None:
             AND (
                 (
                     s.edge_type = 'equivalent'
-                    AND s.overlap_minutes >= {T.MIN_OVERLAP_MINUTES}
+                    AND s.overlap_minutes >= {threshold_bucket_counts.overlap_buckets}
                     AND s.score <= {effective.equivalence_mean_abs_diff_max} + {EDGE_THRESHOLD_EPSILON}
                     AND abs(s.current_p_src - s.current_p_dst) <= {effective.equivalence_current_abs_diff_max} + {EDGE_THRESHOLD_EPSILON}
                 )
                 OR (
                     s.edge_type = 'implies'
-                    AND s.overlap_minutes >= {T.MIN_OVERLAP_MINUTES}
+                    AND s.overlap_minutes >= {threshold_bucket_counts.overlap_buckets}
                     AND s.violation_score <= {effective.implication_violation_mean_max} + {EDGE_THRESHOLD_EPSILON}
                     AND s.current_p_src <= s.current_p_dst + {effective.implication_current_slack} + {EDGE_THRESHOLD_EPSILON}
                 )
                 OR (
                     s.edge_type = 'mutually_exclusive'
-                    AND s.overlap_minutes >= {T.MIN_OVERLAP_MINUTES}
+                    AND s.overlap_minutes >= {threshold_bucket_counts.overlap_buckets}
                     AND s.violation_score <= {effective.exclusion_violation_mean_max} + {EDGE_THRESHOLD_EPSILON}
                     AND s.current_p_src + s.current_p_dst <= {effective.exclusion_current_sum_max} + {EDGE_THRESHOLD_EPSILON}
                 )

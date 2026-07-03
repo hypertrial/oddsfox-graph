@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 
 from .queries import DuckDB, q
 
 
-REQUIRED_COLUMNS = {
+COMMON_COLUMNS = {
     "market_id",
     "outcome_index",
     "clob_token_id",
@@ -15,10 +16,23 @@ REQUIRED_COLUMNS = {
     "is_active",
     "is_closed",
     "market_volume_usd",
-    "ODDS_TIMESTAMP",
-    "ODDS_TIMESTAMP_EPOCH",
+}
+
+MINUTELY_REQUIRED_COLUMNS = {
+    *COMMON_COLUMNS,
+    "odds_timestamp",
+    "odds_timestamp_epoch",
     "price",
 }
+
+HOURLY_REQUIRED_COLUMNS = {
+    *COMMON_COLUMNS,
+    "odds_hour_utc",
+    "odds_hour_epoch",
+    "close_price",
+}
+
+REQUIRED_COLUMNS = MINUTELY_REQUIRED_COLUMNS
 
 TABLE_REQUIRED_COLUMNS = {
     "market_id",
@@ -36,10 +50,63 @@ TABLE_REQUIRED_COLUMNS = {
 }
 
 
+@dataclass(frozen=True)
+class InputFormat:
+    name: str
+    required_columns: frozenset[str]
+    source_timestamp_column: str
+    source_epoch_column: str
+    source_price_column: str
+    granularity_seconds: int
+
+    @property
+    def minute_epoch_sql(self) -> str:
+        if self.granularity_seconds == 60:
+            return f"CAST(floor({self.source_epoch_column} / 60) * 60 AS BIGINT)"
+        return f"{self.source_epoch_column}::BIGINT"
+
+
+MINUTELY_INPUT = InputFormat(
+    name="minutely",
+    required_columns=frozenset(MINUTELY_REQUIRED_COLUMNS),
+    source_timestamp_column="odds_timestamp",
+    source_epoch_column="odds_timestamp_epoch",
+    source_price_column="price",
+    granularity_seconds=60,
+)
+
+HOURLY_INPUT = InputFormat(
+    name="hourly",
+    required_columns=frozenset(HOURLY_REQUIRED_COLUMNS),
+    source_timestamp_column="odds_hour_utc",
+    source_epoch_column="odds_hour_epoch",
+    source_price_column="close_price",
+    granularity_seconds=3600,
+)
+
+INPUT_FORMATS = (MINUTELY_INPUT, HOURLY_INPUT)
+
+
 def validate_input(db: DuckDB, path: Path) -> None:
-    validate_input_schema(db, path)
+    input_format = validate_input_schema(db, path)
+    create_input_prices(db, path, table="input_prices_validation", input_format=input_format)
+    validate_input_table(db, "input_prices_validation")
+
+
+def validate_input_schema(db: DuckDB, path: Path) -> InputFormat:
+    return detect_input_format(db, path)
+
+
+def create_input_prices(
+    db: DuckDB,
+    path: Path,
+    *,
+    table: str = "input_prices",
+    input_format: InputFormat | None = None,
+) -> InputFormat:
+    input_format = input_format or detect_input_format(db, path)
     db.execute(f"""
-        CREATE OR REPLACE TEMP VIEW input_prices_validation AS
+        CREATE OR REPLACE TEMP TABLE {table} AS
         SELECT
             market_id,
             outcome_index,
@@ -50,21 +117,33 @@ def validate_input(db: DuckDB, path: Path) -> None:
             is_active,
             is_closed,
             market_volume_usd,
-            ODDS_TIMESTAMP AS odds_timestamp,
-            ODDS_TIMESTAMP_EPOCH AS odds_timestamp_epoch,
-            CAST(floor(ODDS_TIMESTAMP_EPOCH / 60) * 60 AS BIGINT) AS odds_minute_epoch,
-            price
+            {input_format.source_timestamp_column} AS odds_timestamp,
+            {input_format.source_epoch_column}::BIGINT AS odds_timestamp_epoch,
+            {input_format.minute_epoch_sql} AS odds_minute_epoch,
+            {input_format.source_price_column} AS price
         FROM read_parquet('{q(path)}');
     """)
-    validate_input_table(db, "input_prices_validation")
+    return input_format
 
 
-def validate_input_schema(db: DuckDB, path: Path) -> None:
+def detect_input_format(db: DuckDB, path: Path) -> InputFormat:
+    found = _schema_columns(db, path)
+    for input_format in INPUT_FORMATS:
+        if input_format.required_columns <= found:
+            return input_format
+
+    minutely_missing = sorted(MINUTELY_REQUIRED_COLUMNS - found)
+    hourly_missing = sorted(HOURLY_REQUIRED_COLUMNS - found)
+    raise ValueError(
+        "Input parquet missing required columns for supported formats: "
+        f"minutely missing {', '.join(minutely_missing)}; "
+        f"hourly missing {', '.join(hourly_missing)}"
+    )
+
+
+def _schema_columns(db: DuckDB, path: Path) -> set[str]:
     rows = db.rows(f"SELECT name FROM parquet_schema('{q(path)}') WHERE name != 'duckdb_schema'")
-    found = {row["name"] for row in rows}
-    missing = sorted(REQUIRED_COLUMNS - found)
-    if missing:
-        raise ValueError("Input parquet missing required columns: " + ", ".join(missing))
+    return {str(row["name"]).lower() for row in rows}
 
 
 def validate_input_table(db: DuckDB, table: str = "input_prices") -> None:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from . import thresholds as T
+from .thresholds import ThresholdBucketCounts
 
 
 def ew_lambda_sql() -> str:
@@ -198,9 +199,10 @@ def create_aligned_edges_sql() -> str:
     """
 
 
-def create_pair_persistence_sql() -> str:
+def create_pair_persistence_sql(threshold_bucket_counts: ThresholdBucketCounts) -> str:
     _, raw_gap = _gap_exprs()
-    lookback_seconds = T.PERSISTENCE_LOOKBACK_MINUTES * 60
+    lookback_seconds = threshold_bucket_counts.persistence_lookback_seconds
+    persistence_buckets = threshold_bucket_counts.violation_persistence_buckets
     return f"""
         CREATE TABLE pair_persistence AS
         WITH pairs AS (
@@ -266,22 +268,22 @@ def create_pair_persistence_sql() -> str:
                 dst_node_id,
                 candidate_type,
                 count(*) FILTER (
-                    WHERE in_breach AND rn_desc <= {T.VIOLATION_MIN_PERSISTENCE_MINUTES}
+                    WHERE in_breach AND rn_desc <= {persistence_buckets}
                 ) AS trailing_breach_minutes,
                 min(odds_timestamp) FILTER (
-                    WHERE in_breach AND rn_desc <= {T.VIOLATION_MIN_PERSISTENCE_MINUTES}
+                    WHERE in_breach AND rn_desc <= {persistence_buckets}
                 ) AS first_seen_ts,
                 max(odds_timestamp) FILTER (
-                    WHERE in_breach AND rn_desc <= {T.VIOLATION_MIN_PERSISTENCE_MINUTES}
+                    WHERE in_breach AND rn_desc <= {persistence_buckets}
                 ) AS last_seen_ts,
-                count(*) FILTER (WHERE rn_desc <= {T.VIOLATION_MIN_PERSISTENCE_MINUTES}) AS trailing_window_minutes,
+                count(*) FILTER (WHERE rn_desc <= {persistence_buckets}) AS trailing_window_minutes,
                 count(*) FILTER (
-                    WHERE in_breach AND rn_desc <= {T.VIOLATION_MIN_PERSISTENCE_MINUTES}
+                    WHERE in_breach AND rn_desc <= {persistence_buckets}
                 )::DOUBLE / greatest(
-                    count(*) FILTER (WHERE rn_desc <= {T.VIOLATION_MIN_PERSISTENCE_MINUTES}), 1
+                    count(*) FILTER (WHERE rn_desc <= {persistence_buckets}), 1
                 ) AS breach_fraction_recent
             FROM ordered
-            WHERE rn_desc <= {T.VIOLATION_MIN_PERSISTENCE_MINUTES}
+            WHERE rn_desc <= {persistence_buckets}
             GROUP BY 1, 2, 3
         )
         SELECT * FROM trail_stats;

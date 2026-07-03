@@ -50,9 +50,12 @@ def test_manifest_shape_is_documented() -> None:
     builds_doc = (DOCS / "builds.md").read_text(encoding="utf-8")
     manifest_keys = {
         "input",
+        "input_format",
+        "input_granularity_seconds",
         "quotes",
         "resolutions",
         "taxonomy",
+        "threshold_bucket_counts",
         "effective_thresholds",
         "lp_warnings",
         "build_options",

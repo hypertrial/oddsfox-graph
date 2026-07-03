@@ -18,8 +18,16 @@ from .contracts import validate_relation_columns
 from .evaluate import run_evaluation
 from .queries import DuckDB, q
 from .reports import write_reports
-from .rules import Taxonomy, load_taxonomy, single_winner_pattern_sql, single_winner_values_sql, stage_rules_values_sql
-from .schema import validate_input_schema, validate_input_table
+from .rules import (
+    Taxonomy,
+    load_taxonomy,
+    single_winner_pattern_sql,
+    single_winner_values_sql,
+    stage_rules_values_sql,
+    stage_subject_alias_values_sql,
+)
+from .schema import InputFormat, create_input_prices, validate_input_schema, validate_input_table
+from .thresholds import ThresholdBucketCounts, bucket_counts, bucket_counts_as_dict
 
 
 def _stage(
@@ -67,8 +75,9 @@ def build(
         return _stage(name, fn, stage_timings)
 
     try:
-        stage("validate_input_schema", lambda: validate_input_schema(db, input_path))
-        stage("create_input_prices", lambda: _create_input_prices(db, input_path))
+        input_format = stage("validate_input_schema", lambda: validate_input_schema(db, input_path))
+        threshold_bucket_counts = bucket_counts(input_format.granularity_seconds)
+        stage("create_input_prices", lambda: _create_input_prices(db, input_path, input_format))
         stage("validate_input", lambda: validate_input_table(db))
         stage(
             "create_views",
@@ -85,7 +94,7 @@ def build(
             stage("write_prices", lambda: _write_prices(db, out_dir))
         stage("write_nodes", lambda: _write_nodes(db, out_dir))
         stage("write_market_groups", lambda: _write_market_groups(db, out_dir))
-        stage("write_candidates", lambda: write_candidates(db, out_dir))
+        stage("write_candidates", lambda: write_candidates(db, out_dir, threshold_bucket_counts))
         stage(
             "score_edges",
             lambda: score_edges(
@@ -93,12 +102,16 @@ def build(
                 out_dir,
                 stage,
                 lookback_days=graph_lookback_days if fast_graph else None,
+                threshold_bucket_counts=threshold_bucket_counts,
             ),
         )
         effective_thresholds = stage(
             "fit_calibration", lambda: fit_calibration(db, out_dir)
         )[1]
-        stage("apply_calibration_confidence", lambda: apply_calibration_confidence(db, effective_thresholds))
+        stage(
+            "apply_calibration_confidence",
+            lambda: apply_calibration_confidence(db, effective_thresholds, threshold_bucket_counts),
+        )
         stage("validate_final_edges", lambda: _validate_final_edge_invariants(db))
         stage("write_final_edges", lambda: _write_final_edges(db, out_dir))
         stage("compute_transitive_closure", lambda: compute_transitive_closure(db, out_dir))
@@ -108,7 +121,10 @@ def build(
             stage("create_empty_coherence_tables", lambda: create_empty_coherence_tables(db))
         stage("write_constraints", lambda: write_constraints(db, out_dir))
         stage("write_conditionals", lambda: write_conditionals(db, out_dir))
-        stage("write_violations", lambda: write_violations(db, out_dir, effective_thresholds))
+        stage(
+            "write_violations",
+            lambda: write_violations(db, out_dir, effective_thresholds, threshold_bucket_counts),
+        )
         if resolutions_path is not None:
             stage("run_evaluation", lambda: run_evaluation(db, out_dir, resolutions_path))
         stats = stage("stats", lambda: _stats(db, start, fast_graph=fast_graph))
@@ -137,6 +153,8 @@ def build(
             has_coherence=actual_solve_coherence,
             fast_graph=fast_graph,
             graph_lookback_days=graph_lookback_days,
+            input_format=input_format,
+            threshold_bucket_counts=threshold_bucket_counts,
             stage_timings=stage_timings,
         )
         return stats
@@ -170,10 +188,14 @@ def _write_manifest(
     has_coherence: bool,
     fast_graph: bool,
     graph_lookback_days: int,
+    input_format: InputFormat,
+    threshold_bucket_counts: ThresholdBucketCounts,
     stage_timings: dict[str, float],
 ) -> None:
     manifest = {
         "input": str(input_path),
+        "input_format": input_format.name,
+        "input_granularity_seconds": input_format.granularity_seconds,
         "quotes": str(quotes_path) if quotes_path else None,
         "resolutions": str(resolutions_path) if resolutions_path else None,
         "taxonomy": {
@@ -181,6 +203,7 @@ def _write_manifest(
             "path": str(taxonomy.source_path),
             "hash": taxonomy.content_hash,
         },
+        "threshold_bucket_counts": bucket_counts_as_dict(threshold_bucket_counts),
         "effective_thresholds": thresholds_as_dict(effective_thresholds) if effective_thresholds else None,
         "lp_warnings": lp_warnings,
         "build_options": {
@@ -260,28 +283,8 @@ def _validate_generated_artifacts(
             )
 
 
-def _create_input_prices(db: DuckDB, input_path: Path) -> None:
-    src = q(input_path)
-    db.execute(
-        f"""
-        CREATE TEMP TABLE input_prices AS
-        SELECT
-            market_id,
-            outcome_index,
-            clob_token_id,
-            question,
-            outcome_label,
-            event_slug,
-            is_active,
-            is_closed,
-            market_volume_usd,
-            ODDS_TIMESTAMP AS odds_timestamp,
-            ODDS_TIMESTAMP_EPOCH AS odds_timestamp_epoch,
-            CAST(floor(ODDS_TIMESTAMP_EPOCH / 60) * 60 AS BIGINT) AS odds_minute_epoch,
-            price
-        FROM read_parquet('{src}');
-        """
-    )
+def _create_input_prices(db: DuckDB, input_path: Path, input_format: InputFormat) -> None:
+    create_input_prices(db, input_path, input_format=input_format)
     validate_relation_columns(db, "input_prices")
 
 
@@ -441,6 +444,12 @@ def _create_semantic_tables(db: DuckDB, taxonomy: Taxonomy) -> None:
         FROM (VALUES
             {single_winner_values_sql(taxonomy)}
         ) AS t(event_slug);
+
+        CREATE TABLE semantic_stage_subject_aliases AS
+        SELECT *
+        FROM (VALUES
+            {stage_subject_alias_values_sql(taxonomy)}
+        ) AS t(alias_subject, canonical_subject);
         """
     )
 
@@ -547,7 +556,7 @@ def _create_nodes_view(db: DuckDB, taxonomy: Taxonomy) -> None:
     db.execute(
         f"""
         CREATE VIEW nodes_v AS
-        WITH stage_matches AS (
+        WITH raw_stage_matches AS (
             SELECT node_id, stage_subject, stage_rank
             FROM (
                 SELECT
@@ -560,6 +569,15 @@ def _create_nodes_view(db: DuckDB, taxonomy: Taxonomy) -> None:
                     ON regexp_extract(s.question, r.rule_pattern, 1) != ''
             )
             WHERE rn = 1
+        ),
+        stage_matches AS (
+            SELECT
+                m.node_id,
+                coalesce(a.canonical_subject, m.stage_subject) AS stage_subject,
+                m.stage_rank
+            FROM raw_stage_matches m
+            LEFT JOIN semantic_stage_subject_aliases a
+                ON a.alias_subject = m.stage_subject
         ),
         enriched AS (
             SELECT

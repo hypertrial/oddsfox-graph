@@ -6,6 +6,7 @@ import pytest
 
 from oddsgraph.calibration import _empirical_confidence, apply_calibration_confidence, default_thresholds
 from oddsgraph.queries import DuckDB
+from oddsgraph.thresholds import bucket_counts
 
 
 def test_empirical_confidence_counts_equal_errors_as_at_least_observed() -> None:
@@ -87,7 +88,7 @@ def test_sql_calibration_confidence_counts_equal_errors_as_at_least_observed(tmp
                 NULL::DOUBLE AS exclusion_violation_raw;
         """)
 
-        apply_calibration_confidence(db, default_thresholds())
+        apply_calibration_confidence(db, default_thresholds(), bucket_counts(60))
 
         confidence = float(db.scalar("SELECT confidence FROM scored_edges_v WHERE src_node_id = 'target_src'") or 0)
         assert confidence == pytest.approx(0.2)

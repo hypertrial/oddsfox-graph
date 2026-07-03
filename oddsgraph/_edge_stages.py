@@ -9,11 +9,16 @@ from . import thresholds as T
 from .artifacts import artifact_projection
 from .contracts import SCORED_EDGES_RAW_COLUMNS, validate_relation_columns
 from .queries import DuckDB, q
+from .thresholds import ThresholdBucketCounts
 
 T_ = TypeVar("T_")
 
 
-def write_candidates(db: DuckDB, out_dir: Path) -> None:
+def write_candidates(
+    db: DuckDB,
+    out_dir: Path,
+    threshold_bucket_counts: ThresholdBucketCounts,
+) -> None:
     db.execute(
         f"""
         CREATE TABLE candidate_edges_v AS
@@ -55,7 +60,7 @@ def write_candidates(db: DuckDB, out_dir: Path) -> None:
             SELECT *
             FROM nodes_v
             WHERE market_volume_usd >= {T.MIN_MARKET_VOLUME_USD}
-                AND active_minutes >= {T.MIN_ACTIVE_MINUTES}
+                AND active_minutes >= {threshold_bucket_counts.active_buckets}
                 AND outcome_label = 'Yes'
         ),
         exact_duplicates AS (
@@ -187,6 +192,7 @@ def score_edges(
     stage: Callable[[str, Callable[[], T_]], T_],
     *,
     lookback_days: int | None = None,
+    threshold_bucket_counts: ThresholdBucketCounts,
 ) -> None:
     del out_dir
     def create_scoring_minute_prices() -> None:
@@ -198,7 +204,7 @@ def score_edges(
         validate_relation_columns(db, "aligned_edges")
 
     def create_pair_persistence() -> None:
-        db.execute(noise.create_pair_persistence_sql())
+        db.execute(noise.create_pair_persistence_sql(threshold_bucket_counts))
         validate_relation_columns(db, "pair_persistence")
 
     stage("  scoring_minute_prices", create_scoring_minute_prices)
@@ -240,7 +246,9 @@ def score_edges(
                 ELSE 'price_only'
             END AS edge_basis,
             CASE
-                WHEN c.candidate_type = 'complement' AND s.overlap_minutes < {T.COMPLEMENT_LOW_OVERLAP_MINUTES} THEN 0.5
+                WHEN c.candidate_type = 'complement'
+                    AND s.overlap_minutes < {threshold_bucket_counts.complement_low_overlap_buckets}
+                    THEN 0.5
                 WHEN c.candidate_type = 'complement' THEN coalesce(greatest(0, 1 - 20 * s.complement_error), 0.5)
                 WHEN c.candidate_type = 'equivalence' THEN coalesce(greatest(0, 1 - 20 * s.equivalence_error), 0.5)
                 WHEN c.candidate_type = 'implication' THEN coalesce(greatest(0, 1 - 50 * s.implication_violation), 0.5)
@@ -294,57 +302,7 @@ def score_edges(
         FROM candidate_edges_v c
         JOIN aligned_edges s USING (src_node_id, dst_node_id, candidate_type)
         JOIN current_pair_prices p USING (src_node_id, dst_node_id);
-
-        CREATE TABLE logic_edges_v AS
-        SELECT
-            src_node_id, dst_node_id, edge_type, edge_basis, confidence, score,
-            violation_score, overlap_minutes, current_p_src, current_p_dst, mean_p_src,
-            mean_p_dst, market_id_src, market_id_dst, event_slug_src, event_slug_dst, evidence
-        FROM scored_edges_v
-        WHERE edge_basis IN (
-            'same_market',
-            'exact_duplicate',
-            'single_winner_family',
-            'stage_progression_rule'
-        );
-
-        CREATE TABLE price_edges_v AS
-        SELECT
-            src_node_id, dst_node_id, edge_type, edge_basis, confidence, score,
-            violation_score, overlap_minutes, current_p_src, current_p_dst, mean_p_src,
-            mean_p_dst, market_id_src, market_id_dst, event_slug_src, event_slug_dst, evidence
-        FROM scored_edges_v s
-        WHERE s.edge_basis = 'price_only'
-            AND (
-                (
-                    s.edge_type = 'equivalent'
-                    AND s.overlap_minutes >= {T.MIN_OVERLAP_MINUTES}
-                    AND s.score <= {T.EQUIVALENCE_MEAN_ABS_DIFF_MAX}
-                    AND abs(s.current_p_src - s.current_p_dst) <= {T.EQUIVALENCE_CURRENT_ABS_DIFF_MAX}
-                )
-                OR (
-                    s.edge_type = 'implies'
-                    AND s.overlap_minutes >= {T.MIN_OVERLAP_MINUTES}
-                    AND s.violation_score <= {T.IMPLICATION_VIOLATION_MEAN_MAX}
-                    AND s.current_p_src <= s.current_p_dst + {T.IMPLICATION_CURRENT_SLACK}
-                )
-                OR (
-                    s.edge_type = 'mutually_exclusive'
-                    AND s.overlap_minutes >= {T.MIN_OVERLAP_MINUTES}
-                    AND s.violation_score <= {T.EXCLUSION_VIOLATION_MEAN_MAX}
-                    AND s.current_p_src + s.current_p_dst <= {T.EXCLUSION_CURRENT_SUM_MAX}
-                )
-            )
-            AND NOT EXISTS (
-                SELECT 1
-                FROM logic_edges_v l
-                WHERE l.src_node_id = s.src_node_id
-                    AND l.dst_node_id = s.dst_node_id
-                    AND l.edge_type = s.edge_type
-            );
         """
     )
     validate_relation_columns(db, "current_pair_prices")
     validate_relation_columns(db, "scored_edges_v", SCORED_EDGES_RAW_COLUMNS)
-    validate_relation_columns(db, "logic_edges_v")
-    validate_relation_columns(db, "price_edges_v")

@@ -9,23 +9,53 @@ otherwise.
 Generate the odds parquet with
 [hypertrial/oddsfox](https://github.com/hypertrial/oddsfox). Follow its
 [quickstart](https://github.com/hypertrial/oddsfox/blob/main/docs/quickstart.md),
-then run `scripts/export_selected_minutely_odds.py` to export
-`polymarket_marts.selected_token_minutely_odds`.
+then export `polymarket_marts.selected_token_hourly_odds` as parquet.
 
 The exported file should match the schema documented in
-[`wc2026_token_minutely_odds_20260702T070755Z.md`](../wc2026_token_minutely_odds_20260702T070755Z.md).
+[`selected_token_hourly_odds_20260703T095031Z.md`](../selected_token_hourly_odds_20260703T095031Z.md).
+Legacy minutely parquet with `odds_timestamp`, `odds_timestamp_epoch`, and
+`price` is still supported for compatibility.
 
 ## Full Build
 
 ```bash
 python -m oddsgraph.cli build \
-  --input wc2026_token_minutely_odds_20260702T070755Z.parquet \
+  --input selected_token_hourly_odds_20260703T095031Z.parquet \
   --out output/wc2026
 ```
 
 Full builds write all default parquet artifacts, all default reports, and
-`build_manifest.json`. They materialize the full deduplicated minute history for
+`build_manifest.json`. They materialize the full deduplicated price history for
 `prices.parquet` and historical node and market statistics.
+
+## Input Granularity And Thresholds
+
+The build detects whether the source parquet is `minutely` or `hourly` and
+normalizes both into the same internal `input_prices` shape. The manifest
+records the detected `input_format` and `input_granularity_seconds`.
+
+Threshold constants are duration intent, not literal row counts. The build
+converts them to bucket counts from the detected granularity and records the
+effective values in `threshold_bucket_counts`:
+
+- `active_buckets`: active history required for price-signal candidates.
+- `overlap_buckets`: aligned history required before accepting price-only
+  relationships.
+- `complement_low_overlap_buckets`: low-support complement confidence floor.
+- `violation_persistence_buckets`: recent breach count required for reporting
+  persistence-aware violations.
+- `persistence_lookback_buckets`: duration-equivalent trailing window size.
+- `persistence_lookback_seconds`: trailing window duration used in SQL.
+
+Examples: a 1000-minute active/overlap threshold is `1000` buckets for minutely
+input and `17` buckets for hourly input. A 30-minute violation persistence
+threshold is `30` minutely buckets and `1` hourly bucket.
+
+Public artifact column names remain unchanged for compatibility. With hourly
+input, legacy names such as `active_minutes`, `overlap_minutes`,
+`trailing_breach_minutes`, `trailing_window_minutes`, and `price_return_1m`
+mean source price buckets and adjacent-bucket returns rather than literal
+minutes.
 
 ## Optional Inputs
 
@@ -68,7 +98,7 @@ Opt-in graph inspection mode. It implies `write_prices=False` and
 `30`, must be positive, and is only valid with `--fast-graph`.
 
 Fast graph mode still computes current prices from each market's latest complete
-minute. Historical node fields such as `active_minutes`, `mean_price`,
+time bucket. Historical node fields such as `active_minutes`, `mean_price`,
 `mean_price_devig`, `min_price`, `max_price`, and market fields such as
 `mean_sum_price` are lookback-scoped. The manifest marks this with
 `stats.history_mode = "fast_graph_lookback"`.
@@ -82,9 +112,13 @@ that build.
 Top-level manifest fields:
 
 - `input`: input parquet path.
+- `input_format`: detected source format, either `minutely` or `hourly`.
+- `input_granularity_seconds`: detected source price bucket size.
 - `quotes`: optional quotes path, or `null`.
 - `resolutions`: optional resolutions path, or `null`.
 - `taxonomy`: taxonomy metadata.
+- `threshold_bucket_counts`: duration thresholds converted to source bucket
+  counts.
 - `effective_thresholds`: calibrated thresholds used for graph acceptance.
 - `lp_warnings`: warnings emitted by event-level LP coherence.
 - `build_options`: explicit options that affected artifact generation.

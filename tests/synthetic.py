@@ -34,6 +34,17 @@ MINI_WC2026_MARKET_COLUMNS = [
     "start_epoch",
 ]
 
+HOURLY_MARKET_COLUMNS = [
+    "market_id",
+    "question",
+    "event_slug",
+    "yes_price",
+    "no_price",
+    "volume",
+    "bucket_count",
+    "start_epoch",
+]
+
 
 def _values(rows: list[tuple[Any, ...]], columns: list[str]) -> str:
     return values_rows_sql([dict(zip(columns, row, strict=True)) for row in rows], columns)
@@ -176,6 +187,164 @@ def write_synthetic_input(path: Path) -> None:
             UNION ALL SELECT * FROM stale_rows;
 
             COPY fixture TO '{q(path)}' (FORMAT PARQUET);
+            """
+        )
+    finally:
+        db.close()
+
+
+def write_hourly_synthetic_input(path: Path) -> None:
+    markets = [
+        (
+            "hourly_eq_a",
+            "Will Hourly Equivalent A happen?",
+            "hourly-price-event",
+            0.55,
+            0.45,
+            20_000.0,
+            24,
+            0,
+        ),
+        (
+            "hourly_eq_b",
+            "Will Hourly Equivalent B happen?",
+            "hourly-price-event",
+            0.56,
+            0.44,
+            20_000.0,
+            24,
+            0,
+        ),
+        (
+            "hourly_low_a",
+            "Will Hourly Low A happen?",
+            "hourly-low-support-event",
+            0.55,
+            0.45,
+            20_000.0,
+            16,
+            100_000,
+        ),
+        (
+            "hourly_low_b",
+            "Will Hourly Low B happen?",
+            "hourly-low-support-event",
+            0.56,
+            0.44,
+            20_000.0,
+            16,
+            100_000,
+        ),
+        (
+            "bosnia_r16",
+            "Will Bosnia-Herzegovina reach the Round of 16 at the 2026 FIFA World Cup?",
+            "world-cup-nation-to-reach-round-of-16",
+            0.60,
+            0.40,
+            20_000.0,
+            24,
+            200_000,
+        ),
+        (
+            "bosnia_final",
+            "Will Bosnia and Herzegovina reach the 2026 FIFA World Cup final?",
+            "world-cup-nation-to-reach-final",
+            0.30,
+            0.70,
+            20_000.0,
+            24,
+            200_000,
+        ),
+        (
+            "congo_qf",
+            "Will Congo DR reach the Quarterfinals at the 2026 FIFA World Cup?",
+            "world-cup-nation-to-reach-quarterfinals",
+            0.45,
+            0.55,
+            20_000.0,
+            24,
+            300_000,
+        ),
+        (
+            "congo_semis",
+            "Will DR Congo reach the Semifinals at the 2026 FIFA World Cup?",
+            "world-cup-nation-to-reach-semifinals",
+            0.25,
+            0.75,
+            20_000.0,
+            24,
+            300_000,
+        ),
+        (
+            "curacao_qf",
+            "Will Curaçao reach the Quarterfinals at the 2026 FIFA World Cup?",
+            "world-cup-nation-to-reach-quarterfinals",
+            0.42,
+            0.58,
+            20_000.0,
+            24,
+            400_000,
+        ),
+        (
+            "curacao_semis",
+            "Will Curacao reach the Semifinals at the 2026 FIFA World Cup?",
+            "world-cup-nation-to-reach-semifinals",
+            0.22,
+            0.78,
+            20_000.0,
+            24,
+            400_000,
+        ),
+    ]
+    db = DuckDB(path.with_suffix(".duckdb"))
+    try:
+        db.execute(
+            f"""
+            CREATE TABLE hourly_fixture AS
+            WITH market_defs(
+                market_id,
+                question,
+                event_slug,
+                yes_price,
+                no_price,
+                volume,
+                bucket_count,
+                start_epoch
+            ) AS (
+                VALUES
+                {_values(markets, HOURLY_MARKET_COLUMNS)}
+            ),
+            hour AS (
+                SELECT range::BIGINT AS i
+                FROM range(24)
+            )
+            SELECT
+                market_id,
+                outcome_index,
+                market_id || ':' || outcome_label AS clob_token_id,
+                question,
+                outcome_label,
+                event_slug,
+                true AS is_active,
+                false AS is_closed,
+                volume AS market_volume_usd,
+                to_timestamp(start_epoch + i * 3600) AS odds_hour_utc,
+                (start_epoch + i * 3600)::BIGINT AS odds_hour_epoch,
+                CASE outcome_label WHEN 'Yes' THEN yes_price ELSE no_price END AS open_price,
+                CASE outcome_label WHEN 'Yes' THEN yes_price ELSE no_price END AS high_price,
+                CASE outcome_label WHEN 'Yes' THEN yes_price ELSE no_price END AS low_price,
+                CASE outcome_label WHEN 'Yes' THEN yes_price ELSE no_price END AS close_price,
+                CASE outcome_label WHEN 'Yes' THEN yes_price ELSE no_price END AS avg_price,
+                1::BIGINT AS observed_points,
+                (start_epoch + i * 3600)::BIGINT AS first_timestamp,
+                to_timestamp(start_epoch + i * 3600) AS first_observed_at,
+                (start_epoch + i * 3600)::BIGINT AS last_timestamp,
+                to_timestamp(start_epoch + i * 3600) AS last_observed_at
+            FROM market_defs
+            JOIN hour ON i < bucket_count
+            CROSS JOIN (VALUES (0, 'Yes'), (1, 'No')) AS o(outcome_index, outcome_label);
+
+            COPY hourly_fixture TO '{q(path)}' (FORMAT PARQUET);
             """
         )
     finally:

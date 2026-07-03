@@ -1,6 +1,6 @@
 # oddsgraph
 
-`oddsgraph` turns token-minute Polymarket odds into graph-ready parquet
+`oddsgraph` turns token-hour Polymarket odds into graph-ready parquet
 artifacts. Each `clob_token_id` becomes a proposition node, then the batch build
 emits market groups, logical edges, price-only edges, derived implications,
 conditional probabilities, constraint rows, violations, optional coherence and
@@ -14,9 +14,9 @@ trading system.
 - Python 3.11 or newer.
 - DuckDB from the Python package dependency in `pyproject.toml`.
 - A parquet input with the schema described in
-  [wc2026_token_minutely_odds_20260702T070755Z.md](wc2026_token_minutely_odds_20260702T070755Z.md).
+  [selected_token_hourly_odds_20260703T095031Z.md](selected_token_hourly_odds_20260703T095031Z.md).
 
-The local WC2026 parquet is a large sample, about 621 MB. It is useful for
+The local WC2026 hourly parquet is a sample, about 41 MB. It is useful for
 reproducing the project results, but generated outputs and large datasets should
 stay outside source control.
 
@@ -24,12 +24,12 @@ stay outside source control.
 
 Use [hypertrial/oddsfox](https://github.com/hypertrial/oddsfox) to build and
 export the source data. OddsFox documents the local pipeline in its
-[quickstart](https://github.com/hypertrial/oddsfox/blob/main/docs/quickstart.md)
-and exports `polymarket_marts.selected_token_minutely_odds` with
-`scripts/export_selected_minutely_odds.py`.
+[quickstart](https://github.com/hypertrial/oddsfox/blob/main/docs/quickstart.md).
+For the current workflow, export
+`polymarket_marts.selected_token_hourly_odds` as parquet.
 
 The exported parquet should match the schema in
-[wc2026_token_minutely_odds_20260702T070755Z.md](wc2026_token_minutely_odds_20260702T070755Z.md).
+[selected_token_hourly_odds_20260703T095031Z.md](selected_token_hourly_odds_20260703T095031Z.md).
 
 ## Setup
 
@@ -45,7 +45,7 @@ Run a full build when you want the complete artifact set:
 
 ```bash
 python -m oddsgraph.cli build \
-  --input wc2026_token_minutely_odds_20260702T070755Z.parquet \
+  --input selected_token_hourly_odds_20260703T095031Z.parquet \
   --out output/wc2026
 ```
 
@@ -54,7 +54,7 @@ lookback-scoped historical node and market statistics:
 
 ```bash
 python -m oddsgraph.cli build \
-  --input wc2026_token_minutely_odds_20260702T070755Z.parquet \
+  --input selected_token_hourly_odds_20260703T095031Z.parquet \
   --out output/wc2026-fast-graph \
   --fast-graph \
   --graph-lookback-days 30
@@ -68,7 +68,7 @@ completion marker for a coherent output directory.
 Search nodes:
 
 ```bash
-python -m oddsgraph.cli search --out output/wc2026 --query "Brazil win World Cup"
+python -m oddsgraph.cli search --out output/wc2026 --query "Brazil"
 ```
 
 Show high-volume nodes:
@@ -106,8 +106,8 @@ Ask for a conditional probability row:
 ```bash
 python -m oddsgraph.cli condition \
   --out output/wc2026 \
-  --a "Brazil reach the Round of 16" \
-  --b "NOT(Will Brazil reach the Round of 16?)"
+  --a 60941235333934119537308581623022145063589498358463811604437431757990716193139 \
+  --b 69254358704504551873876012384649223770132435379419074198292590735170180021451
 ```
 
 Summarize a completed build manifest:
