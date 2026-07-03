@@ -20,6 +20,10 @@
     {
       "pattern": "^Will (.*) reach the Round of 16 at the 2026 FIFA World Cup\\?$",
       "rank": 1
+    },
+    {
+      "pattern": "^Will (.*) reach the Round of 32 at the 2026 FIFA World Cup\\?$",
+      "rank": 0
     }
   ],
   "stage_subject_aliases": {

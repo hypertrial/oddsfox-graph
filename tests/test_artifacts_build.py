@@ -8,6 +8,7 @@ import pytest
 
 from oddsfox_graph.artifacts import ARTIFACT_COLUMNS, ARTIFACT_EMPTY_TYPES, PARQUET_ARTIFACTS, artifact_projection
 from oddsfox_graph.build import _validate_generated_artifacts, build
+from oddsfox_graph.knockout import KNOCKOUT_ARTIFACT
 from oddsfox_graph.queries import DuckDB, q
 from oddsfox_graph.rules import load_taxonomy
 
@@ -19,6 +20,7 @@ def test_build_outputs_artifacts_and_core_logic(synthetic_output: Path) -> None:
     db = DuckDB()
     try:
         assert ARTIFACTS <= {p.name for p in synthetic_output.glob("*.parquet")}
+        assert (synthetic_output / KNOCKOUT_ARTIFACT).is_file()
         assert (synthetic_output / "reports" / "summary.md").read_text()
         coverage = (synthetic_output / "reports" / "coverage.md").read_text()
         assert "## Market Families" in coverage
@@ -194,7 +196,7 @@ def test_semantic_rule_classification(synthetic_output: Path) -> None:
 
 def test_build_manifest_marks_success(synthetic_output: Path) -> None:
     manifest = json.loads((synthetic_output / "build_manifest.json").read_text())
-    assert set(manifest["artifacts"]) == ARTIFACTS
+    assert set(manifest["artifacts"]) == ARTIFACTS | {KNOCKOUT_ARTIFACT}
     assert manifest["stats"]["tokens"] > 0
     assert manifest["taxonomy"]["name"] == "wc2026"
     assert manifest["effective_thresholds"] is not None
@@ -223,6 +225,29 @@ def test_build_manifest_marks_success(synthetic_output: Path) -> None:
             assert manifest["stats"][stat_key] == artifact_count
     finally:
         db.close()
+
+
+def test_knockout_artifact_contains_stage_probabilities(synthetic_output: Path) -> None:
+    artifact = json.loads((synthetic_output / KNOCKOUT_ARTIFACT).read_text())
+
+    assert artifact["competition"] == "wc2026"
+    assert "winner_alpha:Yes" in artifact["asset_ids"]
+    alpha_winner = [
+        row
+        for row in artifact["team_stage_markets"]
+        if row["team_id"] == "alpha" and row["stage_key"] == "winner"
+    ]
+    assert alpha_winner
+    conditionals = [
+        row
+        for row in artifact["conditional_probabilities"]
+        if row["team_id"] == "alpha"
+        and row["from_stage"] == "semifinal"
+        and row["to_stage"] == "winner"
+    ]
+    assert conditionals
+    assert conditionals[0]["method"] == "market_ratio"
+    assert 0 <= conditionals[0]["probability"] <= 1
 
 def test_market_minute_sums_match_market_group_artifact(synthetic_output: Path) -> None:
     db = DuckDB(synthetic_output / "oddsfox_graph.duckdb")
@@ -260,7 +285,7 @@ def test_market_minute_sums_match_market_group_artifact(synthetic_output: Path) 
 def test_taxonomy_loader_round_trip() -> None:
     taxonomy = load_taxonomy()
     assert taxonomy.name == "wc2026"
-    assert len(taxonomy.stage_rules) == 5
+    assert len(taxonomy.stage_rules) == 6
     assert "world-cup-winner" in taxonomy.single_winner_slugs
 
 def test_failed_build_removes_success_manifest(tmp_path: Path) -> None:

@@ -16,6 +16,7 @@ from .calibration import apply_calibration_confidence, fit_calibration, threshol
 from .coherence import compute_transitive_closure, create_empty_coherence_tables, solve_event_coherence
 from .contracts import validate_relation_columns
 from .evaluate import run_evaluation
+from .knockout import KNOCKOUT_ARTIFACT, write_knockout_artifacts
 from .queries import DuckDB, q
 from .reports import write_reports
 from .rules import (
@@ -131,6 +132,7 @@ def build(
             "write_violations",
             lambda: write_violations(db, out_dir, effective_thresholds, threshold_bucket_counts),
         )
+        stage("write_knockout_artifacts", lambda: write_knockout_artifacts(db, out_dir))
         if resolutions_path is not None:
             stage("run_evaluation", lambda: run_evaluation(db, out_dir, resolutions_path))
         stats = stage(
@@ -178,7 +180,12 @@ def build(
 
 
 def _clear_generated(out_dir: Path) -> None:
-    for name in (*parquet_artifacts(has_evaluation=True), "build_manifest.json", "oddsfox_graph.duckdb"):
+    for name in (
+        *parquet_artifacts(has_evaluation=True),
+        KNOCKOUT_ARTIFACT,
+        "build_manifest.json",
+        "oddsfox_graph.duckdb",
+    ):
         path = out_dir / name
         if path.exists():
             path.unlink()
@@ -229,13 +236,14 @@ def _write_manifest(
             "graph_lookback_days": graph_lookback_days,
             "current_max_age_hours": current_max_age_hours,
         },
-        "artifacts": list(
-            parquet_artifacts(
+        "artifacts": [
+            *parquet_artifacts(
                 has_evaluation=has_evaluation,
                 has_prices=has_prices,
                 has_coherence=has_coherence,
-            )
-        ),
+            ),
+            KNOCKOUT_ARTIFACT,
+        ],
         "reports": list(reports(has_evaluation=has_evaluation)),
         "stats": stats,
         "stage_timings": stage_timings,

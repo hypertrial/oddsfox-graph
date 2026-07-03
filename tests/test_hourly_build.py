@@ -6,6 +6,7 @@ from pathlib import Path
 from oddsfox_graph.artifacts import ARTIFACT_COLUMNS, PARQUET_ARTIFACTS
 from oddsfox_graph.build import build
 from oddsfox_graph.cli import main
+from oddsfox_graph.knockout import KNOCKOUT_ARTIFACT
 from oddsfox_graph.queries import DuckDB, q
 from oddsfox_graph.thresholds import bucket_counts
 from tests.synthetic import (
@@ -41,7 +42,7 @@ def test_hourly_full_build_preserves_artifact_schemas_and_manifest(tmp_path: Pat
     assert manifest["input_granularity_seconds"] == 3600
     assert manifest["threshold_bucket_counts"]["active_buckets"] == 17
     assert manifest["threshold_bucket_counts"]["overlap_buckets"] == 17
-    assert set(manifest["artifacts"]) == set(PARQUET_ARTIFACTS)
+    assert set(manifest["artifacts"]) == set(PARQUET_ARTIFACTS) | {KNOCKOUT_ARTIFACT}
 
     db = DuckDB()
     try:

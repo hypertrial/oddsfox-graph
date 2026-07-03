@@ -66,6 +66,10 @@ python -m oddsfox_graph.cli build \
 Successful builds write `build_manifest.json` last. Treat that file as the
 completion marker for a coherent output directory.
 
+WC2026 builds also write `knockout_artifacts.json` for `oddsfox-live`. It
+contains stages, teams, stage-market asset IDs, bracket slots, and baseline
+market-ratio conditional probabilities.
+
 ## Inspect Results
 
 Search nodes:
