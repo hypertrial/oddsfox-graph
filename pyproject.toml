@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
 authors = [{name = "Hypertrial"}]
-dependencies = ["duckdb>=1.0", "scipy>=1.11", "numpy>=1.26"]
+dependencies = ["duckdb>=1.0", "scipy>=1.11", "numpy>=1.26", "pytz>=2024.1"]
 classifiers = [
   "Programming Language :: Python :: 3",
   "Topic :: Scientific/Engineering :: Information Analysis",
