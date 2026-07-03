@@ -232,12 +232,14 @@ def test_knockout_artifact_contains_stage_probabilities(synthetic_output: Path) 
 
     assert artifact["competition"] == "wc2026"
     assert "winner_alpha:Yes" in artifact["asset_ids"]
+    assert "winner_alpha:No" in artifact["asset_ids"]
     alpha_winner = [
         row
         for row in artifact["team_stage_markets"]
         if row["team_id"] == "alpha" and row["stage_key"] == "winner"
     ]
     assert alpha_winner
+    assert alpha_winner[0]["no_asset_id"] == "winner_alpha:No"
     conditionals = [
         row
         for row in artifact["conditional_probabilities"]
@@ -248,6 +250,22 @@ def test_knockout_artifact_contains_stage_probabilities(synthetic_output: Path) 
     assert conditionals
     assert conditionals[0]["method"] == "market_ratio"
     assert 0 <= conditionals[0]["probability"] <= 1
+    hourly = [
+        row
+        for row in artifact["team_stage_probabilities_hourly"]
+        if row["team_id"] == "alpha" and row["stage_key"] == "winner"
+    ]
+    assert hourly
+    assert any(row["source"] == "hourly_devig_close" for row in hourly)
+    assert any(row["source"] == "carried_forward" and row["stale_age_hours"] > 0 for row in hourly)
+    hourly_conditionals = [
+        row
+        for row in artifact["conditional_probabilities_hourly"]
+        if row["team_id"] == "alpha"
+        and row["from_stage"] == "semifinal"
+        and row["to_stage"] == "winner"
+    ]
+    assert hourly_conditionals
 
 def test_market_minute_sums_match_market_group_artifact(synthetic_output: Path) -> None:
     db = DuckDB(synthetic_output / "oddsfox_graph.duckdb")
