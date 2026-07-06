@@ -9,6 +9,19 @@ evaluation artifacts, and markdown reports.
 This is a Python/DuckDB tool for offline analysis. It is not a live ingest or
 trading system.
 
+## Part Of OddsFox
+
+`oddsfox-graph` sits between `oddsfox-pipeline` and `oddsfox-live`. It consumes
+the pipeline graph export parquet and publishes `graph_snapshot.json` plus
+`knockout_artifacts.json` for the live API and dashboard.
+
+For the full source-to-dashboard flow, see the
+[OddsFox System Overview](https://github.com/hypertrial/oddsfox-pipeline/blob/main/docs/system-overview.md)
+and
+[Operator Runbook](https://github.com/hypertrial/oddsfox-pipeline/blob/main/docs/operator-runbook.md).
+The live API contract is documented in
+[oddsfox-live docs/api.md](https://github.com/hypertrial/oddsfox-live/blob/main/docs/api.md).
+
 ## Requirements
 
 - Python 3.11 or newer.
