@@ -40,13 +40,19 @@ def write_knockout_artifacts(
             event_slug,
             stage_subject,
             stage_rank,
+            stage_key,
+            canonical_team_name,
+            market_direction,
+            progression_outcome_label,
+            is_progression_node,
+            opposite_clob_token_id,
             current_price,
             current_price_devig,
             is_active,
             is_closed
         FROM nodes_v
         WHERE stage_rank IS NOT NULL
-            AND outcome_label = 'Yes'
+            AND is_progression_node
         ORDER BY stage_subject, stage_rank
         """
     )
@@ -60,11 +66,21 @@ def write_knockout_artifacts(
         stage = STAGE_BY_RANK.get(int(row["stage_rank"]))
         if stage is None:
             continue
-        team = str(row["stage_subject"] or "").strip()
+        team = str(row["canonical_team_name"] or row["stage_subject"] or "").strip()
         if not team:
             continue
         team_id = _slugify(team)
         teams.setdefault(team_id, {"team_id": team_id, "name": team})
+        market_assets = sibling_assets.get(str(row["market_id"]), {})
+        opposite_asset = str(row["opposite_clob_token_id"] or "").strip() or None
+        if not opposite_asset:
+            opposite_asset = (
+                market_assets.get("no")
+                if str(row["outcome_label"]).lower() == "yes"
+                else market_assets.get("yes")
+            )
+        yes_asset = row["clob_token_id"] if str(row["outcome_label"]).lower() == "yes" else market_assets.get("yes")
+        no_asset = row["clob_token_id"] if str(row["outcome_label"]).lower() == "no" else market_assets.get("no")
         probability = _number(row["current_price_devig"])
         source = "current_price_devig"
         if probability is None:
@@ -77,11 +93,16 @@ def write_knockout_artifacts(
             "stage_rank": stage["rank"],
             "node_id": row["node_id"],
             "asset_id": row["clob_token_id"],
-            "yes_asset_id": row["clob_token_id"],
-            "no_asset_id": sibling_assets.get(str(row["market_id"])),
+            "progression_asset_id": row["clob_token_id"],
+            "opposite_asset_id": opposite_asset,
+            "yes_asset_id": yes_asset,
+            "no_asset_id": no_asset,
             "market_id": row["market_id"],
             "question": row["question"],
             "event_slug": row["event_slug"],
+            "canonical_team_name": row["canonical_team_name"],
+            "market_direction": row["market_direction"],
+            "progression_outcome_label": row["progression_outcome_label"],
             "baseline_probability": probability,
             "probability_source": source,
             "is_active": bool(row["is_active"]),
@@ -91,8 +112,8 @@ def write_knockout_artifacts(
         price_by_team_stage[(team_id, str(stage["key"]))] = probability
         if row["clob_token_id"]:
             asset_ids.append(str(row["clob_token_id"]))
-        if item["no_asset_id"]:
-            asset_ids.append(str(item["no_asset_id"]))
+        if item["opposite_asset_id"]:
+            asset_ids.append(str(item["opposite_asset_id"]))
 
     hourly = _hourly_stage_probabilities(db, team_stage_markets)
     hourly_conditionals = _hourly_conditionals(hourly)
@@ -120,7 +141,7 @@ def write_knockout_artifacts(
     return artifact
 
 
-def _sibling_assets(db: DuckDB, market_ids: list[str]) -> dict[str, str]:
+def _sibling_assets(db: DuckDB, market_ids: list[str]) -> dict[str, dict[str, str]]:
     if not market_ids:
         return {}
     ids = ", ".join(f"'{q(market_id)}'" for market_id in sorted(set(market_ids)))
@@ -129,11 +150,11 @@ def _sibling_assets(db: DuckDB, market_ids: list[str]) -> dict[str, str]:
         FROM input_prices
         WHERE market_id IN ({ids})
     """)
-    no_by_market: dict[str, str] = {}
+    by_market: dict[str, dict[str, str]] = {}
     for row in rows:
-        if row["outcome_label"] == "no" and row["clob_token_id"]:
-            no_by_market[str(row["market_id"])] = str(row["clob_token_id"])
-    return no_by_market
+        if row["clob_token_id"]:
+            by_market.setdefault(str(row["market_id"]), {})[str(row["outcome_label"])] = str(row["clob_token_id"])
+    return by_market
 
 
 def _hourly_stage_probabilities(
@@ -181,13 +202,13 @@ def _hourly_stage_probabilities(
     for market in markets:
         last_probability: float | None = None
         last_hour: int | None = None
-        yes_asset = str(market["asset_id"])
-        no_asset = market.get("no_asset_id")
+        progression_asset = str(market["asset_id"])
+        opposite_asset = market.get("opposite_asset_id") or market.get("no_asset_id")
         for hour in range(start_hour, max_hour + 1, 3600):
             prices = price_by_market_hour.get((str(market["market_id"]), hour), {})
             probability, source = _market_probability(
-                prices.get(yes_asset),
-                prices.get(str(no_asset)) if no_asset else None,
+                prices.get(progression_asset),
+                prices.get(str(opposite_asset)) if opposite_asset else None,
             )
             stale_age_hours: int | None = 0 if probability is not None else None
             if probability is None and last_probability is not None and last_hour is not None:

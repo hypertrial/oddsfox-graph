@@ -16,6 +16,7 @@ from .calibration import apply_calibration_confidence, fit_calibration, threshol
 from .coherence import compute_transitive_closure, create_empty_coherence_tables, solve_event_coherence
 from .contracts import validate_relation_columns
 from .evaluate import run_evaluation
+from .graph_snapshot import GRAPH_SNAPSHOT_ARTIFACT, write_graph_snapshot
 from .knockout import KNOCKOUT_ARTIFACT, write_knockout_artifacts
 from .queries import DuckDB, q
 from .reports import write_reports
@@ -132,6 +133,7 @@ def build(
             "write_violations",
             lambda: write_violations(db, out_dir, effective_thresholds, threshold_bucket_counts),
         )
+        stage("write_graph_snapshot", lambda: write_graph_snapshot(db, out_dir))
         stage("write_knockout_artifacts", lambda: write_knockout_artifacts(db, out_dir))
         if resolutions_path is not None:
             stage("run_evaluation", lambda: run_evaluation(db, out_dir, resolutions_path))
@@ -182,6 +184,7 @@ def build(
 def _clear_generated(out_dir: Path) -> None:
     for name in (
         *parquet_artifacts(has_evaluation=True),
+        GRAPH_SNAPSHOT_ARTIFACT,
         KNOCKOUT_ARTIFACT,
         "build_manifest.json",
         "oddsfox_graph.duckdb",
@@ -242,6 +245,7 @@ def _write_manifest(
                 has_prices=has_prices,
                 has_coherence=has_coherence,
             ),
+            GRAPH_SNAPSHOT_ARTIFACT,
             KNOCKOUT_ARTIFACT,
         ],
         "reports": list(reports(has_evaluation=has_evaluation)),
@@ -370,7 +374,16 @@ def _create_token_minute_prices(
                 odds_timestamp,
                 odds_timestamp_epoch,
                 odds_minute_epoch,
-                price
+                price,
+                input_canonical_team_name,
+                input_stage_key,
+                input_stage_rank,
+                input_market_direction,
+                input_progression_outcome_label,
+                input_is_progression_token,
+                input_opposite_clob_token_id,
+                input_market_status,
+                input_is_still_alive
             FROM (
                 SELECT
                     *,
@@ -432,7 +445,16 @@ def _create_token_minute_prices(
             odds_timestamp,
             odds_timestamp_epoch,
             odds_minute_epoch,
-            price
+            price,
+            input_canonical_team_name,
+            input_stage_key,
+            input_stage_rank,
+            input_market_direction,
+            input_progression_outcome_label,
+            input_is_progression_token,
+            input_opposite_clob_token_id,
+            input_market_status,
+            input_is_still_alive
         FROM (
             SELECT
                 *,
@@ -625,7 +647,16 @@ def _create_token_stats_tables(db: DuckDB) -> None:
             avg(price) AS mean_price,
             min(price) AS min_price,
             max(price) AS max_price,
-            avg(price_devig) AS mean_price_devig
+            avg(price_devig) AS mean_price_devig,
+            any_value(input_canonical_team_name) AS input_canonical_team_name,
+            any_value(input_stage_key) AS input_stage_key,
+            any_value(input_stage_rank) AS input_stage_rank,
+            any_value(input_market_direction) AS input_market_direction,
+            any_value(input_progression_outcome_label) AS input_progression_outcome_label,
+            any_value(input_is_progression_token) AS input_is_progression_token,
+            any_value(input_opposite_clob_token_id) AS input_opposite_clob_token_id,
+            any_value(input_market_status) AS input_market_status,
+            any_value(input_is_still_alive) AS input_is_still_alive
         FROM enriched_minute_prices
         JOIN market_token_counts USING (market_id)
         GROUP BY clob_token_id;
@@ -693,8 +724,16 @@ def _create_nodes_view(db: DuckDB, taxonomy: Taxonomy) -> None:
                     WHEN s.outcome_label IN ('Yes', 'No') THEN 'binary'
                     ELSE 'named_outcome'
                 END AS proposition_type,
-                m.stage_subject,
-                m.stage_rank,
+                coalesce(s.input_canonical_team_name, m.stage_subject) AS stage_subject,
+                coalesce(s.input_stage_rank, m.stage_rank) AS stage_rank,
+                coalesce(s.input_stage_key, 'rank_' || coalesce(s.input_stage_rank, m.stage_rank)::VARCHAR) AS stage_key,
+                s.input_canonical_team_name AS canonical_team_name,
+                s.input_market_direction AS market_direction,
+                s.input_progression_outcome_label AS progression_outcome_label,
+                coalesce(s.input_is_progression_token, s.outcome_label = 'Yes') AS is_progression_node,
+                s.input_opposite_clob_token_id AS opposite_clob_token_id,
+                s.input_market_status AS market_status,
+                s.input_is_still_alive AS is_still_alive,
                 CASE
                     WHEN w.event_slug IS NOT NULL OR {single_winner_pattern_sql(taxonomy, "s.event_slug")} THEN true
                     ELSE false

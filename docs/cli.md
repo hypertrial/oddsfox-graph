@@ -39,13 +39,13 @@ Examples:
 
 ```bash
 python -m oddsfox_graph.cli build \
-  --input selected_token_live_hourly_odds_20260703T095031Z.parquet \
+  --input /tmp/wc2026_graph_hourly.parquet \
   --out output/wc2026
 ```
 
 ```bash
 python -m oddsfox_graph.cli build \
-  --input selected_token_live_hourly_odds_20260703T095031Z.parquet \
+  --input /tmp/wc2026_graph_hourly.parquet \
   --out output/wc2026-fast-graph \
   --fast-graph \
   --graph-lookback-days 30

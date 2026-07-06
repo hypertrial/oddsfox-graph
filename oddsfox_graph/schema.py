@@ -49,6 +49,18 @@ TABLE_REQUIRED_COLUMNS = {
     "price",
 }
 
+OPTIONAL_SEMANTIC_COLUMNS = {
+    "canonical_team_name": ("input_canonical_team_name", "VARCHAR"),
+    "stage_key": ("input_stage_key", "VARCHAR"),
+    "stage_rank": ("input_stage_rank", "INTEGER"),
+    "market_direction": ("input_market_direction", "VARCHAR"),
+    "progression_outcome_label": ("input_progression_outcome_label", "VARCHAR"),
+    "is_progression_token": ("input_is_progression_token", "BOOLEAN"),
+    "opposite_clob_token_id": ("input_opposite_clob_token_id", "VARCHAR"),
+    "market_status": ("input_market_status", "VARCHAR"),
+    "is_still_alive": ("input_is_still_alive", "BOOLEAN"),
+}
+
 
 @dataclass(frozen=True)
 class InputFormat:
@@ -105,6 +117,11 @@ def create_input_prices(
     input_format: InputFormat | None = None,
 ) -> InputFormat:
     input_format = input_format or detect_input_format(db, path)
+    found = _schema_columns(db, path)
+    semantic_projection = ",\n            ".join(
+        _optional_column_sql(found, source_name, output_name, sql_type)
+        for source_name, (output_name, sql_type) in OPTIONAL_SEMANTIC_COLUMNS.items()
+    )
     db.execute(f"""
         CREATE OR REPLACE TEMP TABLE {table} AS
         SELECT
@@ -120,7 +137,8 @@ def create_input_prices(
             {input_format.source_timestamp_column} AS odds_timestamp,
             {input_format.source_epoch_column}::BIGINT AS odds_timestamp_epoch,
             {input_format.minute_epoch_sql} AS odds_minute_epoch,
-            {input_format.source_price_column} AS price
+            {input_format.source_price_column} AS price,
+            {semantic_projection}
         FROM read_parquet('{q(path)}');
     """)
     return input_format
@@ -144,6 +162,17 @@ def detect_input_format(db: DuckDB, path: Path) -> InputFormat:
 def _schema_columns(db: DuckDB, path: Path) -> set[str]:
     rows = db.rows(f"SELECT name FROM parquet_schema('{q(path)}') WHERE name != 'duckdb_schema'")
     return {str(row["name"]).lower() for row in rows}
+
+
+def _optional_column_sql(
+    found: set[str],
+    source_name: str,
+    output_name: str,
+    sql_type: str,
+) -> str:
+    if source_name.lower() in found:
+        return f"{source_name} AS {output_name}"
+    return f"CAST(NULL AS {sql_type}) AS {output_name}"
 
 
 def validate_input_table(db: DuckDB, table: str = "input_prices") -> None:

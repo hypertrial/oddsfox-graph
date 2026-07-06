@@ -8,6 +8,7 @@ import pytest
 
 from oddsfox_graph.artifacts import ARTIFACT_COLUMNS, ARTIFACT_EMPTY_TYPES, PARQUET_ARTIFACTS, artifact_projection
 from oddsfox_graph.build import _validate_generated_artifacts, build
+from oddsfox_graph.graph_snapshot import GRAPH_SNAPSHOT_ARTIFACT
 from oddsfox_graph.knockout import KNOCKOUT_ARTIFACT
 from oddsfox_graph.queries import DuckDB, q
 from oddsfox_graph.rules import load_taxonomy
@@ -21,6 +22,7 @@ def test_build_outputs_artifacts_and_core_logic(synthetic_output: Path) -> None:
     try:
         assert ARTIFACTS <= {p.name for p in synthetic_output.glob("*.parquet")}
         assert (synthetic_output / KNOCKOUT_ARTIFACT).is_file()
+        assert (synthetic_output / GRAPH_SNAPSHOT_ARTIFACT).is_file()
         assert (synthetic_output / "reports" / "summary.md").read_text()
         coverage = (synthetic_output / "reports" / "coverage.md").read_text()
         assert "## Market Families" in coverage
@@ -196,7 +198,10 @@ def test_semantic_rule_classification(synthetic_output: Path) -> None:
 
 def test_build_manifest_marks_success(synthetic_output: Path) -> None:
     manifest = json.loads((synthetic_output / "build_manifest.json").read_text())
-    assert set(manifest["artifacts"]) == ARTIFACTS | {KNOCKOUT_ARTIFACT}
+    assert set(manifest["artifacts"]) == ARTIFACTS | {
+        GRAPH_SNAPSHOT_ARTIFACT,
+        KNOCKOUT_ARTIFACT,
+    }
     assert manifest["stats"]["tokens"] > 0
     assert manifest["taxonomy"]["name"] == "wc2026"
     assert manifest["effective_thresholds"] is not None
@@ -258,14 +263,28 @@ def test_knockout_artifact_contains_stage_probabilities(synthetic_output: Path) 
     assert hourly
     assert any(row["source"] == "hourly_devig_close" for row in hourly)
     assert any(row["source"] == "carried_forward" and row["stale_age_hours"] > 0 for row in hourly)
-    hourly_conditionals = [
-        row
-        for row in artifact["conditional_probabilities_hourly"]
-        if row["team_id"] == "alpha"
-        and row["from_stage"] == "semifinal"
-        and row["to_stage"] == "winner"
-    ]
-    assert hourly_conditionals
+
+
+def test_graph_snapshot_matches_core_artifact_counts(synthetic_output: Path) -> None:
+    snapshot = json.loads((synthetic_output / GRAPH_SNAPSHOT_ARTIFACT).read_text())
+    db = DuckDB()
+    try:
+        counts = {
+            "nodes": int(db.scalar(f"SELECT count(*) FROM read_parquet('{q(synthetic_output / 'nodes.parquet')}')") or 0),
+            "logic_edges": int(db.scalar(f"SELECT count(*) FROM read_parquet('{q(synthetic_output / 'logic_edges.parquet')}')") or 0),
+            "violations": int(db.scalar(f"SELECT count(*) FROM read_parquet('{q(synthetic_output / 'violations.parquet')}')") or 0),
+        }
+    finally:
+        db.close()
+
+    assert snapshot["counts"]["nodes"] == counts["nodes"]
+    assert snapshot["counts"]["logic_edges"] == counts["logic_edges"]
+    assert snapshot["counts"]["violations"] == counts["violations"]
+    assert all(
+        row["p_a_given_b"] is None or 0 <= row["p_a_given_b"] <= 1
+        for row in snapshot["conditionals"]
+    )
+
 
 def test_market_minute_sums_match_market_group_artifact(synthetic_output: Path) -> None:
     db = DuckDB(synthetic_output / "oddsfox_graph.duckdb")

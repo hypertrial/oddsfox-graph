@@ -13,8 +13,9 @@ trading system.
 
 - Python 3.11 or newer.
 - DuckDB from the Python package dependency in `pyproject.toml`.
-- A parquet input with the schema described in
-  [selected_token_hourly_odds_20260703T095031Z.md](selected_token_hourly_odds_20260703T095031Z.md).
+- A parquet input from
+  `polymarket_wc2026_marts.polymarket_wc2026_graph_token_hourly_odds` or a
+  legacy hourly/minutely OddsFox export.
 
 The local WC2026 hourly parquet is a sample, about 41 MB. It is useful for
 reproducing the project results, but generated outputs and large datasets should
@@ -25,14 +26,19 @@ stay outside source control.
 Use [hypertrial/oddsfox-pipeline](https://github.com/hypertrial/oddsfox-pipeline) to build and
 export the source data. OddsFox documents the local pipeline in its
 [quickstart](https://github.com/hypertrial/oddsfox-pipeline/blob/main/docs/quickstart.md).
-For graph builds, export
-`polymarket_marts.selected_token_live_hourly_odds` as parquet from OddsFox
-(`scripts/export_selected_hourly_odds.py --live-current`). The historical
-`selected_token_hourly_odds` export remains useful for audits and backtests;
-`oddsfox-graph` also defensively filters stale or closed markets by default.
+For hosted WC2026 graph builds, export
+`polymarket_wc2026_marts.polymarket_wc2026_graph_token_hourly_odds`:
 
-The exported parquet should match the schema in
-[selected_token_hourly_odds_20260703T095031Z.md](selected_token_hourly_odds_20260703T095031Z.md).
+```bash
+uv run python scripts/export_polymarket_wc2026_graph_hourly_odds.py \
+  --snapshot-copy \
+  --output /tmp/wc2026_graph_hourly.parquet
+```
+
+This graph export carries both Yes/No tokens and dbt-clean team, stage,
+progression-token, and opposite-token semantics. Legacy OddsFox hourly/minutely
+exports remain supported for audits and backtests; regex/taxonomy parsing is
+used only when semantic columns are absent.
 
 ## Setup
 
@@ -48,7 +54,7 @@ Run a full build when you want the complete artifact set:
 
 ```bash
 python -m oddsfox_graph.cli build \
-  --input selected_token_live_hourly_odds_20260703T095031Z.parquet \
+  --input /tmp/wc2026_graph_hourly.parquet \
   --out output/wc2026
 ```
 
@@ -57,7 +63,7 @@ lookback-scoped historical node and market statistics:
 
 ```bash
 python -m oddsfox_graph.cli build \
-  --input selected_token_live_hourly_odds_20260703T095031Z.parquet \
+  --input /tmp/wc2026_graph_hourly.parquet \
   --out output/wc2026-fast-graph \
   --fast-graph \
   --graph-lookback-days 30
@@ -66,9 +72,11 @@ python -m oddsfox_graph.cli build \
 Successful builds write `build_manifest.json` last. Treat that file as the
 completion marker for a coherent output directory.
 
-WC2026 builds also write `knockout_artifacts.json` for `oddsfox-live`. It
-contains stages, teams, stage-market asset IDs, bracket slots, baseline
-market-ratio conditional probabilities, and hourly probability history.
+WC2026 builds also write `knockout_artifacts.json` and `graph_snapshot.json` for
+`oddsfox-live`. The knockout artifact contains stages, teams, stage-market asset
+IDs, bracket slots, baseline market-ratio conditional probabilities, and hourly
+probability history. The graph snapshot is compact JSON for the hosted logical
+graph API.
 
 ## Inspect Results
 

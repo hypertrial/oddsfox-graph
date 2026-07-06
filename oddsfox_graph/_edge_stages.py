@@ -61,7 +61,7 @@ def write_candidates(
             FROM nodes_v
             WHERE market_volume_usd >= {T.MIN_MARKET_VOLUME_USD}
                 AND active_minutes >= {threshold_bucket_counts.active_buckets}
-                AND outcome_label = 'Yes'
+                AND is_progression_node
         ),
         exact_duplicates AS (
             SELECT
@@ -95,8 +95,8 @@ def write_candidates(
             JOIN nodes_v b
                 ON a.event_slug = b.event_slug
                 AND a.market_id < b.market_id
-            WHERE a.outcome_label = 'Yes'
-                AND b.outcome_label = 'Yes'
+            WHERE a.is_progression_node
+                AND b.is_progression_node
                 AND a.canonical_proposition != b.canonical_proposition
                 AND a.is_single_winner_family
                 AND b.is_single_winner_family
@@ -117,8 +117,8 @@ def write_candidates(
                 ON a.stage_subject = b.stage_subject
                 AND a.stage_rank > b.stage_rank
                 AND a.market_id != b.market_id
-            WHERE a.outcome_label = 'Yes'
-                AND b.outcome_label = 'Yes'
+            WHERE a.is_progression_node
+                AND b.is_progression_node
                 AND a.stage_subject IS NOT NULL
                 AND b.stage_subject IS NOT NULL
         ),

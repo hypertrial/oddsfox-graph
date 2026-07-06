@@ -14,6 +14,29 @@ provided.
 Build-mode behavior is documented in [Build Modes](builds.md). Pipeline behavior
 is documented in [Architecture](architecture.md).
 
+## Hosted JSON Artifacts
+
+### `graph_snapshot.json`
+
+Purpose: compact hosted API payload for `oddsfox-live`.
+
+Top-level fields: `version`, `built_at`, `source_manifest`, `counts`, `nodes`,
+`logic_edges`, `conditionals`, and `violations`.
+
+Nodes expose `node_id`, `market_id`, `question`, `outcome_label`,
+`canonical_proposition`, `team`, `stage_key`, `current_price`, and
+`current_price_devig`. Logic edges expose `source`, `target`, `type`, `basis`,
+`confidence`, `current_p_src`, and `current_p_dst`. Conditional rows expose
+`a_node_id`, `b_node_id`, `p_a_given_b`, bounds, method, and confidence.
+
+### `knockout_artifacts.json`
+
+Purpose: hosted WC2026 knockout probability payload for `oddsfox-live`.
+
+The progression-side token is always `asset_id` and `progression_asset_id`,
+including elimination-framed markets where progression is the No token.
+`opposite_asset_id` carries the sibling token used for live devig.
+
 Several column names keep legacy minute wording for schema compatibility.
 For hourly input, `active_minutes`, `overlap_minutes`,
 `trailing_breach_minutes`, `trailing_window_minutes`, and `price_return_1m`

@@ -20,6 +20,15 @@ INPUT_PRICE_COLUMNS = [
     "odds_timestamp_epoch",
     "odds_minute_epoch",
     "price",
+    "input_canonical_team_name",
+    "input_stage_key",
+    "input_stage_rank",
+    "input_market_direction",
+    "input_progression_outcome_label",
+    "input_is_progression_token",
+    "input_opposite_clob_token_id",
+    "input_market_status",
+    "input_is_still_alive",
 ]
 
 ENRICHED_MINUTE_COLUMNS = [
@@ -48,6 +57,15 @@ TOKEN_STATS_COLUMNS = [
     "min_price",
     "max_price",
     "mean_price_devig",
+    "input_canonical_team_name",
+    "input_stage_key",
+    "input_stage_rank",
+    "input_market_direction",
+    "input_progression_outcome_label",
+    "input_is_progression_token",
+    "input_opposite_clob_token_id",
+    "input_market_status",
+    "input_is_still_alive",
 ]
 
 MARKET_CURRENT_ELIGIBILITY_COLUMNS = [
@@ -67,6 +85,14 @@ NODES_VIEW_COLUMNS = [
     "proposition_type",
     "stage_subject",
     "stage_rank",
+    "stage_key",
+    "canonical_team_name",
+    "market_direction",
+    "progression_outcome_label",
+    "is_progression_node",
+    "opposite_clob_token_id",
+    "market_status",
+    "is_still_alive",
     "is_single_winner_family",
     "expected_tokens",
     "market_family",

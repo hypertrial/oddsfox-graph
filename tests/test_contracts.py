@@ -41,6 +41,16 @@ def test_token_minute_prices_choose_latest_timestamp_per_minute(tmp_path: Path) 
                 price
             );
 
+            ALTER TABLE input_prices ADD COLUMN input_canonical_team_name VARCHAR;
+            ALTER TABLE input_prices ADD COLUMN input_stage_key VARCHAR;
+            ALTER TABLE input_prices ADD COLUMN input_stage_rank INTEGER;
+            ALTER TABLE input_prices ADD COLUMN input_market_direction VARCHAR;
+            ALTER TABLE input_prices ADD COLUMN input_progression_outcome_label VARCHAR;
+            ALTER TABLE input_prices ADD COLUMN input_is_progression_token BOOLEAN;
+            ALTER TABLE input_prices ADD COLUMN input_opposite_clob_token_id VARCHAR;
+            ALTER TABLE input_prices ADD COLUMN input_market_status VARCHAR;
+            ALTER TABLE input_prices ADD COLUMN input_is_still_alive BOOLEAN;
+
             CREATE TABLE token_minute_reference AS
             SELECT
                 market_id,
@@ -55,7 +65,16 @@ def test_token_minute_prices_choose_latest_timestamp_per_minute(tmp_path: Path) 
                 odds_timestamp,
                 odds_timestamp_epoch,
                 odds_minute_epoch,
-                price
+                price,
+                input_canonical_team_name,
+                input_stage_key,
+                input_stage_rank,
+                input_market_direction,
+                input_progression_outcome_label,
+                input_is_progression_token,
+                input_opposite_clob_token_id,
+                input_market_status,
+                input_is_still_alive
             FROM (
                 SELECT
                     *,

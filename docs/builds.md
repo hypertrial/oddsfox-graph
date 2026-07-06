@@ -9,14 +9,15 @@ otherwise.
 Generate the odds parquet with
 [hypertrial/oddsfox-pipeline](https://github.com/hypertrial/oddsfox-pipeline). Follow its
 [quickstart](https://github.com/hypertrial/oddsfox-pipeline/blob/main/docs/quickstart.md),
-then export `polymarket_marts.selected_token_live_hourly_odds` as parquet with
-`scripts/export_selected_hourly_odds.py --live-current`.
+then export `polymarket_wc2026_marts.polymarket_wc2026_graph_token_hourly_odds`
+as parquet with `scripts/export_polymarket_wc2026_graph_hourly_odds.py`.
 
-The live export keeps the same schema documented in
-[`selected_token_hourly_odds_20260703T095031Z.md`](../selected_token_hourly_odds_20260703T095031Z.md).
-Historical `selected_token_hourly_odds` parquet is still supported for audits,
-backtests, and legacy fixtures; the build also filters stale or closed markets
-defensively by default.
+The graph export includes both Yes/No tokens per real-team knockout market and
+dbt-clean semantic columns such as `canonical_team_name`, `stage_key`,
+`stage_rank`, `is_progression_token`, and `opposite_clob_token_id`. Historical
+`selected_token_hourly_odds` parquet is still supported for audits, backtests,
+and legacy fixtures; regex/taxonomy parsing is only used when semantic columns
+are absent.
 Legacy minutely parquet with `odds_timestamp`, `odds_timestamp_epoch`, and
 `price` is still supported for compatibility.
 
@@ -24,7 +25,7 @@ Legacy minutely parquet with `odds_timestamp`, `odds_timestamp_epoch`, and
 
 ```bash
 python -m oddsfox_graph.cli build \
-  --input selected_token_live_hourly_odds_20260703T095031Z.parquet \
+  --input /tmp/wc2026_graph_hourly.parquet \
   --out output/wc2026
 ```
 
