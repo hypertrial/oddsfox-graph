@@ -12,11 +12,14 @@ trading system.
 ## Part Of OddsFox
 
 `oddsfox-graph` consumes pipeline graph-export parquet and publishes offline
-analysis artifacts. The former `oddsfox-live` API and dashboard deployment are
-retired; graph output is not coupled to trade execution.
+analysis artifacts. The standalone
+[`oddsfox-execution`](https://github.com/hypertrial/oddsfox-execution) service
+accepts explicit order intents and does not consume graph output.
 
-For the current data flow, see the
-[OddsFox System Overview](https://github.com/hypertrial/oddsfox-pipeline/blob/main/docs/concepts/system-overview.md).
+For the full repository and runtime flow, see the private parent
+[OddsFox architecture](https://github.com/hypertrial/oddsfox/blob/main/docs/architecture.md).
+The public warehouse remains documented in the
+[pipeline system overview](https://github.com/hypertrial/oddsfox-pipeline/blob/main/docs/concepts/system-overview.md).
 
 ## Requirements
 

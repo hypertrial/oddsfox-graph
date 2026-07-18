@@ -8,7 +8,7 @@ otherwise.
 
 Generate the odds parquet with
 [hypertrial/oddsfox-pipeline](https://github.com/hypertrial/oddsfox-pipeline). Follow its
-[quickstart](https://github.com/hypertrial/oddsfox-pipeline/blob/main/docs/quickstart.md),
+[quickstart](https://github.com/hypertrial/oddsfox-pipeline/blob/main/docs/getting-started/index.md),
 then export `polymarket_wc2026_marts.polymarket_wc2026_graph_token_hourly_odds`
 as parquet with `scripts/export_polymarket_wc2026_graph_hourly_odds.py`.
 
