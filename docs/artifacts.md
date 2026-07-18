@@ -14,11 +14,11 @@ provided.
 Build-mode behavior is documented in [Build Modes](builds.md). Pipeline behavior
 is documented in [Architecture](architecture.md).
 
-## Hosted JSON Artifacts
+## Portable JSON Artifacts
 
 ### `graph_snapshot.json`
 
-Purpose: compact hosted API payload for `oddsfox-live`.
+Purpose: compact, portable graph snapshot for offline consumers.
 
 Top-level fields: `version`, `built_at`, `source_manifest`, `counts`, `nodes`,
 `logic_edges`, `conditionals`, and `violations`.
@@ -31,7 +31,7 @@ Nodes expose `node_id`, `market_id`, `question`, `outcome_label`,
 
 ### `knockout_artifacts.json`
 
-Purpose: hosted WC2026 knockout probability payload for `oddsfox-live`.
+Purpose: portable WC2026 knockout probability payload.
 
 The progression-side token is always `asset_id` and `progression_asset_id`,
 including elimination-framed markets where progression is the No token.

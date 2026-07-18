@@ -11,16 +11,12 @@ trading system.
 
 ## Part Of OddsFox
 
-`oddsfox-graph` sits between `oddsfox-pipeline` and `oddsfox-live`. It consumes
-the pipeline graph export parquet and publishes `graph_snapshot.json` plus
-`knockout_artifacts.json` for the live API and dashboard.
+`oddsfox-graph` consumes pipeline graph-export parquet and publishes offline
+analysis artifacts. The former `oddsfox-live` API and dashboard deployment are
+retired; graph output is not coupled to trade execution.
 
-For the full source-to-dashboard flow, see the
-[OddsFox System Overview](https://github.com/hypertrial/oddsfox-pipeline/blob/main/docs/system-overview.md)
-and
-[Operator Runbook](https://github.com/hypertrial/oddsfox-pipeline/blob/main/docs/operator-runbook.md).
-The live API contract is documented in
-[oddsfox-live docs/api.md](https://github.com/hypertrial/oddsfox-live/blob/main/docs/api.md).
+For the current data flow, see the
+[OddsFox System Overview](https://github.com/hypertrial/oddsfox-pipeline/blob/main/docs/concepts/system-overview.md).
 
 ## Requirements
 
@@ -38,8 +34,8 @@ stay outside source control.
 
 Use [hypertrial/oddsfox-pipeline](https://github.com/hypertrial/oddsfox-pipeline) to build and
 export the source data. OddsFox documents the local pipeline in its
-[quickstart](https://github.com/hypertrial/oddsfox-pipeline/blob/main/docs/quickstart.md).
-For hosted WC2026 graph builds, export
+[quickstart](https://github.com/hypertrial/oddsfox-pipeline/blob/main/docs/getting-started/index.md).
+For WC2026 graph builds, export
 `polymarket_wc2026_marts.polymarket_wc2026_graph_token_hourly_odds`:
 
 ```bash
@@ -87,11 +83,9 @@ python -m oddsfox_graph.cli build \
 Successful builds write `build_manifest.json` last. Treat that file as the
 completion marker for a coherent output directory.
 
-WC2026 builds also write `knockout_artifacts.json` and `graph_snapshot.json` for
-`oddsfox-live`. The knockout artifact contains stages, teams, stage-market asset
-IDs, bracket slots, baseline market-ratio conditional probabilities, and hourly
-probability history. The graph snapshot is compact JSON for the hosted logical
-graph API.
+WC2026 builds also write the legacy-compatible `knockout_artifacts.json` and
+`graph_snapshot.json`. They remain useful as portable analysis artifacts but
+have no supported hosted runtime.
 
 ## Inspect Results
 
