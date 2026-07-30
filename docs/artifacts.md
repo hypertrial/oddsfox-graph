@@ -51,7 +51,8 @@ Grain: one accepted structural/semantic edge.
 
 Columns: `src_node_id`, `dst_node_id`, `edge_type`, `edge_basis`, `confidence`,
 `market_id_src`, `market_id_dst`, `event_slug_src`, `event_slug_dst`,
-`evidence`.
+`evidence`, `discovery_method`, `rule_version`, `model_version`,
+`prompt_version`, `explanation`, `assumptions`.
 
 Accepted `edge_basis` values:
 
@@ -59,6 +60,11 @@ Accepted `edge_basis` values:
 - `exact_duplicate`
 - `single_winner_family`
 - `stage_progression_rule`
+
+Discovery also uses `normalized_equivalence`, `numeric_threshold`,
+`time_window_containment`, `tournament_stage`, `single_winner`, and
+`llm_classifier`. `compatible` is a graph edge, but it is excluded from
+conditional derivation. `unrelated` and `uncertain` are not edge types.
 
 ### `conditional_edges.parquet`
 
@@ -74,6 +80,58 @@ Methods:
 - `exact_implication` → `P(dst|src) = 1` for `implies` edges
 
 Price-ratio and Frechet methods are not produced.
+
+### `propositions.parquet`
+
+Discovery only. Grain: one row per outcome, with
+`proposition_id = clob_token_id`.
+
+Columns: `proposition_id`, `market_id`, `event_id`, `event_slug`,
+`clob_token_id`, `outcome_index`, `outcome`, `question`, `category`, `tags`,
+`subject_original`, `subject`, `predicate`, `object_original`, `object`,
+`operator`, `threshold`, `unit_original`, `unit`, `time_start`, `time_end`,
+`competition_original`, `competition`, `jurisdiction_original`,
+`jurisdiction`, `polarity`, `parse_confidence`, `parse_status`, `parser_model`,
+`prompt_version`, `source_format`.
+
+Original/canonical pairs preserve normalization provenance. Nullable structured
+fields remain present and may contain null.
+
+### `relation_candidates.parquet`
+
+Discovery only. Grain: one canonical unordered proposition pair.
+
+Columns: `proposition_a_id`, `proposition_b_id`, `candidate_reasons`,
+`embedding_similarity`, `embedding_rank`, `deterministic_relation`,
+`classification_relation`, `classification_confidence`, `explanation`,
+`assumptions`, `requires_review`, `status`, `discovery_method`,
+`model_version`, `prompt_version`.
+
+Candidate reasons may include shared entity, event, competition, predicate,
+unit, overlapping dates, and embedding rank/score. Embedding-only candidates
+cannot be accepted without classification.
+
+### `review_queue.parquet`
+
+Discovery only. Grain: one deduplicated review item.
+
+Columns: `review_id`, `proposition_a_id`, `proposition_b_id`, `review_kind`,
+`proposed_relation`, `confidence`, `explanation`, `assumptions`,
+`model_version`, `prompt_version`.
+
+The queue includes parse failures, low-confidence parses/classifications,
+explicit review requests, refusals, malformed or exhausted requests, and LLM
+consistency conflicts.
+
+### `evaluation.json`
+
+Written by `review-score`. It contains completed sample counts, deterministic
+and overall precision, candidate recall, provenance failures, threshold
+definitions, per-gate booleans, and the overall `passed` result.
+Completed CSV labels must use a supported relation name (`equivalent`,
+`implies`, `A_implies_B`, `B_implies_A`, `mutually_exclusive`, `complement`,
+`compatible`, `unrelated`, or `uncertain`); unknown or missing labels fail
+scoring.
 
 ## Reports
 

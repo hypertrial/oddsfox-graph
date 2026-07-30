@@ -20,6 +20,9 @@ class DuckDB:
             return
         self._conn.execute(sql, params)
 
+    def executemany(self, sql: str, params: Sequence[Sequence[object]]) -> None:
+        self._conn.executemany(sql, params)
+
     def rows(self, sql: str, params: Sequence[object] | None = None) -> list[dict[str, object]]:
         rel = self._conn.execute(sql) if params is None else self._conn.execute(sql, params)
         cols = [d[0] for d in rel.description]

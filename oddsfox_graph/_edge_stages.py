@@ -160,7 +160,20 @@ def accept_logic_edges(db: DuckDB, out_dir: Path) -> None:
                 WHEN c.candidate_source = 'semantic_stage_progression' THEN 'higher tournament stage implies lower stage'
                 WHEN c.candidate_source = 'same_market' THEN 'same market n-ary outcomes are mutually exclusive'
                 ELSE 'structural candidate'
-            END AS evidence
+            END AS evidence,
+            'deterministic' AS discovery_method,
+            'structural-v1' AS rule_version,
+            NULL::VARCHAR AS model_version,
+            NULL::VARCHAR AS prompt_version,
+            CASE
+                WHEN c.candidate_type = 'complement' THEN 'same market tokens sum to 1'
+                WHEN c.candidate_source = 'exact_duplicate_same_event' THEN 'same canonical proposition in the same event'
+                WHEN c.candidate_source = 'semantic_single_winner' THEN 'single-winner family alternatives cannot both occur'
+                WHEN c.candidate_source = 'semantic_stage_progression' THEN 'higher tournament stage implies lower stage'
+                WHEN c.candidate_source = 'same_market' THEN 'same market n-ary outcomes are mutually exclusive'
+                ELSE 'structural candidate'
+            END AS explanation,
+            []::VARCHAR[] AS assumptions
         FROM candidate_edges_v c
         WHERE c.candidate_source IN (
             'same_market',

@@ -227,5 +227,8 @@ output/
 *_token_minutely_odds_*.parquet
 *_token_hourly_odds_*.parquet
 
+# Local catalog / discovery inputs (not versioned)
+data/
+
 # macOS
 .DS_Store

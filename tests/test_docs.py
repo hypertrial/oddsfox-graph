@@ -5,13 +5,18 @@ from pathlib import Path
 
 from oddsfox_graph.artifacts import ARTIFACT_COLUMNS, PARQUET_ARTIFACTS, REPORTS
 from oddsfox_graph.cli import build_parser
+from oddsfox_graph.discovery import (
+    CANDIDATE_COLUMNS,
+    PROPOSITION_COLUMNS,
+    REVIEW_COLUMNS,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
 DOCS = ROOT / "docs"
 
 
-def test_cli_docs_cover_subcommands_and_build_flags() -> None:
+def test_cli_docs_cover_subcommands_and_flags() -> None:
     subcommands = _subcommand_parsers(build_parser())
     cli_doc = (DOCS / "cli.md").read_text(encoding="utf-8")
     builds_doc = (DOCS / "builds.md").read_text(encoding="utf-8")
@@ -20,11 +25,12 @@ def test_cli_docs_cover_subcommands_and_build_flags() -> None:
     for command in sorted(subcommands):
         assert f"`{command}`" in cli_doc
 
-    flags = _long_options(subcommands["build"])
-    assert flags
     documented_flags = cli_doc + "\n" + builds_doc
-    for flag in sorted(flags):
-        assert flag in documented_flags
+    for command, parser in subcommands.items():
+        flags = _long_options(parser)
+        assert flags, command
+        for flag in sorted(flags):
+            assert flag in documented_flags
 
 
 def test_artifact_docs_cover_artifacts_reports_and_columns() -> None:
@@ -37,6 +43,16 @@ def test_artifact_docs_cover_artifacts_reports_and_columns() -> None:
 
     for report in REPORTS:
         assert f"`{report}`" in artifact_doc
+
+    discovery_columns = {
+        "propositions.parquet": PROPOSITION_COLUMNS,
+        "relation_candidates.parquet": CANDIDATE_COLUMNS,
+        "review_queue.parquet": REVIEW_COLUMNS,
+    }
+    for artifact, columns in discovery_columns.items():
+        assert f"`{artifact}`" in artifact_doc
+        for column in columns:
+            assert f"`{column}`" in artifact_doc
 
 
 def test_manifest_shape_is_documented() -> None:

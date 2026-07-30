@@ -72,7 +72,8 @@ def write_conditionals(db: DuckDB, out_dir: Path) -> None:
         )
         SELECT * FROM exact_exclusion
         UNION ALL SELECT * FROM exact_equivalence
-        UNION ALL SELECT * FROM exact_implication;
+        UNION ALL SELECT * FROM exact_implication
+        ORDER BY a_node_id, b_node_id, method;
         """
     )
     validate_relation_columns(db, "conditional_edges_v")
@@ -81,6 +82,7 @@ def write_conditionals(db: DuckDB, out_dir: Path) -> None:
         COPY (
             SELECT {artifact_projection("conditional_edges.parquet")}
             FROM conditional_edges_v
+            ORDER BY a_node_id, b_node_id, method
         ) TO '{q(out_dir / "conditional_edges.parquet")}' (FORMAT PARQUET);
         """
     )

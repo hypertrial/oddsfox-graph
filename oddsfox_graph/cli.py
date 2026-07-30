@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -9,7 +10,13 @@ from .build import build
 from .search import PATH_SENTINEL, read_rows, resolve_node, search_nodes
 
 
-EDGE_TYPES = ("complement", "equivalent", "implies", "mutually_exclusive")
+EDGE_TYPES = (
+    "compatible",
+    "complement",
+    "equivalent",
+    "implies",
+    "mutually_exclusive",
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -20,6 +27,41 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--input", required=True, type=Path)
     p.add_argument("--out", required=True, type=Path)
     p.add_argument("--taxonomy", type=Path, default=None)
+
+    p = sub.add_parser("discover")
+    p.add_argument("--input", required=True, type=Path)
+    p.add_argument("--out", required=True, type=Path)
+    p.add_argument("--cache-dir", type=Path, default=None)
+    p.add_argument("--offline", action="store_true")
+    p.add_argument("--parse-model", default="gpt-5.6-terra")
+    p.add_argument("--classify-model", default="gpt-5.6-terra")
+    p.add_argument(
+        "--embedding-model",
+        default="sentence-transformers/all-MiniLM-L6-v2",
+    )
+    p.add_argument(
+        "--embedding-revision",
+        default="1110a243fdf4706b3f48f1d95db1a4f5529b4d41",
+    )
+    p.add_argument("--accept-confidence", type=float, default=0.95)
+    p.add_argument("--parse-confidence", type=float, default=0.95)
+    p.add_argument("--top-k", type=int, default=20)
+    p.add_argument("--max-propositions", type=int, default=2_000)
+    p.add_argument("--max-candidates", type=int, default=40_000)
+    p.add_argument("--max-llm-pairs", type=int, default=5_000)
+    p.add_argument("--llm-concurrency", type=int, default=8)
+
+    p = sub.add_parser("review-export")
+    p.add_argument("--out", required=True, type=Path)
+    p.add_argument("--output", required=True, type=Path)
+    p.add_argument("--accepted", type=int, default=200)
+    p.add_argument("--recall-pairs", type=int, default=200)
+    p.add_argument("--seed", type=int, default=0)
+
+    p = sub.add_parser("review-score")
+    p.add_argument("--out", required=True, type=Path)
+    p.add_argument("--labels", required=True, type=Path)
+    p.add_argument("--output", type=Path, default=None)
 
     p = sub.add_parser("benchmark-summary")
     p.add_argument("--out", required=True, type=Path)
@@ -63,6 +105,49 @@ def main(argv: list[str] | None = None) -> int:
             stats = build(args.input, args.out, taxonomy_path=args.taxonomy)
             for key, value in stats.items():
                 print(f"{key}: {value}")
+        elif args.cmd == "discover":
+            from .discovery import DiscoveryConfig, discover
+
+            stats = discover(
+                args.input,
+                args.out,
+                config=DiscoveryConfig(
+                    cache_dir=args.cache_dir,
+                    offline=args.offline,
+                    parse_model=args.parse_model,
+                    classify_model=args.classify_model,
+                    embedding_model=args.embedding_model,
+                    embedding_revision=args.embedding_revision,
+                    accept_confidence=args.accept_confidence,
+                    parse_confidence=args.parse_confidence,
+                    top_k=args.top_k,
+                    max_propositions=args.max_propositions,
+                    max_candidates=args.max_candidates,
+                    max_llm_pairs=args.max_llm_pairs,
+                    llm_concurrency=args.llm_concurrency,
+                ),
+            )
+            for key, value in stats.items():
+                print(f"{key}: {value}")
+        elif args.cmd == "review-export":
+            from .review import export_review
+
+            counts = export_review(
+                args.out,
+                args.output,
+                accepted=args.accepted,
+                recall_pairs=args.recall_pairs,
+                seed=args.seed,
+            )
+            for key, value in counts.items():
+                print(f"{key}: {value}")
+        elif args.cmd == "review-score":
+            from .review import score_review
+
+            result = score_review(args.out, args.labels, args.output)
+            print(json.dumps(result, indent=2, sort_keys=True))
+            if not result["passed"]:
+                return 1
         elif args.cmd == "benchmark-summary":
             print(benchmark_summary(args.out), end="")
         elif args.cmd == "nodes":

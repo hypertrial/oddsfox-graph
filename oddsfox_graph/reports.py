@@ -9,51 +9,10 @@ def write_reports(db: DuckDB, out_dir: Path, stats: dict[str, object]) -> None:
     reports = out_dir / "reports"
     reports.mkdir(parents=True, exist_ok=True)
     _write(reports / "summary.md", _summary(stats))
-    _write(
-        reports / "strongest_implications.md",
-        _query_report(
-            db,
-            "Implications",
-            """
-            SELECT
-                e.src_node_id,
-                e.dst_node_id,
-                e.edge_basis,
-                s.canonical_proposition AS src_proposition,
-                d.canonical_proposition AS dst_proposition,
-                e.confidence,
-                e.evidence
-            FROM logic_edges_v e
-            JOIN nodes_v s ON s.node_id = e.src_node_id
-            JOIN nodes_v d ON d.node_id = e.dst_node_id
-            WHERE e.edge_type = 'implies'
-            ORDER BY e.edge_basis, e.src_node_id, e.dst_node_id
-            LIMIT 50
-            """,
-        ),
-    )
+    _write(reports / "strongest_implications.md", _logic_edge_report(db, "Implications", "implies"))
     _write(
         reports / "strongest_exclusions.md",
-        _query_report(
-            db,
-            "Exclusions",
-            """
-            SELECT
-                e.src_node_id,
-                e.dst_node_id,
-                e.edge_basis,
-                s.canonical_proposition AS src_proposition,
-                d.canonical_proposition AS dst_proposition,
-                e.confidence,
-                e.evidence
-            FROM logic_edges_v e
-            JOIN nodes_v s ON s.node_id = e.src_node_id
-            JOIN nodes_v d ON d.node_id = e.dst_node_id
-            WHERE e.edge_type = 'mutually_exclusive'
-            ORDER BY e.edge_basis, e.src_node_id, e.dst_node_id
-            LIMIT 50
-            """,
-        ),
+        _logic_edge_report(db, "Exclusions", "mutually_exclusive"),
     )
     _write(
         reports / "duplicate_edges.md",
@@ -93,8 +52,31 @@ def write_reports(db: DuckDB, out_dir: Path, stats: dict[str, object]) -> None:
     )
 
 
+def _logic_edge_report(db: DuckDB, title: str, edge_type: str) -> str:
+    return _query_report(
+        db,
+        title,
+        f"""
+        SELECT
+            e.src_node_id,
+            e.dst_node_id,
+            e.edge_basis,
+            s.canonical_proposition AS src_proposition,
+            d.canonical_proposition AS dst_proposition,
+            e.confidence,
+            e.evidence
+        FROM logic_edges_v e
+        JOIN nodes_v s ON s.node_id = e.src_node_id
+        JOIN nodes_v d ON d.node_id = e.dst_node_id
+        WHERE e.edge_type = '{edge_type}'
+        ORDER BY e.edge_basis, e.src_node_id, e.dst_node_id
+        LIMIT 50
+        """,
+    )
+
+
 def _summary(stats: dict[str, object]) -> str:
-    lines = ["# oddsfox-graph build summary", ""]
+    lines = ["# oddsfox_graph build summary", ""]
     for key in (
         "input_rows",
         "markets",

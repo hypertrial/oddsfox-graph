@@ -64,6 +64,12 @@ ARTIFACT_COLUMNS = {
         "event_slug_src",
         "event_slug_dst",
         "evidence",
+        "discovery_method",
+        "rule_version",
+        "model_version",
+        "prompt_version",
+        "explanation",
+        "assumptions",
     ],
     "conditional_edges.parquet": [
         "a_node_id",
@@ -76,14 +82,9 @@ ARTIFACT_COLUMNS = {
 }
 
 
-def parquet_artifacts() -> tuple[str, ...]:
-    return PARQUET_ARTIFACTS
-
-
 def reports() -> tuple[str, ...]:
     return tuple(f"reports/{name}" for name in REPORTS)
 
 
-def artifact_projection(artifact: str, *, table_alias: str | None = None) -> str:
-    prefix = f"{table_alias}." if table_alias else ""
-    return ", ".join(f"{prefix}{column}" for column in ARTIFACT_COLUMNS[artifact])
+def artifact_projection(artifact: str) -> str:
+    return ", ".join(ARTIFACT_COLUMNS[artifact])

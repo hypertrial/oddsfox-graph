@@ -128,14 +128,14 @@ def _wc2026_output_or_skip() -> Path:
     manifest_path = WC2026_OUT / "build_manifest.json"
     snapshot_path = WC2026_OUT / GRAPH_SNAPSHOT_ARTIFACT
     if not manifest_path.exists() or not snapshot_path.exists():
-        pytest.skip("output/wc2026 is missing v0.2 manifest/snapshot")
+        pytest.skip("output/wc2026 is missing the current manifest/snapshot")
 
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
     artifacts = set(manifest.get("artifacts") or [])
     required = {"nodes.parquet", "logic_edges.parquet", "conditional_edges.parquet"}
     if not required.issubset(artifacts) or "prices.parquet" in artifacts:
-        pytest.skip("output/wc2026 is not a structural-only v0.2 build")
+        pytest.skip("output/wc2026 is not a current structural-only build")
     if snapshot.get("version") != f"v{__version__}":
         pytest.skip(
             f"output/wc2026 snapshot version {snapshot.get('version')!r} "

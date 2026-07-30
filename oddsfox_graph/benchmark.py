@@ -10,8 +10,10 @@ COUNT_KEYS = (
     "markets",
     "tokens",
     "candidate_edges",
+    "classified_pairs",
     "logic_edges",
     "conditional_edges",
+    "review_queue",
 )
 
 

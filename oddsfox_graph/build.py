@@ -6,19 +6,17 @@ import time
 from pathlib import Path
 from typing import Callable, TypeVar
 
-T_ = TypeVar("T_")
-
 from .artifacts import (
     ARTIFACT_COLUMNS,
     FINAL_EDGE_ARTIFACT_TABLES,
+    PARQUET_ARTIFACTS,
     REPORTS,
     artifact_projection,
-    parquet_artifacts,
     reports,
 )
 from ._diagnostic_stages import write_conditionals
 from ._edge_stages import accept_logic_edges, write_candidates
-from .contracts import INPUT_PRICE_COLUMNS, sql_column_list, validate_relation_columns
+from .contracts import INPUT_PRICE_COLUMNS, validate_relation_columns
 from .graph_snapshot import GRAPH_SNAPSHOT_ARTIFACT, write_graph_snapshot
 from .queries import DuckDB, q
 from .reports import write_reports
@@ -31,6 +29,9 @@ from .rules import (
     stage_subject_alias_values_sql,
 )
 from .schema import InputFormat, create_input_prices, validate_input_schema, validate_input_table
+
+
+T_ = TypeVar("T_")
 
 
 def _stage(
@@ -119,7 +120,7 @@ _LEGACY_REPORTS = (
 
 def _clear_generated(out_dir: Path) -> None:
     for name in (
-        *parquet_artifacts(),
+        *PARQUET_ARTIFACTS,
         *_LEGACY_GENERATED_ARTIFACTS,
         GRAPH_SNAPSHOT_ARTIFACT,
         "build_manifest.json",
@@ -154,7 +155,7 @@ def _write_manifest(
             "hash": taxonomy.content_hash,
         },
         "artifacts": [
-            *parquet_artifacts(),
+            *PARQUET_ARTIFACTS,
             GRAPH_SNAPSHOT_ARTIFACT,
         ],
         "reports": list(reports()),
@@ -168,12 +169,11 @@ def _write_manifest(
 
 
 def _validate_generated_artifacts(db: DuckDB, out_dir: Path) -> None:
-    artifacts = parquet_artifacts()
-    missing = [name for name in artifacts if not (out_dir / name).exists()]
+    missing = [name for name in PARQUET_ARTIFACTS if not (out_dir / name).exists()]
     if missing:
         raise RuntimeError("Missing generated artifacts: " + ", ".join(missing))
 
-    for artifact in artifacts:
+    for artifact in PARQUET_ARTIFACTS:
         expected_columns = ARTIFACT_COLUMNS[artifact]
         path = q(out_dir / artifact)
         actual_columns = [
@@ -216,7 +216,7 @@ def _create_identity_tables(
 
 
 def _create_token_minute_prices(db: DuckDB) -> None:
-    columns = sql_column_list(INPUT_PRICE_COLUMNS)
+    columns = ", ".join(INPUT_PRICE_COLUMNS)
     db.execute(
         f"""
         CREATE TABLE token_minute_prices AS
@@ -452,10 +452,10 @@ def _validate_final_edge_invariants(db: DuckDB) -> None:
                 """
                 SELECT count(*)
                 FROM (
-                    SELECT src_node_id, dst_node_id, edge_type
-                    FROM logic_edges_v
-                    GROUP BY 1, 2, 3
-                    HAVING count(*) > 1
+                SELECT src_node_id, dst_node_id, edge_type
+                FROM logic_edges_v
+                GROUP BY 1, 2, 3
+                HAVING count(*) > 1
                 )
                 """,
             ),

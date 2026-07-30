@@ -1,8 +1,10 @@
 # oddsfox-graph
 
-`oddsfox-graph` turns token-level Polymarket odds parquet into a structural
-proposition graph. Each `clob_token_id` becomes a node. The batch build emits
-market groups, accepted logic edges, and exact logic-only conditional edges.
+`oddsfox-graph` turns Polymarket market or token-odds parquet into a proposition
+graph. Each `clob_token_id` becomes a node. The offline `build` command preserves
+the WC2026 structural workflow; the v0.3.0 `discover` command adds typed parsing,
+local semantic retrieval, deterministic rules, selective LLM classification,
+review tooling, and complete provenance.
 
 This is a Python/DuckDB tool for offline structural analysis. It does not score
 prices, solve coherence LPs, or produce trading signals.
@@ -23,9 +25,12 @@ The public warehouse remains documented in the
 
 - Python 3.11 or newer.
 - DuckDB from the Python package dependency in `pyproject.toml`.
-- A parquet input from
+- For `build`, a parquet input from
   `polymarket_wc2026_marts.polymarket_wc2026_graph_token_hourly_odds` or a
   legacy hourly/minutely OddsFox export.
+- For `discover`, either a compact market snapshot with `market_id`, `question`,
+  `outcomes`, and `clob_token_ids`, or an existing OddsFox minutely/hourly
+  export.
 
 ## Get The Parquet
 
@@ -54,10 +59,19 @@ From the repo root:
 python -m pip install -e ".[dev]"
 ```
 
+Install the optional discovery runtime for live discovery:
+
+```bash
+python -m pip install -e ".[discovery]"
+```
+
+Legacy `build` remains DuckDB-only. Live discovery also requires
+`OPENAI_API_KEY`; a cache-complete `--offline` run does not.
+
 ## Validation
 
 ```bash
-python -m pytest -q
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest -q
 ```
 
 ## Build Artifacts
@@ -71,7 +85,7 @@ python -m oddsfox_graph.cli build \
 Successful builds write `build_manifest.json` last. Treat that file as the
 completion marker for a coherent output directory.
 
-Published parquet artifacts:
+Legacy builds publish:
 
 - `nodes.parquet`
 - `market_groups.parquet`
@@ -79,6 +93,47 @@ Published parquet artifacts:
 - `conditional_edges.parquet`
 
 Builds also write a portable `graph_snapshot.json` summary.
+
+## Automated Discovery
+
+The supplied local catalog is the canonical smoke input:
+
+```bash
+python -m oddsfox_graph.cli discover \
+  --input data/polymarket_all_markets_20260730T093857Z.parquet \
+  --out output/discovery-smoke \
+  --cache-dir .cache/oddsfox-graph
+```
+
+`data/` is intentionally unversioned; place the supplied catalog at that path
+before running the smoke commands.
+
+The catalog is deterministically capped by highest `volume`, then `market_id`,
+to honor `--max-propositions` (default 2,000). Unusable source markets and the
+selection counts are recorded in the manifest. Reproduce the completed run
+without an API key:
+
+```bash
+python -m oddsfox_graph.cli discover \
+  --input data/polymarket_all_markets_20260730T093857Z.parquet \
+  --out output/discovery-smoke \
+  --cache-dir .cache/oddsfox-graph \
+  --offline
+```
+
+Discovery additionally publishes `propositions.parquet`,
+`relation_candidates.parquet`, and `review_queue.parquet`. Export and score a
+human review:
+
+```bash
+python -m oddsfox_graph.cli review-export \
+  --out output/discovery-smoke \
+  --output output/discovery-smoke/review.csv
+
+python -m oddsfox_graph.cli review-score \
+  --out output/discovery-smoke \
+  --labels output/discovery-smoke/review.csv
+```
 
 ## Inspect Results
 

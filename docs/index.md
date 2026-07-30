@@ -8,7 +8,8 @@ and low-level artifact schemas.
 1. Start with the [README](../README.md) for purpose, setup, and the shortest
    working build and inspect commands.
 2. Use [CLI Reference](cli.md) when you need every command and flag.
-3. Use [Builds](builds.md) for the structural build flow and manifest shape.
+3. Use [Builds](builds.md) for the legacy and automated-discovery flows,
+   cache behavior, and manifest shape.
 4. Use [Artifact Reference](artifacts.md) when consuming parquet files or
    markdown reports programmatically.
 5. Use [Architecture](architecture.md) when changing the build pipeline or
@@ -18,5 +19,5 @@ and low-level artifact schemas.
 ## Maintenance Contract
 
 The test suite includes lightweight docs drift checks in `tests/test_docs.py`.
-Those checks verify that CLI subcommands, build flags, artifact names, report
+Those checks verify that CLI subcommands and flags, artifact names, report
 names, manifest fields, and local Markdown links remain documented.

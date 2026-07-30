@@ -97,11 +97,6 @@ INTERNAL_TABLE_COLUMNS = {
 }
 
 
-def sql_column_list(columns: Sequence[str], *, table_alias: str | None = None) -> str:
-    prefix = f"{table_alias}." if table_alias else ""
-    return ", ".join(f"{prefix}{column}" for column in columns)
-
-
 def validate_relation_columns(
     db: DuckDB,
     relation: str,
