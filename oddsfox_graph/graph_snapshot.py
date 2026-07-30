@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from . import __version__
 from .queries import DuckDB
 
 GRAPH_SNAPSHOT_ARTIFACT = "graph_snapshot.json"
@@ -54,7 +55,7 @@ def write_graph_snapshot(
         """
     )
     snapshot = {
-        "version": "v0.2.0",
+        "version": f"v{__version__}",
         "built_at": datetime.now(timezone.utc).isoformat(),
         "source_manifest": source_manifest,
         "counts": {

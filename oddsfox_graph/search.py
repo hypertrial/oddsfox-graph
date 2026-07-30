@@ -7,6 +7,9 @@ from pathlib import Path
 from .queries import DuckDB, q
 
 
+PATH_SENTINEL = "__PATH__"
+
+
 def read_rows(
     out_dir: Path,
     artifact: str,
@@ -16,7 +19,7 @@ def read_rows(
     db = DuckDB()
     try:
         path = q(require_artifact(out_dir, artifact))
-        return db.rows(sql.format(path=path), params)
+        return db.rows(sql.replace(PATH_SENTINEL, path), params)
     finally:
         db.close()
 
@@ -44,7 +47,7 @@ def search_nodes(out_dir: Path, query: str, top: int = 20) -> list[dict[str, obj
         "nodes.parquet",
         f"""
         SELECT node_id, market_id, outcome_label, event_slug, canonical_proposition
-        FROM read_parquet('{{path}}')
+        FROM read_parquet('{PATH_SENTINEL}')
         WHERE lower(node_id) = ?
             OR lower(question) LIKE ? ESCAPE '!'
             OR lower(canonical_proposition) LIKE ? ESCAPE '!'
@@ -60,9 +63,9 @@ def resolve_node(out_dir: Path, text: str, *, require_unique: bool = False) -> s
     exact = read_rows(
         out_dir,
         "nodes.parquet",
-        """
+        f"""
         SELECT node_id
-        FROM read_parquet('{path}')
+        FROM read_parquet('{PATH_SENTINEL}')
         WHERE node_id = ?
         LIMIT 1
         """,

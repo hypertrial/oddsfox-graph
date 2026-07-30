@@ -11,7 +11,6 @@ COUNT_KEYS = (
     "tokens",
     "candidate_edges",
     "logic_edges",
-    "derived_edges",
     "conditional_edges",
 )
 

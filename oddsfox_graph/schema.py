@@ -32,8 +32,6 @@ HOURLY_REQUIRED_COLUMNS = {
     "close_price",
 }
 
-REQUIRED_COLUMNS = MINUTELY_REQUIRED_COLUMNS
-
 TABLE_REQUIRED_COLUMNS = {
     "market_id",
     "outcome_index",
@@ -181,11 +179,6 @@ def validate_input_table(db: DuckDB, table: str = "input_prices") -> None:
             SELECT count(*)
             FROM {table}
             WHERE {" OR ".join(f"{col} IS NULL" for col in sorted(TABLE_REQUIRED_COLUMNS))}
-        """), "rows"),
-        ("prices outside [0, 1]", _count(db, f"""
-            SELECT count(*)
-            FROM {table}
-            WHERE price < 0 OR price > 1
         """), "rows"),
         ("duplicate token timestamp rows", _count(db, f"""
             SELECT count(*)

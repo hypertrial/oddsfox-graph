@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 
+from oddsfox_graph import __version__
 from oddsfox_graph.artifacts import ARTIFACT_COLUMNS, PARQUET_ARTIFACTS
-from oddsfox_graph.build import build
+from oddsfox_graph.build import _validate_generated_artifacts, build
 from oddsfox_graph.graph_snapshot import GRAPH_SNAPSHOT_ARTIFACT
 from oddsfox_graph.queries import DuckDB, q
 
@@ -74,7 +76,7 @@ def test_build_outputs_structural_artifacts(synthetic_output: Path) -> None:
         assert "exact_implication_reverse" not in methods
 
         snapshot = json.loads((synthetic_output / GRAPH_SNAPSHOT_ARTIFACT).read_text(encoding="utf-8"))
-        assert snapshot["version"] == "v0.2.0"
+        assert snapshot["version"] == f"v{__version__}"
         assert "violations" not in snapshot
         assert "nodes" in snapshot
         assert "logic_edges" in snapshot
@@ -84,6 +86,8 @@ def test_build_outputs_structural_artifacts(synthetic_output: Path) -> None:
         assert set(manifest["artifacts"]) == set(PARQUET_ARTIFACTS) | {GRAPH_SNAPSHOT_ARTIFACT}
         assert "stage_timings" in manifest
         assert "build_options" not in manifest
+        assert "derived_edges" not in manifest["stats"]
+        assert "compute_transitive_closure" not in manifest["stage_timings"]
     finally:
         db.close()
 
@@ -122,5 +126,33 @@ def test_nary_same_market_exclusions(synthetic_output: Path) -> None:
             or 0
         )
         assert count == 3
+    finally:
+        db.close()
+
+
+def test_conditional_row_count_parity_is_enforced(synthetic_output: Path, tmp_path: Path) -> None:
+    out = tmp_path / "parity"
+    shutil.copytree(synthetic_output, out)
+    db = DuckDB()
+    try:
+        db.execute(
+            f"""
+            COPY (
+                SELECT *
+                FROM read_parquet('{q(out / "conditional_edges.parquet")}')
+                LIMIT 0
+            ) TO '{q(out / "conditional_edges.parquet")}' (FORMAT PARQUET);
+
+            CREATE TABLE logic_edges_v AS
+            SELECT * FROM read_parquet('{q(out / "logic_edges.parquet")}');
+            CREATE TABLE conditional_edges_v AS
+            SELECT * FROM read_parquet('{q(synthetic_output / "conditional_edges.parquet")}');
+            """
+        )
+        try:
+            _validate_generated_artifacts(db, out)
+            raise AssertionError("expected conditional parity failure")
+        except RuntimeError as exc:
+            assert "conditional_edges.parquet is stale" in str(exc)
     finally:
         db.close()

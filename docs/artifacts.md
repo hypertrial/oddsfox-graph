@@ -9,15 +9,22 @@ that output directory.
 
 ### `graph_snapshot.json`
 
-Purpose: compact portable structural snapshot.
+Purpose: portable structural snapshot.
 
 Top-level fields: `version`, `built_at`, `source_manifest`, `counts`, `nodes`,
-`logic_edges`, and `conditionals`.
+`logic_edges`, and `conditionals`. The `version` field is `v` plus the package
+`__version__`.
 
 Nodes expose `node_id`, `market_id`, `question`, `outcome_label`,
 `canonical_proposition`, `team`, and `stage_key`. Logic edges expose `source`,
 `target`, `type`, `basis`, and `confidence`. Conditionals expose `a_node_id`,
 `b_node_id`, `p_a_given_b`, `method`, and `confidence`.
+
+## Scratch Database
+
+`oddsfox_graph.duckdb` may appear under the build output directory as a working
+database. It is cleared on rebuild and is not part of the published artifact
+contract.
 
 ## Parquet Artifacts
 

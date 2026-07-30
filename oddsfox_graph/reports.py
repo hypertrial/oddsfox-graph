@@ -103,7 +103,6 @@ def _summary(stats: dict[str, object]) -> str:
         "closed_markets",
         "candidate_edges",
         "logic_edges",
-        "derived_edges",
         "conditional_edges",
         "runtime_seconds",
         "time_range_start",

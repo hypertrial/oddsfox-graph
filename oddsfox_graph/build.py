@@ -16,9 +16,9 @@ from .artifacts import (
     parquet_artifacts,
     reports,
 )
-from ._diagnostic_stages import compute_transitive_closure, write_conditionals
+from ._diagnostic_stages import write_conditionals
 from ._edge_stages import accept_logic_edges, write_candidates
-from .contracts import validate_relation_columns
+from .contracts import INPUT_PRICE_COLUMNS, sql_column_list, validate_relation_columns
 from .graph_snapshot import GRAPH_SNAPSHOT_ARTIFACT, write_graph_snapshot
 from .queries import DuckDB, q
 from .reports import write_reports
@@ -75,7 +75,6 @@ def build(
         stage("write_candidates", lambda: write_candidates(db))
         stage("accept_logic_edges", lambda: accept_logic_edges(db, out_dir))
         stage("validate_final_edges", lambda: _validate_final_edge_invariants(db))
-        stage("compute_transitive_closure", lambda: compute_transitive_closure(db))
         stage("write_conditionals", lambda: write_conditionals(db, out_dir))
         stage("write_graph_snapshot", lambda: write_graph_snapshot(db, out_dir))
         stats = stage("stats", lambda: _stats(db, start))
@@ -217,32 +216,12 @@ def _create_identity_tables(
 
 
 def _create_token_minute_prices(db: DuckDB) -> None:
+    columns = sql_column_list(INPUT_PRICE_COLUMNS)
     db.execute(
-        """
+        f"""
         CREATE TABLE token_minute_prices AS
         SELECT
-            market_id,
-            outcome_index,
-            clob_token_id,
-            question,
-            outcome_label,
-            event_slug,
-            is_active,
-            is_closed,
-            market_volume_usd,
-            odds_timestamp,
-            odds_timestamp_epoch,
-            odds_minute_epoch,
-            price,
-            input_canonical_team_name,
-            input_stage_key,
-            input_stage_rank,
-            input_market_direction,
-            input_progression_outcome_label,
-            input_is_progression_token,
-            input_opposite_clob_token_id,
-            input_market_status,
-            input_is_still_alive
+            {columns}
         FROM (
             SELECT
                 *,
@@ -563,7 +542,6 @@ def _stats(db: DuckDB, start: float) -> dict[str, str | int | float | None]:
             (SELECT max(odds_timestamp) FROM input_prices) AS time_range_end,
             (SELECT count(*) FROM candidate_edges_v) AS candidate_edges,
             (SELECT count(*) FROM logic_edges_v) AS logic_edges,
-            (SELECT count(*) FROM derived_edges_v) AS derived_edges,
             (SELECT count(*) FROM conditional_edges_v) AS conditional_edges
         """
     )[0]

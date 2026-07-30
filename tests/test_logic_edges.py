@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import json
 from pathlib import Path
 
 import pytest
@@ -118,8 +119,28 @@ def _resolve_node(db: DuckDB, out: Path, query: str) -> str:
 
 
 def _wc2026_output_or_skip() -> Path:
+    from oddsfox_graph import __version__
+    from oddsfox_graph.graph_snapshot import GRAPH_SNAPSHOT_ARTIFACT
+
     if not (WC2026_OUT / "logic_edges.parquet").exists():
         pytest.skip("output/wc2026 is not present")
+
+    manifest_path = WC2026_OUT / "build_manifest.json"
+    snapshot_path = WC2026_OUT / GRAPH_SNAPSHOT_ARTIFACT
+    if not manifest_path.exists() or not snapshot_path.exists():
+        pytest.skip("output/wc2026 is missing v0.2 manifest/snapshot")
+
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
+    artifacts = set(manifest.get("artifacts") or [])
+    required = {"nodes.parquet", "logic_edges.parquet", "conditional_edges.parquet"}
+    if not required.issubset(artifacts) or "prices.parquet" in artifacts:
+        pytest.skip("output/wc2026 is not a structural-only v0.2 build")
+    if snapshot.get("version") != f"v{__version__}":
+        pytest.skip(
+            f"output/wc2026 snapshot version {snapshot.get('version')!r} "
+            f"does not match package v{__version__}"
+        )
     return WC2026_OUT
 
 
@@ -203,3 +224,29 @@ def test_wc2026_oracle_on_mini_fixture(mini_wc2026_output: Path) -> None:
 @pytest.mark.full_output
 def test_wc2026_oracle_if_available() -> None:
     _assert_wc2026_oracle(_wc2026_output_or_skip())
+
+
+def test_wc2026_full_output_gate_skips_stale_tree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    stale = tmp_path / "wc2026"
+    stale.mkdir()
+    (stale / "logic_edges.parquet").write_bytes(b"stale")
+    (stale / "build_manifest.json").write_text(
+        json.dumps(
+            {
+                "artifacts": [
+                    "nodes.parquet",
+                    "prices.parquet",
+                    "logic_edges.parquet",
+                    "conditional_edges.parquet",
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    (stale / "graph_snapshot.json").write_text(
+        json.dumps({"version": "v0.1.1"}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("tests.test_logic_edges.WC2026_OUT", stale)
+    with pytest.raises(pytest.skip.Exception, match="structural-only|snapshot version"):
+        _wc2026_output_or_skip()

@@ -19,6 +19,7 @@ REPORTS = (
 
 FINAL_EDGE_ARTIFACT_TABLES = {
     "logic_edges.parquet": "logic_edges_v",
+    "conditional_edges.parquet": "conditional_edges_v",
 }
 
 ARTIFACT_COLUMNS = {

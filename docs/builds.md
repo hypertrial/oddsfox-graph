@@ -1,6 +1,6 @@
-# Build Modes
+# Builds
 
-v0.2.0 has one build mode: structural graph construction.
+v0.2.0 has one build flow: structural graph construction.
 
 ## Command
 
@@ -14,9 +14,8 @@ python -m oddsfox_graph.cli build --input <parquet> --out <dir> [--taxonomy <jso
 2. Deduplicate token buckets and build identity tables.
 3. Build `nodes_v` and write `nodes.parquet` / `market_groups.parquet`.
 4. Generate structural candidates and accept them as logic edges.
-5. Compute internal transitive implications for conditionals.
-6. Write exact logic-only `conditional_edges.parquet`.
-7. Write `graph_snapshot.json`, reports, and `build_manifest.json`.
+5. Write exact logic-only `conditional_edges.parquet`.
+6. Write `graph_snapshot.json`, reports, and `build_manifest.json`.
 
 ## Manifest
 
@@ -32,6 +31,11 @@ Successful builds write `build_manifest.json` last. Fields:
 | `reports` | Markdown report paths under `reports/` |
 | `stats` | Row counts and runtime |
 | `stage_timings` | Per-stage seconds |
+
+## Scratch Database
+
+Builds also write `oddsfox_graph.duckdb` under `--out` as a working database.
+It is cleared on rebuild and is not a published contract artifact.
 
 ## Omitted Surfaces
 

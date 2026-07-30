@@ -6,7 +6,7 @@ from pathlib import Path
 
 from .benchmark import benchmark_summary
 from .build import build
-from .search import read_rows, resolve_node, search_nodes
+from .search import PATH_SENTINEL, read_rows, resolve_node, search_nodes
 
 
 EDGE_TYPES = ("complement", "equivalent", "implies", "mutually_exclusive")
@@ -72,7 +72,7 @@ def main(argv: list[str] | None = None) -> int:
                     "nodes.parquet",
                     f"""
                     SELECT node_id, market_id, outcome_label, event_slug, canonical_proposition
-                    FROM read_parquet('{{path}}')
+                    FROM read_parquet('{PATH_SENTINEL}')
                     ORDER BY event_slug, market_id, outcome_index
                     LIMIT {int(args.top)}
                     """,
@@ -87,7 +87,7 @@ def main(argv: list[str] | None = None) -> int:
                     "logic_edges.parquet",
                     f"""
                     SELECT edge_type, edge_basis, confidence, src_node_id, dst_node_id, evidence
-                    FROM read_parquet('{{path}}')
+                    FROM read_parquet('{PATH_SENTINEL}')
                     {edge_filter}
                     ORDER BY edge_basis, edge_type, src_node_id, dst_node_id
                     LIMIT {int(args.top)}
@@ -104,9 +104,9 @@ def main(argv: list[str] | None = None) -> int:
                 read_rows(
                     args.out,
                     "conditional_edges.parquet",
-                    """
+                    f"""
                     SELECT *
-                    FROM read_parquet('{path}')
+                    FROM read_parquet('{PATH_SENTINEL}')
                     WHERE a_node_id = ? AND b_node_id = ?
                     LIMIT 20
                     """,
@@ -141,7 +141,7 @@ def _print_explain_node(out_dir: Path, node: str) -> None:
         read_rows(
             out_dir,
             "nodes.parquet",
-            """
+            f"""
             SELECT
                 node_id,
                 market_id,
@@ -149,7 +149,7 @@ def _print_explain_node(out_dir: Path, node: str) -> None:
                 event_slug,
                 market_family,
                 canonical_proposition
-            FROM read_parquet('{path}')
+            FROM read_parquet('{PATH_SENTINEL}')
             WHERE node_id = ?
             """,
             [node],
@@ -165,9 +165,9 @@ def _print_explain_node(out_dir: Path, node: str) -> None:
                 n.node_id AS sibling_node_id,
                 n.outcome_label,
                 n.canonical_proposition
-            FROM read_parquet('{{path}}') n
+            FROM read_parquet('{PATH_SENTINEL}') n
             WHERE n.market_id = (
-                SELECT market_id FROM read_parquet('{{path}}') WHERE node_id = ?
+                SELECT market_id FROM read_parquet('{PATH_SENTINEL}') WHERE node_id = ?
             )
                 AND n.node_id != ?
             ORDER BY n.outcome_index
@@ -181,9 +181,9 @@ def _print_explain_node(out_dir: Path, node: str) -> None:
         read_rows(
             out_dir,
             "conditional_edges.parquet",
-            """
+            f"""
             SELECT a_node_id, b_node_id, method, p_a_given_b, confidence, evidence
-            FROM read_parquet('{path}')
+            FROM read_parquet('{PATH_SENTINEL}')
             WHERE a_node_id = ? OR b_node_id = ?
             ORDER BY method, a_node_id, b_node_id
             LIMIT 20
@@ -197,9 +197,9 @@ def _touching_edges(out_dir: Path, node: str) -> list[dict[str, object]]:
     return read_rows(
         out_dir,
         "logic_edges.parquet",
-        """
+        f"""
         SELECT edge_type, edge_basis, confidence, src_node_id, dst_node_id, evidence
-        FROM read_parquet('{path}')
+        FROM read_parquet('{PATH_SENTINEL}')
         WHERE src_node_id = ? OR dst_node_id = ?
         ORDER BY edge_basis, edge_type
         LIMIT 20
@@ -220,7 +220,7 @@ def _print_explain_edge(out_dir: Path, src: str, dst: str, edge_type: str) -> No
             "logic_edges.parquet",
             f"""
             SELECT edge_type, edge_basis, confidence, src_node_id, dst_node_id, evidence
-            FROM read_parquet('{{path}}')
+            FROM read_parquet('{PATH_SENTINEL}')
             WHERE edge_type = ? AND ({edge_where})
             ORDER BY confidence DESC
             LIMIT 20
@@ -235,7 +235,7 @@ def _print_explain_edge(out_dir: Path, src: str, dst: str, edge_type: str) -> No
             "conditional_edges.parquet",
             f"""
             SELECT a_node_id, b_node_id, method, p_a_given_b, confidence, evidence
-            FROM read_parquet('{{path}}')
+            FROM read_parquet('{PATH_SENTINEL}')
             WHERE {conditional_where}
             ORDER BY method
             LIMIT 20

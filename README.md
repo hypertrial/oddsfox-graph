@@ -78,7 +78,7 @@ Published parquet artifacts:
 - `logic_edges.parquet`
 - `conditional_edges.parquet`
 
-Builds also write a slim `graph_snapshot.json` portable summary.
+Builds also write a portable `graph_snapshot.json` summary.
 
 ## Inspect Results
 

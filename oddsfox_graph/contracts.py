@@ -85,16 +85,6 @@ CANDIDATE_EDGE_COLUMNS = [
     "event_slug_dst",
 ]
 
-DERIVED_EDGE_COLUMNS = [
-    "src_node_id",
-    "dst_node_id",
-    "edge_type",
-    "edge_basis",
-    "confidence",
-    "path",
-    "evidence",
-]
-
 INTERNAL_TABLE_COLUMNS = {
     "input_prices": INPUT_PRICE_COLUMNS,
     "token_minute_prices": INPUT_PRICE_COLUMNS,
@@ -103,9 +93,13 @@ INTERNAL_TABLE_COLUMNS = {
     "nodes_v": NODES_VIEW_COLUMNS,
     "candidate_edges_v": CANDIDATE_EDGE_COLUMNS,
     "logic_edges_v": ARTIFACT_COLUMNS["logic_edges.parquet"],
-    "derived_edges_v": DERIVED_EDGE_COLUMNS,
     "conditional_edges_v": ARTIFACT_COLUMNS["conditional_edges.parquet"],
 }
+
+
+def sql_column_list(columns: Sequence[str], *, table_alias: str | None = None) -> str:
+    prefix = f"{table_alias}." if table_alias else ""
+    return ", ".join(f"{prefix}{column}" for column in columns)
 
 
 def validate_relation_columns(

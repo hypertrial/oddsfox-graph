@@ -99,9 +99,6 @@ def test_schema_accepts_hourly_input(tmp_path: Path) -> None:
         ([("m1", 0, "m1:Yes", None, "Yes", "event-1", True, False, 1.0, 1, 0.4),
           ("m1", 1, "m1:No", "Will M1 pass?", "No", "event-1", True, False, 1.0, 1, 0.6)],
          "null required values: 1 rows"),
-        ([("m1", 0, "m1:Yes", "Will M1 pass?", "Yes", "event-1", True, False, 1.0, 1, 1.2),
-          ("m1", 1, "m1:No", "Will M1 pass?", "No", "event-1", True, False, 1.0, 1, 0.6)],
-         "prices outside \\[0, 1\\]: 1 rows"),
         (BASE_ROWS + [BASE_ROWS[0]], "duplicate token timestamp rows: 1 groups"),
         ([*BASE_ROWS,
           ("m1", 0, "m1:Yes", "Will M1 changed pass?", "Yes", "event-1", True, False, 1.0, 2, 0.4),
@@ -120,6 +117,22 @@ def test_schema_rejects_invalid_invariants(tmp_path: Path, rows: list[tuple[Any,
     try:
         with pytest.raises(ValueError, match=message):
             validate_input(db, path)
+    finally:
+        db.close()
+
+
+def test_schema_allows_out_of_range_prices(tmp_path: Path) -> None:
+    path = tmp_path / "wide_prices.parquet"
+    _write_input(
+        path,
+        [
+            ("m1", 0, "m1:Yes", "Will M1 pass?", "Yes", "event-1", True, False, 1.0, 1, 1.2),
+            ("m1", 1, "m1:No", "Will M1 pass?", "No", "event-1", True, False, 1.0, 1, -0.1),
+        ],
+    )
+    db = DuckDB(tmp_path / "wide_prices.duckdb")
+    try:
+        validate_input(db, path)
     finally:
         db.close()
 

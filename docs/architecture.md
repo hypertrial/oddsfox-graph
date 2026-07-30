@@ -1,12 +1,12 @@
 # Architecture
 
-`oddsfox-graph` is a sequential DuckDB build. Python orchestrates taxonomy rules
-and transitive implication closure; DuckDB holds intermediate tables until
-parquet export.
+`oddsfox-graph` is a sequential DuckDB build. Python orchestrates taxonomy rules;
+DuckDB holds intermediate tables until parquet export.
 
 The source parquet can be minutely or hourly. Both formats normalize into
-`input_prices`. Price columns remain in the input schema for compatibility but
-are not used for edge acceptance or published graph fields.
+`input_prices`. Price columns remain in the input schema for pipeline
+compatibility and are not used for edge acceptance. Out-of-range prices are not
+range-gated by the structural builder.
 
 ## Build Pipeline
 
@@ -17,9 +17,8 @@ are not used for edge acceptance or published graph fields.
 5. Build `nodes_v` with taxonomy semantics.
 6. Generate structural candidate edges.
 7. Accept structural candidates as `logic_edges_v`.
-8. Compute internal transitive implications for conditionals.
-9. Write exact logic-only conditionals.
-10. Export parquet artifacts, markdown reports, snapshot, and manifest.
+8. Write exact logic-only conditionals.
+9. Export parquet artifacts, markdown reports, snapshot, and manifest.
 
 ## Major Tables And Views
 
@@ -30,7 +29,6 @@ are not used for edge acceptance or published graph fields.
 - `nodes_v`: proposition nodes with taxonomy fields.
 - `candidate_edges_v`: structural candidates before acceptance.
 - `logic_edges_v`: accepted logic edges.
-- `derived_edges_v`: internal transitive implications (not published).
 - `conditional_edges_v`: exact 0/1 conditionals.
 
 ## Edge Lifecycle
@@ -49,12 +47,13 @@ Accepted logic edges use bases:
 - `single_winner_family`
 - `stage_progression_rule`
 
-Price-threshold candidates are not generated.
+Stage-progression candidates already emit the full implication hull across
+ranks (`stage_rank` greater-than joins), so there is no separate transitive
+closure stage. Price-threshold candidates are not generated.
 
 ## Conditionals
 
-Conditionals are derived only from accepted logic edges and internal transitive
-implications:
+Conditionals are derived only from accepted logic edges:
 
 - complement / mutually exclusive → exact 0 both directions
 - equivalent → exact 1 both directions
