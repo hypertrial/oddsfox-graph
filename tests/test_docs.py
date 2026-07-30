@@ -3,11 +3,14 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from oddsfox_graph.artifacts import ARTIFACT_COLUMNS, PARQUET_ARTIFACTS, REPORTS
+from oddsfox_graph.artifacts import ARTIFACT_COLUMNS, REPORTS
 from oddsfox_graph.cli import build_parser
 from oddsfox_graph.discovery import (
     CANDIDATE_COLUMNS,
+    DISCOVERY_PARQUET_ARTIFACTS,
+    PARSE_ERROR_COLUMNS,
     PROPOSITION_COLUMNS,
+    REJECTED_EDGE_COLUMNS,
     REVIEW_COLUMNS,
 )
 
@@ -19,13 +22,13 @@ DOCS = ROOT / "docs"
 def test_cli_docs_cover_subcommands_and_flags() -> None:
     subcommands = _subcommand_parsers(build_parser())
     cli_doc = (DOCS / "cli.md").read_text(encoding="utf-8")
-    builds_doc = (DOCS / "builds.md").read_text(encoding="utf-8")
+    discovery_doc = (DOCS / "discovery.md").read_text(encoding="utf-8")
 
     assert subcommands
     for command in sorted(subcommands):
         assert f"`{command}`" in cli_doc
 
-    documented_flags = cli_doc + "\n" + builds_doc
+    documented_flags = cli_doc + "\n" + discovery_doc
     for command, parser in subcommands.items():
         flags = _long_options(parser)
         assert flags, command
@@ -36,7 +39,7 @@ def test_cli_docs_cover_subcommands_and_flags() -> None:
 def test_artifact_docs_cover_artifacts_reports_and_columns() -> None:
     artifact_doc = (DOCS / "artifacts.md").read_text(encoding="utf-8")
 
-    for artifact in PARQUET_ARTIFACTS:
+    for artifact in ARTIFACT_COLUMNS:
         assert f"`{artifact}`" in artifact_doc
         for column in ARTIFACT_COLUMNS[artifact]:
             assert f"`{column}`" in artifact_doc
@@ -48,6 +51,8 @@ def test_artifact_docs_cover_artifacts_reports_and_columns() -> None:
         "propositions.parquet": PROPOSITION_COLUMNS,
         "relation_candidates.parquet": CANDIDATE_COLUMNS,
         "review_queue.parquet": REVIEW_COLUMNS,
+        "rejected_edges.parquet": REJECTED_EDGE_COLUMNS,
+        "parse_errors.parquet": PARSE_ERROR_COLUMNS,
     }
     for artifact, columns in discovery_columns.items():
         assert f"`{artifact}`" in artifact_doc
@@ -56,21 +61,59 @@ def test_artifact_docs_cover_artifacts_reports_and_columns() -> None:
 
 
 def test_manifest_shape_is_documented() -> None:
-    builds_doc = (DOCS / "builds.md").read_text(encoding="utf-8")
+    discovery_doc = (DOCS / "discovery.md").read_text(encoding="utf-8")
+    artifact_doc = (DOCS / "artifacts.md").read_text(encoding="utf-8")
     manifest_keys = {
         "input",
-        "input_format",
-        "input_granularity_seconds",
-        "taxonomy",
+        "input_schema",
         "artifacts",
         "reports",
         "stats",
         "stage_timings",
     }
-    taxonomy_keys = {"name", "path", "hash"}
 
-    for key in sorted(manifest_keys | taxonomy_keys):
-        assert f"`{key}`" in builds_doc
+    for key in sorted(manifest_keys):
+        assert f"`{key}`" in discovery_doc + artifact_doc
+
+
+def test_removed_surfaces_do_not_appear_in_package_or_docs() -> None:
+    assert not (ROOT / "oddsfox_graph" / "build.py").exists()
+    assert not (ROOT / "oddsfox_graph" / "review.py").exists()
+    assert not (ROOT / "oddsfox_graph" / "taxonomies").exists()
+    text = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in [
+            ROOT / "README.md",
+            *sorted(DOCS.glob("*.md")),
+            *sorted((ROOT / "oddsfox_graph").rglob("*.py")),
+        ]
+    )
+    folded = text.casefold()
+    for removed in (
+        "review-export",
+        "review-score",
+        "--pricing-file",
+        "source_format",
+        "input_granularity_seconds",
+        "wc2026",
+        "minutely",
+        "hourly",
+    ):
+        assert removed not in folded
+    benchmark_doc = (DOCS / "benchmarks.md").read_text(encoding="utf-8")
+    assert "sampling_manifest.json" in benchmark_doc
+    assert "sampling-manifest.json" not in benchmark_doc
+    assert set(DISCOVERY_PARQUET_ARTIFACTS) <= {
+        "nodes.parquet",
+        "market_groups.parquet",
+        "propositions.parquet",
+        "relation_candidates.parquet",
+        "logic_edges.parquet",
+        "conditional_edges.parquet",
+        "review_queue.parquet",
+        "rejected_edges.parquet",
+        "parse_errors.parquet",
+    }
 
 
 def test_local_markdown_links_resolve() -> None:
@@ -103,7 +146,7 @@ def _markdown_links(text: str) -> list[str]:
 def _subcommand_parsers(parser: object) -> dict[str, object]:
     for action in parser._actions:
         choices = getattr(action, "choices", None)
-        if choices and "build" in choices:
+        if choices:
             return dict(choices)
     raise AssertionError("No argparse subcommands found")
 

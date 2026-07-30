@@ -56,7 +56,7 @@ class ModernBertNliScorer:
             from sentence_transformers import CrossEncoder
         except ImportError as exc:  # pragma: no cover - dependency guard
             raise ImportError(
-                'NLI scoring requires `pip install -e ".[discovery]"`.'
+                "NLI scoring dependencies are missing; reinstall oddsfox-graph."
             ) from exc
         self._model = CrossEncoder(
             model,

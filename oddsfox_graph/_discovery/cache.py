@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 
-CACHE_ENTRY_VERSION = 4
+CACHE_ENTRY_VERSION = 5
 CacheState = Literal["success", "stable_failure", "transient_failure"]
 
 
@@ -73,7 +73,6 @@ class JsonCache:
         self.stable_failure_hits = 0
         self.transient_failure_hits = 0
         self.transient_retries = 0
-        self.legacy_hits = 0
 
     @staticmethod
     def key(
@@ -125,8 +124,6 @@ class JsonCache:
             self.misses += 1
             self.transient_retries += 1
             return None
-        if entry.get("usage_accounting") == "legacy_unscoped":
-            self.legacy_hits += 1
         self.hits += 1
         if state == "success":
             self.success_hits += 1
@@ -166,7 +163,6 @@ class JsonCache:
             "stable_failure_hits": self.stable_failure_hits,
             "transient_failure_hits": self.transient_failure_hits,
             "transient_retries": self.transient_retries,
-            "legacy_hits": self.legacy_hits,
         }
 
     @staticmethod
@@ -178,11 +174,6 @@ class JsonCache:
             if state not in {"success", "stable_failure", "transient_failure"}:
                 raise ValueError(f"Unsupported discovery cache state {state!r}")
             return dict(raw)
-        if raw.get("version") in {1, 2, 3}:
-            raise ValueError(
-                "This cache entry predates the v0.6 self-hosted inference "
-                "fingerprint and cannot be reused. Use an empty cache directory."
-            )
         raise ValueError(
-            f"Unsupported discovery cache version {raw.get('version')!r}"
+            "Incompatible discovery cache entry. Use an empty cache directory."
         )

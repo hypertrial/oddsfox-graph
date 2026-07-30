@@ -224,10 +224,6 @@ __marimo__/
 output/
 .benchmarks/
 
-# Large exported odds inputs (keep local; see companion *.md manifests)
-*_token_minutely_odds_*.parquet
-*_token_hourly_odds_*.parquet
-
 # Local catalog / discovery inputs (not versioned)
 data/
 

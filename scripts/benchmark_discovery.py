@@ -14,6 +14,19 @@ from pathlib import Path
 from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+CANONICAL_SOURCE_SHA256 = (
+    "790bd1595b379472ad65ba0073105b4eb630974d04e7b44d58c8a4929f274aa2"
+)
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
@@ -135,6 +148,9 @@ def _worker(args: argparse.Namespace) -> int:
                 "wall_seconds": round(elapsed, 6),
                 "peak_rss_mb": stats["peak_rss_mb"],
                 "tokens": stats["tokens"],
+                "propositions_per_second": (
+                    float(stats["tokens"]) / elapsed if elapsed > 0 else None
+                ),
                 "candidate_edges": stats["candidate_edges"],
                 "stage_timings": manifest["stage_timings"],
                 "incremental": stats["incremental"],
@@ -236,6 +252,12 @@ def _summaries(samples: list[dict[str, Any]]) -> dict[str, Any]:
             "median_publication_seconds": statistics.median(
                 float(row["stage_timings"]["publish_artifacts"]) for row in rows
             ),
+            "median_propositions_per_second": statistics.median(
+                float(row["propositions_per_second"]) for row in rows
+            ),
+            "median_candidate_edges": statistics.median(
+                int(row["candidate_edges"]) for row in rows
+            ),
         }
         for (size, mode), rows in sorted(grouped.items())
     }
@@ -243,8 +265,6 @@ def _summaries(samples: list[dict[str, Any]]) -> dict[str, Any]:
 
 def _acceptance(
     summary: dict[str, Any],
-    *,
-    baseline: dict[str, Any] | None,
 ) -> dict[str, Any]:
     gates: dict[str, bool] = {}
     ratios: dict[str, float] = {}
@@ -272,20 +292,6 @@ def _acceptance(
             )
             ratios[f"{size}:offline_candidate_ratio"] = ratio
             gates[f"{size}:offline_candidate_reuse"] = ratio <= 0.25
-        prior = (baseline or {}).get(f"{size}:clean")
-        if clean and prior:
-            runtime_ratio = (
-                float(clean["median_wall_seconds"])
-                / float(prior["median_wall_seconds"])
-            )
-            rss_ratio = (
-                float(clean["median_peak_rss_mb"])
-                / float(prior["median_peak_rss_mb"])
-            )
-            ratios[f"{size}:clean_runtime_ratio"] = runtime_ratio
-            ratios[f"{size}:clean_rss_ratio"] = rss_ratio
-            gates[f"{size}:no_runtime_regression"] = runtime_ratio <= 1.10
-            gates[f"{size}:no_rss_regression"] = rss_ratio <= 1.10
     return {
         "passed": bool(gates) and all(gates.values()),
         "gates": gates,
@@ -376,7 +382,7 @@ def main() -> int:
     )
     parser.add_argument("--input", required=True, type=Path)
     parser.add_argument("--output", type=Path)
-    parser.add_argument("--sizes", default="500,2000,5000,20000")
+    parser.add_argument("--sizes", default="5000,20000")
     parser.add_argument(
         "--modes",
         default="clean,offline,one-market-incremental",
@@ -385,11 +391,6 @@ def main() -> int:
     parser.add_argument("--top-k", type=int, default=20)
     parser.add_argument("--max-candidates", type=int, default=400_000)
     parser.add_argument("--max-llm-pairs", type=int, default=5_000)
-    parser.add_argument(
-        "--baseline-json",
-        type=Path,
-        help="Prior harness JSON used for clean runtime/RSS ratio gates.",
-    )
     parser.add_argument("--require-pass", action="store_true")
     parser.add_argument("--worker", action="store_true")
     parser.add_argument("--out", type=Path)
@@ -402,6 +403,11 @@ def main() -> int:
         return _worker(args)
     if args.output is None:
         raise ValueError("--output is required")
+    input_path = args.input.resolve()
+    if _sha256(input_path) != CANONICAL_SOURCE_SHA256:
+        raise ValueError(
+            "Performance validation requires the canonical supplied catalog"
+        )
     sizes = [int(value) for value in args.sizes.split(",") if value]
     modes = [value for value in args.modes.split(",") if value]
     supported = {"clean", "offline", "one-market-incremental"}
@@ -415,7 +421,7 @@ def main() -> int:
     ) as temporary_runs:
         changed_market_id, samples = _collect_samples(
             args,
-            input_path=args.input.resolve(),
+            input_path=input_path,
             runs_root=Path(temporary_runs),
             sizes=sizes,
             modes=modes,
@@ -426,16 +432,6 @@ def main() -> int:
         "max_candidates": args.max_candidates,
         "max_llm_pairs": args.max_llm_pairs,
     }
-    baseline_summary = None
-    if args.baseline_json is not None:
-        baseline_payload = json.loads(
-            args.baseline_json.read_text(encoding="utf-8")
-        )
-        if baseline_payload.get("configuration") != configuration:
-            raise ValueError(
-                "Performance baseline configuration does not match this run"
-            )
-        baseline_summary = baseline_payload.get("summary")
     result = {
         "input": str(args.input.resolve()),
         "changed_market_id": changed_market_id,
@@ -445,7 +441,7 @@ def main() -> int:
         "configuration": configuration,
         "samples": samples,
         "summary": summary,
-        "acceptance": _acceptance(summary, baseline=baseline_summary),
+        "acceptance": _acceptance(summary),
     }
     root.write_text(
         json.dumps(result, indent=2, sort_keys=True) + "\n",

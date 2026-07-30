@@ -296,7 +296,7 @@ def build_model_profile(
         str(row.get("schema_version") or "")
         for row in benchmark_rows
     } != {BENCHMARK_SCHEMA_VERSION}:
-        raise ValueError("Model profiling requires the v0.6 benchmark schema")
+        raise ValueError("Model profiling requires the current benchmark schema")
     predictions = asyncio.run(
         _calibration_predictions(
             input_path,
@@ -343,7 +343,7 @@ async def _calibration_predictions(
         _validate_parsed_market,
     )
 
-    source_format, _, markets, _ = load_source_markets(
+    source_schema, _, markets, _ = load_source_markets(
         input_path,
         max_propositions=5_000,
     )
@@ -480,7 +480,7 @@ async def _calibration_predictions(
                 entry.get("observed_model")
                 or manifest.loaded_model_identifier
             ),
-            source_format,
+            source_schema,
             None,
             parse_fingerprint,
             None,

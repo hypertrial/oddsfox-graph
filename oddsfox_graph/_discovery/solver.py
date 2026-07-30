@@ -41,8 +41,8 @@ def solve_proposals(
         from pysat.formula import WCNF
     except ImportError as exc:  # pragma: no cover - installation guard
         raise ImportError(
-            'Automated discovery consistency solving requires '
-            '`pip install -e ".[discovery]"`.'
+            "Automated discovery consistency-solving dependencies are missing; "
+            "reinstall oddsfox-graph."
         ) from exc
 
     normalized = [_normalize_proposal(row) for row in proposals]

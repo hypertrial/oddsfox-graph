@@ -1,9 +1,0 @@
-src_node_id,dst_node_id,edge_type,expectation,reason
-comp:Yes,comp:No,complement,required,same-market binary complement
-dup_same_a:Yes,dup_same_b:Yes,equivalent,required,same-event exact duplicate canonical proposition
-winner_alpha:Yes,winner_beta:Yes,mutually_exclusive,required,single-winner family alternatives
-winner_alpha:Yes,alpha_final:Yes,implies,required,winning the tournament implies reaching the final
-alpha_final:Yes,alpha_semis:Yes,implies,required,reaching the final implies reaching the semifinals
-eq_a:Yes,eq_b:Yes,equivalent,forbidden,different propositions are not structural duplicates
-dup_cross_a:Yes,dup_cross_b:Yes,equivalent,forbidden,exact duplicate text across different events is not trusted
-alpha_final:Yes,winner_alpha:Yes,implies,forbidden,stage implication is directional

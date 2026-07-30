@@ -1,23 +1,10 @@
-# oddsfox-graph Docs
+# Documentation
 
-This handbook keeps stable user guidance separate from dated benchmark notes
-and low-level artifact schemas.
+- [Architecture](architecture.md)
+- [Discovery workflow](discovery.md)
+- [CLI reference](cli.md)
+- [Artifact contracts](artifacts.md)
+- [Benchmark and release gates](benchmarks.md)
 
-## Reading Order
-
-1. Start with the [README](../README.md) for purpose, setup, and the shortest
-   working build and inspect commands.
-2. Use [CLI Reference](cli.md) when you need every command and flag.
-3. Use [Builds](builds.md) for the legacy and automated-discovery flows,
-   cache behavior, and manifest shape.
-4. Use [Artifact Reference](artifacts.md) when consuming parquet files or
-   markdown reports programmatically.
-5. Use [Architecture](architecture.md) when changing the build pipeline or
-   logic-edge generation.
-6. Use [Benchmarks](benchmarks.md) when summarizing local stage timings.
-
-## Maintenance Contract
-
-The test suite includes lightweight docs drift checks in `tests/test_docs.py`.
-Those checks verify that CLI subcommands and flags, artifact names, report
-names, manifest fields, and local Markdown links remain documented.
+The only publication path is `discover`. Query commands consume its completed
+output directory after `build_manifest.json` has been written.

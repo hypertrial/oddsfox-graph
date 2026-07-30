@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections import defaultdict
 from collections.abc import Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 
 from .contracts import SourceMarket, SourceOutcome
+from .versions import SOURCE_SCHEMA
 from ..queries import DuckDB, q
 
 
@@ -17,109 +17,106 @@ def load_source_markets(
     max_propositions: int | None = None,
 ) -> tuple[str, int, list[SourceMarket], dict[str, object]]:
     db = DuckDB()
-    eligible_summaries: list[dict[str, object]] | None = None
     try:
         db.execute("SET TimeZone = 'UTC'")
-        columns = {
-            str(row["name"]).lower()
+        schema = {
+            str(row["column_name"]).lower(): str(row["column_type"]).upper()
             for row in db.rows(
-                f"SELECT name FROM parquet_schema('{q(input_path)}') "
-                "WHERE name != 'duckdb_schema'"
+                f"DESCRIBE SELECT * FROM read_parquet('{q(input_path)}')"
             )
         }
+        columns = set(schema)
         input_rows = int(
             db.scalar(f"SELECT count(*) FROM read_parquet('{q(input_path)}')") or 0
         )
-        if {"market_id", "question", "outcomes", "clob_token_ids"} <= columns:
-            invalid_market_rows = int(
-                db.scalar(
-                    f"""
-                    SELECT count(*)
-                    FROM read_parquet('{q(input_path)}')
-                    WHERE market_id IS NULL
-                       OR question IS NULL
-                       OR outcomes IS NULL
-                       OR clob_token_ids IS NULL
-                       OR len(outcomes) = 0
-                       OR len(outcomes) != len(clob_token_ids)
-                    """
-                )
-                or 0
-            )
-            input_propositions = int(
-                db.scalar(
-                    f"""
-                    SELECT sum(coalesce(len(outcomes), 0))
-                    FROM read_parquet('{q(input_path)}')
-                    """
-                )
-                or 0
-            )
-            if max_propositions is not None:
-                _validate_compact_catalog(db, input_path)
-                eligible_summaries = _compact_market_summaries(
-                    db,
-                    input_path,
-                    columns,
-                )
-                selected_ids = _select_market_summaries(
-                    eligible_summaries,
-                    max_propositions,
-                )
-                markets = _load_compact_markets(
-                    db,
-                    input_path,
-                    columns,
-                    selected_market_ids=selected_ids,
-                )
-            else:
-                markets = _load_compact_markets(db, input_path, columns)
-            source_format = "market_snapshot"
-        elif {
-            "market_id",
-            "question",
-            "outcome_label",
-            "clob_token_id",
-            "event_slug",
-        } <= columns and (
-            "odds_timestamp_epoch" in columns or "odds_hour_epoch" in columns
-        ):
-            markets = _load_odds_markets(db, input_path, columns)
-            invalid_market_rows = 0
-            input_propositions = sum(len(market.outcomes) for market in markets)
-            source_format = (
-                "minutely"
-                if "odds_timestamp_epoch" in columns
-                else "hourly"
-            )
-        else:
+        required = {"market_id", "question", "outcomes", "clob_token_ids"}
+        missing = sorted(required - columns)
+        if missing:
             raise ValueError(
-                "Discovery input must be a compact market snapshot or a supported "
-                "OddsFox minutely/hourly export"
+                "Discovery input must use the polymarket-market-snapshot-v1 "
+                "schema; missing columns: " + ", ".join(missing)
             )
+        expected_types = {
+            "market_id": "VARCHAR",
+            "question": "VARCHAR",
+            "outcomes": "VARCHAR[]",
+            "clob_token_ids": "VARCHAR[]",
+        }
+        wrong_types = {
+            name: schema[name]
+            for name, expected in expected_types.items()
+            if schema[name] != expected
+        }
+        if wrong_types:
+            details = ", ".join(
+                f"{name}={actual} (expected {expected_types[name]})"
+                for name, actual in sorted(wrong_types.items())
+            )
+            raise ValueError(
+                "Discovery input must use the polymarket-market-snapshot-v1 "
+                f"schema; incompatible column types: {details}"
+            )
+        if "tags" in schema and schema["tags"] != "VARCHAR[]":
+            raise ValueError(
+                "Discovery input must use the polymarket-market-snapshot-v1 "
+                "schema; tags must have type VARCHAR[]"
+            )
+        invalid_market_rows = int(
+            db.scalar(
+                f"""
+                SELECT count(*)
+                FROM read_parquet('{q(input_path)}')
+                WHERE market_id IS NULL
+                   OR question IS NULL
+                   OR outcomes IS NULL
+                   OR clob_token_ids IS NULL
+                   OR len(outcomes) = 0
+                   OR len(outcomes) != len(clob_token_ids)
+                """
+            )
+            or 0
+        )
+        input_propositions = int(
+            db.scalar(
+                f"""
+                SELECT sum(coalesce(len(outcomes), 0))
+                FROM read_parquet('{q(input_path)}')
+                """
+            )
+            or 0
+        )
+        _validate_compact_catalog(db, input_path)
+        eligible_summaries = _compact_market_summaries(
+            db,
+            input_path,
+            columns,
+        )
+        selected_ids = (
+            _select_market_summaries(eligible_summaries, max_propositions)
+            if max_propositions is not None
+            else None
+        )
+        markets = _load_compact_markets(
+            db,
+            input_path,
+            columns,
+            selected_market_ids=selected_ids,
+        )
     finally:
         db.close()
 
     _validate_source_markets(markets)
-    if source_format == "market_snapshot" and eligible_summaries is not None:
-        eligible_markets = len(eligible_summaries)
-        eligible_propositions = sum(
-            int(row["outcome_count"]) for row in eligible_summaries
-        )
-    else:
-        eligible_markets = len(markets)
-        eligible_propositions = sum(len(market.outcomes) for market in markets)
-    if max_propositions is not None and eligible_summaries is None:
-        markets = _select_source_markets(markets, max_propositions)
+    eligible_markets = len(eligible_summaries)
+    eligible_propositions = sum(
+        int(row["outcome_count"]) for row in eligible_summaries
+    )
     selection = {
         "strategy": (
             "volume_desc_then_market_id"
             if max_propositions is not None
             else "all_eligible_markets"
         ),
-        "input_market_rows": (
-            input_rows if source_format == "market_snapshot" else None
-        ),
+        "input_market_rows": input_rows,
         "input_rows": input_rows,
         "input_propositions": input_propositions,
         "invalid_market_rows": invalid_market_rows,
@@ -129,7 +126,7 @@ def load_source_markets(
         "selected_propositions": sum(len(market.outcomes) for market in markets),
         "truncated": len(markets) < eligible_markets,
     }
-    return source_format, input_rows, markets, selection
+    return SOURCE_SCHEMA, input_rows, markets, selection
 
 
 def _load_compact_markets(
@@ -162,8 +159,8 @@ def _load_compact_markets(
             {_optional_sql(columns, "category", "VARCHAR")},
             {_optional_sql(columns, "tags", "VARCHAR[]", "[]::VARCHAR[]")},
             {_optional_sql(columns, "volume", "DOUBLE")},
-            {_timestamp_sql(columns, ("time_start", "start_time", "start_date"), "time_start")},
-            {_timestamp_sql(columns, ("time_end", "end_time", "end_date"), "time_end")}
+            {_timestamp_sql(columns, ("start_time",), "time_start")},
+            {_timestamp_sql(columns, ("end_time",), "time_end")}
         FROM read_parquet('{q(input_path)}')
         {selection_sql}
         ORDER BY market_id
@@ -374,158 +371,6 @@ def _validate_compact_catalog(db: DuckDB, input_path: Path) -> None:
         raise ValueError(
             f"Discovery input contains {duplicate_tokens} duplicate clob_token_id values"
         )
-
-
-def _select_source_markets(
-    markets: Sequence[SourceMarket],
-    max_propositions: int,
-) -> list[SourceMarket]:
-    selected: list[SourceMarket] = []
-    selected_propositions = 0
-    ordered = sorted(
-        markets,
-        key=lambda market: (
-            -(market.volume if market.volume is not None else float("-inf")),
-            market.market_id,
-        ),
-    )
-    for market in ordered:
-        next_count = selected_propositions + len(market.outcomes)
-        if next_count > max_propositions:
-            continue
-        selected.append(market)
-        selected_propositions = next_count
-        if selected_propositions == max_propositions:
-            break
-    if not selected:
-        raise ValueError(
-            "No complete market fits within max_propositions="
-            f"{max_propositions}"
-        )
-    return sorted(selected, key=lambda market: market.market_id)
-
-
-def _load_odds_markets(
-    db: DuckDB,
-    input_path: Path,
-    columns: set[str],
-) -> list[SourceMarket]:
-    epoch = (
-        "odds_timestamp_epoch"
-        if "odds_timestamp_epoch" in columns
-        else "odds_hour_epoch"
-    )
-    timestamp = (
-        "odds_timestamp" if "odds_timestamp" in columns else "odds_hour_utc"
-    )
-    rows = db.rows(
-        f"""
-        WITH ranked AS (
-            SELECT
-                *,
-                min({timestamp}) OVER (PARTITION BY clob_token_id) AS first_seen_ts,
-                max({timestamp}) OVER (PARTITION BY clob_token_id) AS last_seen_ts,
-                row_number() OVER (
-                    PARTITION BY clob_token_id
-                    ORDER BY {epoch} DESC
-                ) AS rn
-            FROM read_parquet('{q(input_path)}')
-        )
-        SELECT
-            market_id::VARCHAR AS market_id,
-            outcome_index::INTEGER AS outcome_index,
-            clob_token_id::VARCHAR AS clob_token_id,
-            question::VARCHAR AS question,
-            {_optional_sql(columns, "description", "VARCHAR", "''::VARCHAR")},
-            outcome_label::VARCHAR AS outcome,
-            event_slug::VARCHAR AS event_slug,
-            {_optional_sql(columns, "event_id", "VARCHAR")},
-            {_optional_sql(columns, "category", "VARCHAR")},
-            {_optional_sql(columns, "tags", "VARCHAR[]", "[]::VARCHAR[]")},
-            {_optional_sql(columns, "market_volume_usd", "DOUBLE")},
-            is_active::BOOLEAN AS is_active,
-            is_closed::BOOLEAN AS is_closed,
-            first_seen_ts,
-            last_seen_ts
-        FROM ranked
-        WHERE rn = 1
-        ORDER BY market_id, outcome_index, clob_token_id
-        """
-    )
-    grouped: dict[str, list[dict[str, object]]] = defaultdict(list)
-    for row in rows:
-        grouped[str(row["market_id"])].append(row)
-    markets = []
-    for market_id in sorted(grouped):
-        items = grouped[market_id]
-        first = items[0]
-        source_outcomes = tuple(
-            SourceOutcome(
-                int(item["outcome_index"]),
-                str(item["outcome"]),
-                str(item["clob_token_id"]),
-            )
-            for item in items
-        )
-        source_fields = {
-            "market_id": market_id,
-            "question": str(first["question"]),
-            "description": str(first.get("description") or ""),
-            "event_id": str_or_none(first.get("event_id")),
-            "event_slug": str_or_none(first.get("event_slug")),
-            "category": str_or_none(first.get("category")),
-            "tags": [str(tag) for tag in (first.get("tags") or [])],
-            "time_start": None,
-            "time_end": None,
-            "outcomes": [
-                {
-                    "outcome_index": item.outcome_index,
-                    "outcome": item.outcome,
-                    "clob_token_id": item.clob_token_id,
-                }
-                for item in source_outcomes
-            ],
-        }
-        markets.append(
-            SourceMarket(
-                market_id=market_id,
-                question=str(first["question"]),
-                description=str(first.get("description") or ""),
-                source_hash=source_market_hash(source_fields),
-                event_id=str_or_none(first.get("event_id")),
-                event_slug=str_or_none(first.get("event_slug")),
-                category=str_or_none(first.get("category")),
-                tags=tuple(str(tag) for tag in (first.get("tags") or [])),
-                is_active=any(bool(item["is_active"]) for item in items),
-                is_closed=any(bool(item["is_closed"]) for item in items),
-                first_seen_ts=min(
-                    (
-                        item["first_seen_ts"]
-                        for item in items
-                        if item["first_seen_ts"] is not None
-                    ),
-                    default=None,
-                ),
-                last_seen_ts=max(
-                    (
-                        item["last_seen_ts"]
-                        for item in items
-                        if item["last_seen_ts"] is not None
-                    ),
-                    default=None,
-                ),
-                volume=max(
-                    (
-                        float(item["market_volume_usd"])
-                        for item in items
-                        if item.get("market_volume_usd") is not None
-                    ),
-                    default=None,
-                ),
-                outcomes=source_outcomes,
-            )
-        )
-    return markets
 
 
 def _optional_sql(

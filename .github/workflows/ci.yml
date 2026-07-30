@@ -28,8 +28,17 @@ jobs:
       - run: python -m mypy
       - name: Verify self-hosted-only inference surface
         run: |
-          if rg -n -i 'openai|OPENAI_API_KEY|gpt-5' oddsfox_graph pyproject.toml constraints-dev.txt; then
+          if rg -n -i 'openai|OPENAI_API_KEY|gpt-5' oddsfox_graph docs README.md pyproject.toml constraints-dev.txt scripts; then
             echo "Proprietary inference reference detected"
+            exit 1
+          fi
+      - name: Verify current-only discovery surface
+        run: |
+          test ! -e oddsfox_graph/build.py
+          test ! -e oddsfox_graph/review.py
+          test ! -d oddsfox_graph/taxonomies
+          if rg -ni 'review-export|review-score|pricing-file|pricing_file|source_format|input_granularity_seconds|wc2026|minutely|hourly|\[discovery\]' oddsfox_graph docs README.md pyproject.toml scripts; then
+            echo "Removed compatibility surface detected"
             exit 1
           fi
       - run: PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest -q

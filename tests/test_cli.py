@@ -1,75 +1,69 @@
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 
 import pytest
 
-from oddsfox_graph.cli import main
+from oddsfox_graph.cli import build_parser
 
 
-def test_cli_smoke(synthetic_input: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    out = tmp_path / "out"
-
-    assert main(["build", "--input", str(synthetic_input), "--out", str(out)]) == 0
-    assert main(["search", "--out", str(out), "--query", "Equivalent A"]) == 0
-    assert "Will Equivalent A happen?" in capsys.readouterr().out
-    assert main(["nodes", "--out", str(out), "--top", "5"]) == 0
-    assert main(["edges", "--out", str(out), "--edge-type", "complement", "--top", "5"]) == 0
-    assert main(["condition", "--out", str(out), "--a", "comp:Yes", "--b", "comp:No"]) == 0
-    assert "exact_complement" in capsys.readouterr().out
-    assert main(["condition", "--out", str(out), "--a", "NOT(Will Complement pass?)", "--b", "comp:Yes"]) == 0
-    assert "exact_complement" in capsys.readouterr().out
-    assert main(["condition", "--out", str(out), "--a", "Alpha", "--b", "comp:Yes"]) == 1
-    captured = capsys.readouterr()
-    assert "Ambiguous node query" in captured.err
-    assert "Candidates:" in captured.err
-    assert main(["explain", "--out", str(out), "--node", "comp:Yes"]) == 0
-    assert "Logic Edges" in capsys.readouterr().out
-    assert main(["benchmark-summary", "--out", str(out)]) == 0
-    captured = capsys.readouterr()
-    assert "runtime_seconds:" in captured.out
-    assert "top_stage_timings:" in captured.out
+def _commands(parser: argparse.ArgumentParser) -> set[str]:
+    for action in parser._actions:
+        choices = getattr(action, "choices", None)
+        if choices:
+            return set(choices)
+    raise AssertionError("No argparse subcommands found")
 
 
-def test_cli_rejects_invalid_edge_type(tmp_path: Path) -> None:
+def test_cli_contains_only_current_workflows() -> None:
+    parser = build_parser()
+    commands = _commands(parser)
+    assert {"build", "review-export", "review-score"}.isdisjoint(commands)
+    assert {
+        "discover",
+        "benchmark-export",
+        "benchmark-compile",
+        "evaluate",
+        "model-manifest",
+        "model-check",
+        "model-profile",
+        "nodes",
+        "edges",
+        "condition",
+        "explain",
+        "explain-edge",
+        "search",
+        "benchmark-summary",
+    } <= commands
+
+
+@pytest.mark.parametrize("command", ["build", "review-export", "review-score"])
+def test_removed_commands_are_rejected(command: str) -> None:
     with pytest.raises(SystemExit) as exc:
-        main(["edges", "--out", str(tmp_path), "--edge-type", "bad"])
-    assert exc.value.code == 2
-
-    with pytest.raises(SystemExit) as exc:
-        main(
-            [
-                "explain-edge",
-                "--out",
-                str(tmp_path),
-                "--src",
-                "a",
-                "--dst",
-                "b",
-                "--edge-type",
-                "bad",
-            ]
-        )
+        build_parser().parse_args([command])
     assert exc.value.code == 2
 
 
-def test_cli_explain_edge(synthetic_output: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    assert (
-        main(
-            [
-                "explain-edge",
-                "--out",
-                str(synthetic_output),
-                "--src",
-                "comp:Yes",
-                "--dst",
-                "comp:No",
-                "--edge-type",
-                "complement",
-            ]
+@pytest.mark.parametrize(
+    ("command", "flag"),
+    [
+        ("evaluate", "--pricing-file"),
+        ("discover", "--pricing-file"),
+        ("discover", "--taxonomy"),
+    ],
+)
+def test_removed_flags_are_rejected(
+    tmp_path: Path,
+    command: str,
+    flag: str,
+) -> None:
+    arguments = [command, "--out", str(tmp_path)]
+    if command == "evaluate":
+        arguments.extend(
+            ["--benchmark", str(tmp_path / "benchmark.parquet")]
         )
-        == 0
-    )
-    out = capsys.readouterr().out
-    assert "Logic Edge" in out
-    assert "Conditionals" in out
+    arguments.extend([flag, str(tmp_path / "removed-value")])
+    with pytest.raises(SystemExit) as exc:
+        build_parser().parse_args(arguments)
+    assert exc.value.code == 2

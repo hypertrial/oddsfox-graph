@@ -6,7 +6,6 @@ import sys
 from pathlib import Path
 
 from .benchmark import benchmark_summary
-from .build import build
 from .search import PATH_SENTINEL, read_rows, resolve_node, search_nodes
 
 
@@ -23,23 +22,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="oddsfox-graph")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
-    p = sub.add_parser("build")
-    p.add_argument("--input", required=True, type=Path)
-    p.add_argument("--out", required=True, type=Path)
-    p.add_argument("--taxonomy", type=Path, default=None)
-
     p = sub.add_parser("discover")
     p.add_argument("--input", required=True, type=Path)
     p.add_argument("--out", required=True, type=Path)
     p.add_argument("--cache-dir", type=Path, default=None)
     p.add_argument("--benchmark", type=Path, default=None)
     p.add_argument("--incremental-from", type=Path, default=None)
-    p.add_argument(
-        "--pricing-file",
-        type=Path,
-        default=None,
-        help=argparse.SUPPRESS,
-    )
     p.add_argument("--compute-profile", type=Path, default=None)
     p.add_argument("--llm-base-url", default="http://127.0.0.1:8080/v1")
     p.add_argument("--llm-runtime", choices=("llama.cpp", "vllm"), default="llama.cpp")
@@ -107,7 +95,6 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("evaluate")
     p.add_argument("--out", required=True, type=Path)
     p.add_argument("--benchmark", required=True, type=Path)
-    p.add_argument("--pricing-file", type=Path, default=None)
     p.add_argument("--compute-profile", type=Path, default=None)
     p.add_argument("--output", type=Path, default=None)
 
@@ -133,18 +120,6 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--model-manifest", required=True, type=Path)
     p.add_argument("--out", required=True, type=Path)
     p.add_argument("--allow-remote-inference", action="store_true")
-
-    p = sub.add_parser("review-export")
-    p.add_argument("--out", required=True, type=Path)
-    p.add_argument("--output", required=True, type=Path)
-    p.add_argument("--accepted", type=int, default=200)
-    p.add_argument("--recall-pairs", type=int, default=200)
-    p.add_argument("--seed", type=int, default=0)
-
-    p = sub.add_parser("review-score")
-    p.add_argument("--out", required=True, type=Path)
-    p.add_argument("--labels", required=True, type=Path)
-    p.add_argument("--output", type=Path, default=None)
 
     p = sub.add_parser("benchmark-summary")
     p.add_argument("--out", required=True, type=Path)
@@ -184,11 +159,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
-        if args.cmd == "build":
-            stats = build(args.input, args.out, taxonomy_path=args.taxonomy)
-            for key, value in stats.items():
-                print(f"{key}: {value}")
-        elif args.cmd == "discover":
+        if args.cmd == "discover":
             from .discovery import DiscoveryConfig, discover
 
             stats = discover(
@@ -198,7 +169,6 @@ def main(argv: list[str] | None = None) -> int:
                     cache_dir=args.cache_dir,
                     benchmark_path=args.benchmark,
                     incremental_from=args.incremental_from,
-                    pricing_file=args.pricing_file,
                     compute_profile=args.compute_profile,
                     model_manifest=args.model_manifest,
                     model_profile=args.model_profile,
@@ -234,18 +204,6 @@ def main(argv: list[str] | None = None) -> int:
             )
             for key, value in stats.items():
                 print(f"{key}: {value}")
-        elif args.cmd == "review-export":
-            from .review import export_review
-
-            counts = export_review(
-                args.out,
-                args.output,
-                accepted=args.accepted,
-                recall_pairs=args.recall_pairs,
-                seed=args.seed,
-            )
-            for key, value in counts.items():
-                print(f"{key}: {value}")
         elif args.cmd == "benchmark-export":
             from .evaluation import export_benchmark_reviews
 
@@ -277,7 +235,6 @@ def main(argv: list[str] | None = None) -> int:
             result = evaluate_build(
                 args.out,
                 args.benchmark,
-                pricing_file=args.pricing_file,
                 compute_profile=args.compute_profile,
                 output_path=args.output,
             )
@@ -319,13 +276,6 @@ def main(argv: list[str] | None = None) -> int:
                 allow_remote=args.allow_remote_inference,
             )
             print(json.dumps(result, indent=2, sort_keys=True))
-        elif args.cmd == "review-score":
-            from .review import score_review
-
-            result = score_review(args.out, args.labels, args.output)
-            print(json.dumps(result, indent=2, sort_keys=True))
-            if not result["passed"]:
-                return 1
         elif args.cmd == "benchmark-summary":
             print(benchmark_summary(args.out), end="")
         elif args.cmd == "nodes":

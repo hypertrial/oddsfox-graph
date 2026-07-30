@@ -148,7 +148,7 @@ class PropositionRecord(BaseModel):
     prompt_version: str
     inference_fingerprint: str | None
     model_profile_id: str | None
-    source_format: str
+    source_schema: str
 
 
 @dataclass(frozen=True)
@@ -183,7 +183,6 @@ class DiscoveryConfig:
     cache_dir: Path | None = None
     benchmark_path: Path | None = None
     incremental_from: Path | None = None
-    pricing_file: Path | None = None
     compute_profile: Path | None = None
     model_manifest: Path | None = None
     model_profile: Path | None = None
@@ -219,10 +218,6 @@ class DiscoveryConfig:
     llm_concurrency: int = 2
 
     def validate(self) -> None:
-        if self.pricing_file is not None and self.compute_profile is not None:
-            raise ValueError(
-                "pricing_file and compute_profile are mutually exclusive"
-            )
         if not 0.0 <= self.accept_confidence <= 1.0:
             raise ValueError("accept_confidence must be between 0 and 1")
         if not 0.0 <= self.parse_confidence <= 1.0:

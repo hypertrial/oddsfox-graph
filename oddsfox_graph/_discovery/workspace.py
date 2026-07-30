@@ -302,7 +302,7 @@ class CandidateStore:
             SELECT
                 count(*)::INTEGER AS candidate_edges,
                 count(*) FILTER (
-                    WHERE discovery_method = 'llm'
+                    WHERE discovery_method IN ('generative_model', 'nli')
                 )::INTEGER AS classified_pairs,
                 count(*) FILTER (
                     WHERE status = 'not_classified_budget'

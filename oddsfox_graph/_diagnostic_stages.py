@@ -2,8 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .artifacts import artifact_projection
-from .contracts import validate_relation_columns
+from .artifacts import ARTIFACT_COLUMNS, artifact_projection
 from .queries import DuckDB, q
 
 
@@ -76,7 +75,7 @@ def write_conditionals(db: DuckDB, out_dir: Path) -> None:
         ORDER BY a_node_id, b_node_id, method;
         """
     )
-    validate_relation_columns(db, "conditional_edges_v")
+    _validate_columns(db, "conditional_edges_v", "conditional_edges.parquet")
     db.execute(
         f"""
         COPY (
@@ -86,3 +85,15 @@ def write_conditionals(db: DuckDB, out_dir: Path) -> None:
         ) TO '{q(out_dir / "conditional_edges.parquet")}' (FORMAT PARQUET);
         """
     )
+
+
+def _validate_columns(db: DuckDB, relation: str, artifact: str) -> None:
+    actual = [
+        str(row["column_name"])
+        for row in db.rows(f"DESCRIBE SELECT * FROM {relation}")
+    ]
+    expected = ARTIFACT_COLUMNS[artifact]
+    if actual != expected:
+        raise RuntimeError(
+            f"{relation} column contract drift: expected {expected}, got {actual}"
+        )

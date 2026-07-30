@@ -18,7 +18,7 @@ try:
     from pydantic import BaseModel
 except ImportError as exc:  # pragma: no cover - exercised by CLI installation error
     raise ImportError(
-        'Automated discovery requires `pip install -e ".[discovery]"`.'
+        "Automated discovery dependencies are missing; reinstall oddsfox-graph."
     ) from exc
 
 from ._diagnostic_stages import write_conditionals
@@ -32,7 +32,6 @@ from ._discovery.cache import (
 from ._discovery.candidates import (
     candidate_sort_key as _candidate_sort_key,
     generate_candidate_store as _generate_candidate_store_bounded,
-    generate_candidates as _generate_candidates_bounded,
     structural_member_limit as _structural_member_limit,
 )
 from ._discovery.contracts import (
@@ -195,7 +194,7 @@ PROPOSITION_COLUMNS = {
     "prompt_version": "VARCHAR",
     "inference_fingerprint": "VARCHAR",
     "model_profile_id": "VARCHAR",
-    "source_format": "VARCHAR",
+    "source_schema": "VARCHAR",
 }
 
 REVIEW_COLUMNS = {
@@ -667,7 +666,7 @@ def discover(
         lambda: _prepare_inference_context(config, out_dir, _client),
     )
 
-    source_format, input_rows, markets, input_selection = recorder.run(
+    source_schema, input_rows, markets, input_selection = recorder.run(
         "normalize_input",
         lambda: _load_source_markets(
             input_path,
@@ -730,7 +729,7 @@ def discover(
         "parse_propositions",
         lambda: _parse_propositions(
             markets,
-            source_format,
+            source_schema,
             config,
             cache,
             state,
@@ -994,7 +993,7 @@ def discover(
                 rejected_edges,
                 parse_error_rows,
                 review_rows,
-                source_format=source_format,
+                source_schema=source_schema,
                 input_rows=input_rows,
                 input_selection=input_selection,
                 solver_stats=solver_stats,
@@ -1026,7 +1025,6 @@ def discover(
                     staging,
                     config.benchmark_path,
                     input_hash=input_hash,
-                    pricing_file=config.pricing_file,
                     compute_profile=config.compute_profile,
                     run_metadata={
                         "usage": state.usage_manifest(),
@@ -1103,7 +1101,7 @@ def discover(
             input_path,
             input_hash,
             artifact_hashes,
-            source_format,
+            source_schema,
             stats,
             config,
             cache,
@@ -1131,7 +1129,7 @@ def _with_packaged_benchmark(
 ) -> DiscoveryConfig:
     if config.benchmark_path is not None:
         return config
-    packaged = Path(__file__).parent / "benchmarks" / "v0.6.0.parquet"
+    packaged = Path(__file__).parent / "benchmarks" / "v0.7.0.parquet"
     if not packaged.is_file():
         return config
     db = DuckDB()
@@ -1202,9 +1200,8 @@ def _prepare_incremental(
         or baseline_versions.get("candidate_state") != CANDIDATE_STATE_VERSION
     ):
         raise ValueError(
-            "Incremental baseline uses incompatible pre-v0.6 discovery state; "
-            "run one clean v0.6 discover build and use that completed output "
-            "as --incremental-from"
+            "Incremental baseline is incompatible. Run a clean discovery and "
+            "use that completed output as --incremental-from."
         )
     market_state_path = baseline / "state" / "market_state.parquet"
     proposition_fingerprint_path = (
@@ -1556,7 +1553,7 @@ def _seed_parse_cache_from_baseline(
 
 def _parse_propositions(
     markets: Sequence[SourceMarket],
-    source_format: str,
+    source_schema: str,
     config: DiscoveryConfig,
     cache: JsonCache,
     state: RunState,
@@ -1717,7 +1714,7 @@ def _parse_propositions(
                 source_outcome,
                 parsed,
                 observed_model,
-                source_format,
+                source_schema,
                 error,
                 inference.fingerprints["parse"],
                 inference.profile.profile_id if inference.profile else None,
@@ -1822,7 +1819,7 @@ def _proposition_row(
     source: SourceOutcome,
     parsed: ParsedOutcome | None,
     observed_model: str,
-    source_format: str,
+    source_schema: str,
     error: str | None,
     inference_fingerprint_value: str,
     model_profile_id: str | None,
@@ -1920,7 +1917,7 @@ def _proposition_row(
         "prompt_version": PARSE_PROMPT_VERSION,
         "inference_fingerprint": inference_fingerprint_value,
         "model_profile_id": model_profile_id,
-        "source_format": source_format,
+        "source_schema": source_schema,
         "_expected_tokens": len(market.outcomes),
         "_is_active": market.is_active,
         "_is_closed": market.is_closed,
@@ -1996,38 +1993,6 @@ async def _local_parse_market(
         parsed,
         str(result.observed_model),
         dict(result.usage),
-    )
-
-
-def _generate_candidates(
-    propositions: Sequence[dict[str, Any]],
-    config: DiscoveryConfig,
-    embedder: Callable[[list[str], DiscoveryConfig], Any],
-    *,
-    baseline_embeddings: dict[str, list[float]] | None = None,
-    baseline_neighbors: Sequence[dict[str, Any]] | None = None,
-    embedding_state_sink: list[dict[str, Any]] | None = None,
-    neighbor_state_sink: list[dict[str, Any]] | None = None,
-    neighborhood_execution_sink: list[dict[str, Any]] | None = None,
-    enabled_rule_ids: set[str] | None = None,
-) -> list[dict[str, Any]]:
-    return _generate_candidates_bounded(
-        propositions,
-        config,
-        embedder,
-        semantic_keys=_SEMANTIC_KEYS,
-        hashable=_hashable,
-        proposition_signature=_proposition_signature,
-        deterministic_relation=_deterministic_relation,
-        embedding_text=_embedding_text,
-        stage_rank=_stage_rank,
-        is_winner=_is_winner_proposition,
-        baseline_embeddings=baseline_embeddings,
-        baseline_neighbors=baseline_neighbors,
-        embedding_state_sink=embedding_state_sink,
-        neighbor_state_sink=neighbor_state_sink,
-        neighborhood_execution_sink=neighborhood_execution_sink,
-        enabled_rule_ids=enabled_rule_ids,
     )
 
 
@@ -2277,7 +2242,7 @@ def _embed_texts(texts: list[str], config: DiscoveryConfig) -> Any:
         from sentence_transformers import SentenceTransformer
     except ImportError as exc:  # pragma: no cover - dependency installation guard
         raise ImportError(
-            'Automated discovery requires `pip install -e ".[discovery]"`.'
+            "Automated discovery dependencies are missing; reinstall oddsfox-graph."
         ) from exc
     model = SentenceTransformer(
         config.embedding_model,
@@ -2476,7 +2441,7 @@ def _apply_nli_scores(
                 "assumptions": [],
                 "requires_review": False,
                 "unsupported_assumption": False,
-                "discovery_method": "llm",
+                "discovery_method": "nli",
                 "model_version": f"{config.nli_model}@{config.nli_revision}",
                 "prompt_version": "nli-profile-v1",
                 "inference_fingerprint": fingerprint,
@@ -2506,7 +2471,7 @@ def _apply_nli_scores(
                     "confidence": confidence,
                 },
                 by_id,
-                discovery_method="llm",
+                discovery_method="nli",
                 rule_version=None,
                 model_version=f"{config.nli_model}@{config.nli_revision}",
                 prompt_version="nli-profile-v1",
@@ -2754,7 +2719,7 @@ def _classify_candidates(
                     "requires_review": True,
                     "explanation": error or "missing classification",
                     "assumptions": [],
-                    "discovery_method": "llm",
+                    "discovery_method": "generative_model",
                     "model_version": observed_model,
                     "prompt_version": CLASSIFY_PROMPT_VERSION,
                     "inference_fingerprint": inference.fingerprints["classify"],
@@ -2802,7 +2767,7 @@ def _classify_candidates(
                 "assumptions": classification.assumptions,
                 "requires_review": classification.requires_review,
                 "unsupported_assumption": classification.unsupported_assumption,
-                "discovery_method": "llm",
+                "discovery_method": "generative_model",
                 "model_version": observed_model,
                 "prompt_version": CLASSIFY_PROMPT_VERSION,
                 "inference_fingerprint": inference.fingerprints["classify"],
@@ -2873,7 +2838,7 @@ def _classify_candidates(
                 _logic_edge_row(
                     relation_row,
                     by_id,
-                    discovery_method="llm",
+                    discovery_method="generative_model",
                     rule_version=None,
                     model_version=observed_model,
                     prompt_version=CLASSIFY_PROMPT_VERSION,
@@ -3075,7 +3040,7 @@ def _classification_relation(
         "edge_type": edge_type,
         "src_node_id": src,
         "dst_node_id": dst,
-        "edge_basis": "llm_classifier",
+        "edge_basis": "generative_model_classifier",
         "explanation": _atomic_explanation(classification, relation, None),
         "confidence": classification.confidence,
     }
@@ -3247,10 +3212,18 @@ def _validate_logic_edges(
             raise RuntimeError(f"Logic edge lacks complete provenance: {key}")
         if edge["discovery_method"] == "deterministic" and not edge.get("rule_version"):
             raise RuntimeError(f"Deterministic edge lacks rule_version: {key}")
-        if edge["discovery_method"] == "llm" and (
+        if edge["discovery_method"] in {"generative_model", "nli"} and (
             not edge.get("model_version") or not edge.get("prompt_version")
         ):
-            raise RuntimeError(f"LLM edge lacks model/prompt provenance: {key}")
+            raise RuntimeError(f"Model edge lacks model/prompt provenance: {key}")
+        if edge["discovery_method"] not in {
+            "deterministic",
+            "generative_model",
+            "nli",
+        }:
+            raise RuntimeError(
+                f"Unsupported discovery method for logic edge: {key}"
+            )
         by_pair[tuple(sorted((src, dst)))].append(edge)
 
     for pair, pair_edges in sorted(by_pair.items()):
@@ -3263,7 +3236,7 @@ def _validate_logic_edges(
             for edge in pair_edges:
                 if (
                     edge["edge_type"] == "mutually_exclusive"
-                    and edge["discovery_method"] == "llm"
+                    and edge["discovery_method"] in {"generative_model", "nli"}
                 ):
                     reviews.append(
                         _review_row(
@@ -3272,7 +3245,7 @@ def _validate_logic_edges(
                             pair[1],
                             "mutually_exclusive",
                             float(edge["confidence"]),
-                            "Complement subsumes the LLM exclusion relation",
+                            "Complement subsumes the model exclusion relation",
                             list(edge["assumptions"]),
                             _str_or_none(edge.get("model_version")),
                             _str_or_none(edge.get("prompt_version")),
@@ -3280,8 +3253,10 @@ def _validate_logic_edges(
                     )
             continue
         if relation_types == {"implies"} and len(pair_edges) > 1:
-            llm = [
-                edge for edge in pair_edges if edge["discovery_method"] == "llm"
+            model_edges = [
+                edge
+                for edge in pair_edges
+                if edge["discovery_method"] in {"generative_model", "nli"}
             ]
             deterministic = [
                 edge
@@ -3293,7 +3268,7 @@ def _validate_logic_edges(
                     f"Conflicting deterministic implications for pair {pair}"
                 )
             accepted.extend(deterministic)
-            for edge in llm:
+            for edge in model_edges:
                 reviews.append(
                     _review_row(
                         "consistency_conflict",
@@ -3311,13 +3286,17 @@ def _validate_logic_edges(
         if len(relation_types) == 1:
             accepted.extend(pair_edges)
             continue
-        llm = [edge for edge in pair_edges if edge["discovery_method"] == "llm"]
+        model_edges = [
+            edge
+            for edge in pair_edges
+            if edge["discovery_method"] in {"generative_model", "nli"}
+        ]
         deterministic = [
             edge for edge in pair_edges if edge["discovery_method"] == "deterministic"
         ]
-        if deterministic and llm:
+        if deterministic and model_edges:
             accepted.extend(deterministic)
-            for edge in llm:
+            for edge in model_edges:
                 reviews.append(
                     _review_row(
                         "consistency_conflict",
@@ -3325,7 +3304,7 @@ def _validate_logic_edges(
                         pair[1],
                         str(edge["edge_type"]),
                         float(edge["confidence"]),
-                        "LLM relation conflicts with an accepted deterministic relation",
+                        "Model relation conflicts with an accepted deterministic relation",
                         list(edge["assumptions"]),
                         _str_or_none(edge.get("model_version")),
                         _str_or_none(edge.get("prompt_version")),
@@ -3337,7 +3316,7 @@ def _validate_logic_edges(
                 f"Conflicting deterministic relations for pair {pair}: "
                 f"{sorted(relation_types)}"
             )
-        for edge in llm:
+        for edge in model_edges:
             reviews.append(
                 _review_row(
                     "consistency_conflict",
@@ -3345,7 +3324,7 @@ def _validate_logic_edges(
                     pair[1],
                     str(edge["edge_type"]),
                     float(edge["confidence"]),
-                    "Conflicting LLM relations for one proposition pair",
+                    "Conflicting model relations for one proposition pair",
                     list(edge["assumptions"]),
                     _str_or_none(edge.get("model_version")),
                     _str_or_none(edge.get("prompt_version")),
@@ -3371,7 +3350,7 @@ def _proposition_fingerprint_rows(
         "prompt_version",
         "inference_fingerprint",
         "model_profile_id",
-        "source_format",
+        "source_schema",
     }
     return [
         {
@@ -3610,7 +3589,7 @@ def _write_discovery_artifacts(
     parse_errors: Sequence[dict[str, Any]],
     reviews_: Sequence[dict[str, Any]],
     *,
-    source_format: str,
+    source_schema: str,
     input_rows: int,
     input_selection: dict[str, object],
     solver_stats: dict[str, int],
@@ -3870,7 +3849,9 @@ def _write_discovery_artifacts(
             )
             for key, where in {
                 "candidate_edges": "",
-                "classified_pairs": "WHERE discovery_method = 'llm'",
+                "classified_pairs": (
+                    "WHERE discovery_method IN ('generative_model', 'nli')"
+                ),
                 "unclassified_budget_pairs": (
                     "WHERE status = 'not_classified_budget'"
                 ),
@@ -3878,7 +3859,7 @@ def _write_discovery_artifacts(
         }
         stats: dict[str, object] = {
             "input_rows": input_rows,
-            "input_format": source_format,
+            "input_schema": source_schema,
             "input_selection": input_selection,
             "markets": len(markets),
             "tokens": len(propositions),
@@ -3891,8 +3872,11 @@ def _write_discovery_artifacts(
                 for row in logic_edges
                 if row.get("discovery_method") == "deterministic"
             ),
-            "llm_logic_edges": sum(
-                1 for row in logic_edges if row.get("discovery_method") == "llm"
+            "model_logic_edges": sum(
+                1
+                for row in logic_edges
+                if row.get("discovery_method")
+                in {"generative_model", "nli"}
             ),
             "conditional_edges": int(
                 db.scalar("SELECT count(*) FROM conditional_edges_v") or 0
@@ -4153,7 +4137,7 @@ def _discovery_manifest(
     input_path: Path,
     input_hash: str,
     artifact_hashes: dict[str, str],
-    source_format: str,
+    source_schema: str,
     stats: dict[str, object],
     config: DiscoveryConfig,
     cache: JsonCache,
@@ -4181,10 +4165,7 @@ def _discovery_manifest(
         "version": __version__,
         "input": str(input_path),
         "input_hash": input_hash,
-        "input_format": source_format,
-        "input_granularity_seconds": (
-            60 if source_format == "minutely" else (3600 if source_format == "hourly" else None)
-        ),
+        "input_schema": source_schema,
         "models": {
             "parse": {
                 "requested": config.parse_model,
@@ -4282,14 +4263,6 @@ def _discovery_manifest(
                 "hash": _sha256(config.benchmark_path.resolve()),
             }
             if config.benchmark_path is not None
-            else None
-        ),
-        "pricing": (
-            {
-                "path": str(config.pricing_file.resolve()),
-                "hash": _sha256(config.pricing_file.resolve()),
-            }
-            if config.pricing_file is not None
             else None
         ),
         "compute": compute,

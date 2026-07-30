@@ -1,13 +1,6 @@
 from __future__ import annotations
 
 
-PARQUET_ARTIFACTS = (
-    "nodes.parquet",
-    "market_groups.parquet",
-    "logic_edges.parquet",
-    "conditional_edges.parquet",
-)
-
 REPORTS = (
     "summary.md",
     "strongest_implications.md",
@@ -16,11 +9,6 @@ REPORTS = (
     "coverage.md",
     "conditional_examples.md",
 )
-
-FINAL_EDGE_ARTIFACT_TABLES = {
-    "logic_edges.parquet": "logic_edges_v",
-    "conditional_edges.parquet": "conditional_edges_v",
-}
 
 ARTIFACT_COLUMNS = {
     "nodes.parquet": [

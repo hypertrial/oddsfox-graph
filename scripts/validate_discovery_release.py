@@ -11,8 +11,15 @@ from typing import Any
 CANONICAL_SOURCE_SHA256 = (
     "790bd1595b379472ad65ba0073105b4eb630974d04e7b44d58c8a4929f274aa2"
 )
-FIXTURE_SCHEMA_VERSION = "discovery-release-fixture-v2"
-PACKAGE_VERSION = "0.6.0"
+CANONICAL_MARKET_ROWS = 94_781
+REQUIRED_SOURCE_COLUMNS = {
+    "market_id",
+    "question",
+    "outcomes",
+    "clob_token_ids",
+}
+FIXTURE_SCHEMA_VERSION = "discovery-release-fixture-v3"
+PACKAGE_VERSION = "0.7.0"
 REQUIRED_FILES = (
     "input.parquet",
     "benchmark.parquet",
@@ -38,6 +45,35 @@ def _sha256(path: Path) -> str:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _validate_canonical_catalog(path: Path) -> None:
+    if _sha256(path) != CANONICAL_SOURCE_SHA256:
+        raise ValueError("Release validation requires the canonical supplied catalog")
+    from oddsfox_graph.queries import DuckDB, q
+
+    db = DuckDB()
+    try:
+        rows = int(
+            db.scalar(f"SELECT count(*) FROM read_parquet('{q(path)}')") or 0
+        )
+        columns = {
+            str(row["name"])
+            for row in db.rows(
+                f"SELECT name FROM parquet_schema('{q(path)}') "
+                "WHERE name != 'duckdb_schema'"
+            )
+        }
+    finally:
+        db.close()
+    missing = sorted(REQUIRED_SOURCE_COLUMNS - columns)
+    if rows != CANONICAL_MARKET_ROWS or missing:
+        raise ValueError(
+            "Canonical catalog contract mismatch: "
+            f"expected {CANONICAL_MARKET_ROWS} rows and "
+            f"{sorted(REQUIRED_SOURCE_COLUMNS)}; got {rows} rows"
+            + (f" with missing columns {missing}" if missing else "")
+        )
 
 
 def _tree_provenance(path: Path) -> dict[str, Any]:
@@ -78,7 +114,7 @@ def _validate_fixture_manifest(
     if manifest.get("schema_version") != FIXTURE_SCHEMA_VERSION:
         raise ValueError("Unsupported release fixture manifest schema")
     if manifest.get("package_version") != PACKAGE_VERSION:
-        raise ValueError("Release fixture was not produced for package v0.6.0")
+        raise ValueError("Release fixture package version is incompatible")
     if manifest.get("source_sha256") != CANONICAL_SOURCE_SHA256:
         raise ValueError("Release fixture source binding is not canonical")
     files = manifest.get("files")
@@ -196,7 +232,7 @@ def _baseline_requested_models(
     return requested[0], requested[1]
 
 
-def _validate_v060_content_bindings(
+def _validate_content_bindings(
     args: argparse.Namespace,
     limits: list[int],
 ) -> None:
@@ -225,7 +261,7 @@ def _validate_v060_content_bindings(
         < 0.999
         or "nli" not in (model_profile.get("inference_fingerprints") or {})
     ):
-        raise ValueError("Release calibration did not pass v0.6 profile gates")
+        raise ValueError("Release calibration did not pass profile gates")
     if (
         not isinstance(compute.get("hardware_hour_usd"), (int, float))
         or isinstance(compute.get("hardware_hour_usd"), bool)
@@ -233,8 +269,8 @@ def _validate_v060_content_bindings(
         raise ValueError("Compute profile is missing hardware_hour_usd")
     for cache_file in args.cache_dir.rglob("*.json"):
         cache_entry = json.loads(cache_file.read_text(encoding="utf-8"))
-        if cache_entry.get("version") != 4:
-            raise ValueError("Release cache contains pre-v0.6 inference lineage")
+        if cache_entry.get("version") != 5:
+            raise ValueError("Release cache has incompatible inference lineage")
     for limit in limits:
         manifest = json.loads(
             (
@@ -251,7 +287,7 @@ def _validate_v060_content_bindings(
             or inference.get("proprietary_cache_lineage") is not False
         ):
             raise ValueError(
-                f"Baseline {limit} is not bound to the v0.6 open-model fixture"
+                f"Baseline {limit} is not bound to the current open-model fixture"
             )
 
 
@@ -272,8 +308,7 @@ def main() -> int:
     parser.add_argument("--fixture-manifest", required=True, type=Path)
     parser.add_argument("--propositions", default="5000,20000")
     args = parser.parse_args()
-    if _sha256(args.input) != CANONICAL_SOURCE_SHA256:
-        raise ValueError("Release validation requires the canonical supplied catalog")
+    _validate_canonical_catalog(args.input)
     fixture_root = args.input.resolve().parent
     fixture_manifest = _validate_fixture_manifest(
         fixture_root,
@@ -292,7 +327,7 @@ def main() -> int:
         fixture_manifest,
         limits,
     )
-    _validate_v060_content_bindings(args, limits)
+    _validate_content_bindings(args, limits)
 
     results: dict[str, Any] = {}
     results["fixture"] = fixture_manifest

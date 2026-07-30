@@ -1,180 +1,95 @@
-# Benchmarks
+# Benchmark and Release Gates
 
-Use the manifest timing summary after a completed build:
-
-```bash
-python -m oddsfox_graph.cli benchmark-summary --out <build-dir>
-```
-
-The command prints:
-
-- `runtime_seconds`
-- selected count fields from `stats`
-- artifact count
-- top stage timings from `stage_timings`
-
-For discovery, the summary also reports candidate and review counts. Inspect the
-manifest directly for cache, token usage, selected-input counts, requested and
-observed models, embedding revision, and every stage timing.
-
-## v0.6 Human Benchmark
-
-The benchmark is generated only from the supplied catalog with SHA-256
+The canonical source is the supplied 94,781-market catalog with SHA-256
 `790bd1595b379472ad65ba0073105b4eb630974d04e7b44d58c8a4929f274aa2`.
-All pair endpoints come from the top-5,000 discovery population so the same
-truth set can score both release sizes.
+
+Export blinded reviewer material:
 
 ```bash
-python -m oddsfox_graph.cli benchmark-export \
+oddsfox-graph benchmark-export \
   --input data/polymarket_all_markets_20260730T093857Z.parquet \
-  --out output/discovery-5000 \
-  --output-dir output/benchmark-review \
+  --out output/discovery \
+  --output-dir reviews \
   --parse-count 750 \
   --pair-count 3000 \
-  --seed 20260730
+  --seed 0
 ```
 
-The export contains blinded reviewer-A and reviewer-B files plus an adjudication
-template. It stratifies parse records across sports, elections,
-cryptocurrency, economic indicators, and date-based events. Pair records mix
-candidate, semantic near-miss, structured near-miss, and noncandidate sources.
-No model label, method, or confidence appears in reviewer evidence. The
-sampling manifest records domain and pair-source counts without exposing them
-as reviewer labels.
-
-Both reviewers must use distinct aliases and supply notes. Every disagreement
-must receive a final adjudicated label and notes before compilation:
+After two independent reviewers and adjudication:
 
 ```bash
-python -m oddsfox_graph.cli benchmark-compile \
+oddsfox-graph benchmark-compile \
   --input data/polymarket_all_markets_20260730T093857Z.parquet \
-  --review-a output/benchmark-review/reviewer-a.csv \
-  --review-b output/benchmark-review/reviewer-b.csv \
-  --adjudication output/benchmark-review/adjudication.csv \
-  --sampling-manifest output/benchmark-review/sampling_manifest.json \
-  --output oddsfox_graph/benchmarks/v0.6.0.parquet
-```
+  --review-a reviews/reviewer-a.csv \
+  --review-b reviews/reviewer-b.csv \
+  --adjudication reviews/adjudication.csv \
+  --sampling-manifest reviews/sampling_manifest.json \
+  --output oddsfox_graph/benchmarks/v0.7.0.parquet
 
-Do not synthesize or copy model predictions into the human-label columns.
-Compilation deterministically assigns 40% development, 30% calibration, and
-30% untouched test rows. Prompts and rules use development rows; `model-profile`
-uses calibration rows only; final `evaluate` reads test rows only.
-
-An open-weight license does not prove that the model's training data is fully
-reproducible. Release provenance therefore states both the SPDX weight license
-and the immutable upstream/model artifact hashes without making a stronger
-training-data claim.
-
-## M4 Release Runs
-
-The reproducible fake-model performance harness runs each measurement in a
-fresh process, writes raw samples and medians as JSON, and proves offline and
-incremental hash equality:
-
-```bash
-python scripts/benchmark_discovery.py \
+oddsfox-graph model-profile \
   --input data/polymarket_all_markets_20260730T093857Z.parquet \
-  --output output/discovery-benchmark.json \
-  --sizes 500,2000,5000,20000 \
-  --modes clean,offline,one-market-incremental \
-  --repetitions 3
-```
-
-The 500- and 2,000-proposition sizes are correctness and profiling diagnostics.
-Incremental candidate-speed ratios are enforced only at the 5,000 and 20,000
-release envelopes, where timings are large enough to be stable; offline reuse
-and clean runtime/RSS regression gates still apply wherever the required
-samples and baseline exist.
-
-For the recorded regression comparison, use the matching 100-pair fake
-classification envelope and require every ratio gate:
-
-```bash
-python scripts/benchmark_discovery.py \
-  --input data/polymarket_all_markets_20260730T093857Z.parquet \
-  --output output/discovery-regression.json \
-  --max-llm-pairs 100 \
-  --baseline-json benchmarks/discovery-v040-baseline.json \
-  --require-pass
-```
-
-Use the real local catalog and a fresh cache:
-
-```bash
-python -m oddsfox_graph.cli discover \
-  --input data/polymarket_all_markets_20260730T093857Z.parquet \
-  --out output/discovery-5000 \
-  --cache-dir .cache/oddsfox-graph \
+  --benchmark oddsfox_graph/benchmarks/v0.7.0.parquet \
+  --cache-dir output/cache \
   --model-manifest model-manifest.json \
-  --max-propositions 5000 \
-  --max-candidates 400000 \
-  --max-llm-pairs 5000
-```
+  --out output/profile
 
-Repeat at 20,000 propositions. Then rerun each completed output with `--offline`
-and compare `artifact_hashes` in `build_manifest.json`. Validate incremental
-changes against a distinct immutable baseline and compare each result to a clean
-full build using the same configuration.
-
-Evaluation with a self-hosted compute profile is:
-
-```bash
-python -m oddsfox_graph.cli evaluate \
-  --out output/discovery-20000 \
-  --benchmark oddsfox_graph/benchmarks/v0.6.0.parquet \
+oddsfox-graph evaluate \
+  --out output/discovery \
+  --benchmark oddsfox_graph/benchmarks/v0.7.0.parquet \
   --compute-profile compute-profile.json
 ```
 
-`READY_TO_SCALE` requires deterministic precision at least 0.99, overall
-precision at least 0.97, candidate recall at least 0.98, complement precision
-at least 0.995, unsupported-assumption rate below 0.01, complete accepted-edge
-provenance, deterministic replay, affected-component-only recomputation, and
-successful local M4 completion.
+Development rows support prompt and rule work, calibration rows build profiles,
+and untouched test rows determine `READY_TO_SCALE`. Release gates require
+deterministic precision at least 0.99, overall precision at least 0.97,
+candidate recall at least 0.98, complement precision at least 0.995,
+unsupported-assumption rate below 0.01, complete provenance, deterministic
+offline replay, affected-only incremental recomputation, an approved local
+runtime and license, exact model-profile matching, at least 0.999 structured
+validity, and successful 5,000/20,000-proposition runs.
 
-The protected release fixture can validate both limits and completed labels in
-one command:
+`scripts/benchmark_discovery.py` measures absolute runtime, peak RSS,
+candidate/publication timings, offline reuse, and one-market incremental reuse
+against the canonical catalog. The release fixture uses schema
+`discovery-release-fixture-v3`.
+
+## Release procedure
+
+Run current real-catalog performance and reuse validation:
 
 ```bash
-python scripts/validate_discovery_release.py \
+python scripts/benchmark_discovery.py \
   --input data/polymarket_all_markets_20260730T093857Z.parquet \
-  --cache-dir <complete-cache> \
-  --baseline-dir <completed-online-baselines> \
-  --work-dir output/release-validation \
-  --expected-hashes <expected-artifact-hashes.json> \
-  --benchmark <compiled-benchmark.parquet> \
-  --compute-profile <compute-profile.json> \
-  --model-manifest <model-manifest.json> \
-  --model-profile <model-profile.json> \
-  --calibration-report <calibration-report.json> \
-  --fixture-manifest <fixture-manifest.json>
+  --output output/discovery-performance.json \
+  --sizes 5000,20000 \
+  --modes clean,offline,one-market-incremental \
+  --require-pass
 ```
 
-## v0.5 Performance Reference
+After live llama.cpp/Metal and vLLM conformance runs, genuine benchmark
+compilation, calibration, and a `READY_TO_SCALE` test evaluation, assemble the
+content-bound fixture. It must contain the canonical input, cache, 5,000 and
+20,000 baselines, expected hashes, benchmark, compute profile, model
+manifest/profile, and calibration report:
 
-On the July 30, 2026 development M4, a 5,000-proposition fresh real-catalog run
-with deterministic fake adapters improved from 10.339 seconds to 5.433 seconds.
-Candidate generation fell from 1.637 to 1.254 seconds, artifact publication
-from 6.699 to 2.364 seconds, and reported peak RSS from 1,073 MB to 956 MB.
-These are machine-local observations; acceptance is ratio-based and uses the
-process-isolated harness rather than fixed CI wall-clock limits.
+```bash
+python scripts/create_release_fixture_manifest.py \
+  --fixture-root fixture
 
-## Historical v0.3.1 Performance Reference
+python scripts/validate_discovery_release.py \
+  --input fixture/input.parquet \
+  --cache-dir fixture/cache \
+  --baseline-dir fixture/baselines \
+  --work-dir output/release-validation \
+  --expected-hashes fixture/expected-artifact-hashes.json \
+  --benchmark fixture/benchmark.parquet \
+  --compute-profile fixture/compute-profile.json \
+  --model-manifest fixture/model-manifest.json \
+  --model-profile fixture/model-profile.json \
+  --calibration-report fixture/calibration-report.json \
+  --fixture-manifest fixture/fixture-manifest.json
+```
 
-On the July 30, 2026 development machine, using the supplied 94,781-market
-parquet and deterministic fake model/embedding responses:
-
-| Measurement | v0.3.0 | v0.3.1 |
-|---|---:|---:|
-| 2,000-proposition total runtime | 14.769 s | 2.482 s |
-| artifact publication stage | 13.114 s | 1.387 s |
-| 10,000-row typed insert median | 1.798 s | 0.039 s |
-
-The v0.3.1 real-data run selected 1,000 complete markets, retained the configured
-40,000 candidates, classified 200 fake-response pairs, and reproduced all
-logical artifact hashes offline. The v0.3.1 discovery figures are medians from
-three fresh-cache runs. Treat them as a machine-specific reference, not a CI
-wall-clock assertion.
-
-The legacy `review-score` thresholds remain available only for v0.3
-compatibility. v0.6 consumes the source- and sampling-bound benchmark v2 test
-partition and records release decisions in `evaluation_report.json`.
+The sibling `oddsfox-pipeline` must switch to consuming a manifest-complete
+discovery output before this breaking release is integrated; no command shim is
+provided here.

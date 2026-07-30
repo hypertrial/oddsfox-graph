@@ -199,7 +199,7 @@ def export_benchmark_reviews(
     source_hash = _sha256(input_path)
     if source_hash != CANONICAL_SOURCE_SHA256:
         raise ValueError(
-            "v0.6 benchmark export requires the canonical supplied catalog"
+            "Benchmark export requires the canonical supplied catalog"
         )
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     if (
@@ -351,7 +351,7 @@ def compile_benchmark(
     source_hash = _sha256(input_path)
     if source_hash != CANONICAL_SOURCE_SHA256:
         raise ValueError(
-            "v0.6 benchmark compilation requires the canonical supplied catalog"
+            "Benchmark compilation requires the canonical supplied catalog"
         )
     sampling, sampling_hash = _load_sampling_manifest(
         sampling_manifest_path,
@@ -571,13 +571,10 @@ def evaluate_build(
     benchmark_path: Path,
     *,
     input_hash: str | None = None,
-    pricing_file: Path | None = None,
     compute_profile: Path | None = None,
     output_path: Path | None = None,
     run_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    if pricing_file is not None and compute_profile is not None:
-        raise ValueError("pricing_file and compute_profile are mutually exclusive")
     out_dir = out_dir.resolve()
     benchmark_path = benchmark_path.resolve()
     if not benchmark_path.is_file():
@@ -694,7 +691,15 @@ def evaluate_build(
         prediction_rows,
         method="deterministic",
     )
-    llm = _prediction_metrics(prediction_rows, method="llm")
+    generative_model = _prediction_metrics(
+        prediction_rows,
+        method="generative_model",
+    )
+    nli = _prediction_metrics(prediction_rows, method="nli")
+    model = _prediction_metrics(
+        prediction_rows,
+        method={"generative_model", "nli"},
+    )
     overall = _prediction_metrics(prediction_rows)
     deterministic_accepted = [
         row
@@ -716,18 +721,17 @@ def evaluate_build(
         sum(
             bool(row["unsupported_assumption"])
             for row in overall_accepted
-            if row["method"] == "llm"
+            if row["method"] in {"generative_model", "nli"}
         )
         / max(
             1,
             sum(
-                row["method"] == "llm"
+                row["method"] in {"generative_model", "nli"}
                 for row in overall_accepted
             ),
         )
     )
     provenance_failures = _provenance_failures(edges)
-    pricing = _cost_metrics(out_dir, pricing_file, run_metadata=run_metadata)
     compute = _compute_evaluation_metrics(
         out_dir,
         compute_profile,
@@ -912,7 +916,9 @@ def evaluate_build(
             "parser": parser,
             "retrieval": retrieval,
             "deterministic": deterministic,
-            "llm": llm,
+            "generative_model": generative_model,
+            "nli": nli,
+            "model": model,
             "overall": overall,
             "deterministic_accepted_edge_precision": (
                 deterministic_accepted_precision
@@ -922,7 +928,6 @@ def evaluate_build(
             "unsupported_assumption_rate": unsupported_rate,
             "review_rate": review_count / max(1, len(candidates)),
             "provenance_failures": provenance_failures,
-            "cost": pricing,
             "compute": compute,
         },
         "failure_categories": dict(failure_categories.most_common()),
@@ -977,14 +982,6 @@ def evaluate_build(
                     "path": str(benchmark_path),
                     "hash": _sha256(benchmark_path),
                 },
-                "pricing": (
-                    {
-                        "path": str(pricing_file.resolve()),
-                        "hash": _sha256(pricing_file.resolve()),
-                    }
-                    if pricing_file is not None
-                    else None
-                ),
                 "compute": compute,
                 "evaluation": {
                     "path": str(destination),
@@ -1595,7 +1592,7 @@ def _retrieval_metrics(
         "candidate_recall": found / len(positive) if positive else None,
         "positive_pairs": len(positive),
         "candidates_per_proposition": candidate_count / max(1, proposition_count),
-        "llm_calls_avoided": max(
+        "model_calls_avoided": max(
             0,
             proposition_count * (proposition_count - 1) // 2 - classified_count,
         ),
@@ -1637,7 +1634,10 @@ def _prediction_rows(
             candidate = candidate_by_pair.get(pair)
             if candidate and candidate.get("classification_relation"):
                 predicted = str(candidate["classification_relation"])
-                method = "llm"
+                method = str(
+                    candidate.get("discovery_method")
+                    or "generative_model"
+                )
                 confidence = float(
                     candidate.get("classification_confidence") or 0.0
                 )
@@ -1677,12 +1677,13 @@ def _prediction_rows(
 def _prediction_metrics(
     rows: list[dict[str, Any]],
     *,
-    method: str | None = None,
+    method: str | set[str] | None = None,
 ) -> dict[str, Any]:
+    methods = {method} if isinstance(method, str) else method
     scored = [
         (
             row
-            if method is None or row["method"] == method
+            if methods is None or row["method"] in methods
             else {
                 **row,
                 "predicted": None,
@@ -1782,11 +1783,13 @@ def _provenance_failures(edges: list[dict[str, Any]]) -> int:
         method = edge.get("discovery_method")
         if not edge.get("explanation") or edge.get("assumptions") is None:
             failures += 1
+        elif method not in {"deterministic", "generative_model", "nli"}:
+            failures += 1
         elif method == "deterministic" and (
             not edge.get("rule_version") or not edge.get("rule_id")
         ):
             failures += 1
-        elif method == "llm" and (
+        elif method in {"generative_model", "nli"} and (
             not edge.get("model_version")
             or not edge.get("prompt_version")
             or not edge.get("inference_fingerprint")
@@ -1796,92 +1799,6 @@ def _provenance_failures(edges: list[dict[str, Any]]) -> int:
         elif not edge.get("proposal_id") or not edge.get("solver_component_id"):
             failures += 1
     return failures
-
-
-def _cost_metrics(
-    out_dir: Path,
-    pricing_file: Path | None,
-    *,
-    run_metadata: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    manifest_path = out_dir / "build_manifest.json"
-    manifest = (
-        json.loads(manifest_path.read_text(encoding="utf-8"))
-        if manifest_path.is_file()
-        else {}
-    )
-    metadata = run_metadata or manifest
-    usage = metadata.get("usage") or {}
-    accounted_usage = usage.get("accounted_total") or usage
-    result: dict[str, Any] = {
-        "input_tokens": int(accounted_usage.get("input_tokens", 0)),
-        "output_tokens": int(accounted_usage.get("output_tokens", 0)),
-        "total_tokens": int(accounted_usage.get("total_tokens", 0)),
-        "current_request": {
-            "input_tokens": int(usage.get("input_tokens", 0)),
-            "output_tokens": int(usage.get("output_tokens", 0)),
-            "total_tokens": int(usage.get("total_tokens", 0)),
-        },
-        "cached_origin": dict(usage.get("cached_origin") or {}),
-        "estimated_usd": None,
-        "pricing_hash": None,
-    }
-    if pricing_file is None:
-        return result
-    pricing = json.loads(pricing_file.resolve().read_text(encoding="utf-8"))
-    parse_model = ((metadata.get("models") or {}).get("parse") or {}).get("requested")
-    classify_model = ((metadata.get("models") or {}).get("classify") or {}).get("requested")
-    models = pricing.get("models", {})
-    task_models = {
-        "parse": parse_model,
-        "classify": classify_model,
-    }
-    missing_models = sorted(
-        {
-            str(model)
-            for model in task_models.values()
-            if model and not isinstance(models.get(model), dict)
-        }
-    )
-    if missing_models:
-        raise ValueError(
-            "Pricing file does not cover requested models: "
-            + ", ".join(missing_models)
-        )
-    task_usage = usage.get("tasks") or {}
-    cost_by_task = {}
-    for task, model in task_models.items():
-        if not model or task not in task_usage:
-            continue
-        rate = models.get(model)
-        if not isinstance(rate, dict):
-            raise ValueError(f"Pricing file does not cover requested model {model}")
-        tokens = task_usage[task].get("accounted_total") or {}
-        cost_by_task[task] = (
-            int(tokens.get("input_tokens", 0))
-            * float(rate["input_per_million"])
-            + int(tokens.get("output_tokens", 0))
-            * float(rate["output_per_million"])
-        ) / 1_000_000
-    rates = [
-        models.get(model) for model in set(task_models.values()) if model
-    ]
-    rates = [rate for rate in rates if isinstance(rate, dict)]
-    if not rates:
-        raise ValueError("Pricing file does not cover requested models")
-    if cost_by_task:
-        result["estimated_usd"] = sum(cost_by_task.values())
-    else:
-        input_rate = max(float(rate["input_per_million"]) for rate in rates)
-        output_rate = max(float(rate["output_per_million"]) for rate in rates)
-        result["estimated_usd"] = (
-            result["input_tokens"] * input_rate
-            + result["output_tokens"] * output_rate
-        ) / 1_000_000
-    result["estimated_usd_by_task"] = cost_by_task
-    result["pricing_hash"] = _sha256(pricing_file.resolve())
-    result["pricing_version"] = pricing.get("version")
-    return result
 
 
 def _compute_evaluation_metrics(

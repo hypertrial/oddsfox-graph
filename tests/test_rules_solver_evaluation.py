@@ -10,20 +10,30 @@ from typing import Any
 import numpy as np
 import pytest
 
-from oddsfox_graph._discovery.contracts import AtomicPairAssessment
+from oddsfox_graph._discovery.contracts import (
+    AtomicPairAssessment,
+    ParsedOutcome,
+    PropositionRecord,
+)
 from oddsfox_graph._discovery.candidates import _top_k_indices
-from oddsfox_graph._discovery.input import load_source_markets
+from oddsfox_graph._discovery.input import (
+    datetime_or_none,
+    load_source_markets,
+)
 from oddsfox_graph._discovery.solver import solve_proposals
 from oddsfox_graph.discovery import (
     DiscoveryConfig,
+    _canonical_entity,
+    _canonical_unit,
     _classification_validation_error,
     _deterministic_relation,
-    _generate_candidates,
+    _generate_candidate_store,
+    _is_winner_proposition,
+    _validate_logic_edges,
 )
 from oddsfox_graph.evaluation import (
     BENCHMARK_COLUMNS,
     REVIEW_FIELDS,
-    _cost_metrics,
     _prediction_metrics,
     assign_domain,
     compile_benchmark,
@@ -38,6 +48,24 @@ REAL_INPUT = (
 )
 
 
+def _candidate_rows(
+    propositions: list[dict[str, Any]],
+    config: DiscoveryConfig,
+    embedder: Any,
+    **kwargs: Any,
+) -> list[dict[str, Any]]:
+    store = _generate_candidate_store(
+        propositions,
+        config,
+        embedder,
+        **kwargs,
+    )
+    try:
+        return store.rows(order_by="proposition_a_id, proposition_b_id")
+    finally:
+        store.close()
+
+
 def test_domain_taxonomy_uses_word_boundaries_and_precedence() -> None:
     assert assign_domain("Will the Ethiopian prime minister resign?") == "elections"
     assert assign_domain("Will ETH exceed $5,000 by June?") == "cryptocurrency"
@@ -45,6 +73,64 @@ def test_domain_taxonomy_uses_word_boundaries_and_precedence() -> None:
     assert assign_domain("Will the Lakers win the NBA Finals?") == "sports"
     assert assign_domain("Will the agreement be signed by July?") == "date_based"
     assert assign_domain("Will the company announce a new product?") == "other"
+
+
+def test_alias_unit_and_datetime_normalization() -> None:
+    assert _canonical_entity(" ＢＴＣ ") == "Bitcoin"
+    assert _canonical_entity("Manchester Utd") == "Manchester Utd"
+    assert _canonical_unit("US dollars") == "USD"
+    assert _canonical_unit("%") == "percent"
+    assert datetime_or_none("2026-07-30T09:00:00Z") == datetime(
+        2026,
+        7,
+        30,
+        9,
+        tzinfo=timezone.utc,
+    )
+    assert datetime_or_none(datetime(2026, 7, 30, 9)) == datetime(
+        2026,
+        7,
+        30,
+        9,
+        tzinfo=timezone.utc,
+    )
+
+
+def test_structured_contracts_require_nullable_fields() -> None:
+    parsed_schema = ParsedOutcome.model_json_schema()
+    assert set(parsed_schema["required"]) == set(parsed_schema["properties"])
+    assert {"type": "null"} in parsed_schema["properties"]["object"]["anyOf"]
+
+    classified_schema = AtomicPairAssessment.model_json_schema()
+    assert set(classified_schema["required"]) == set(
+        classified_schema["properties"]
+    )
+
+    proposition_schema = PropositionRecord.model_json_schema()
+    assert set(proposition_schema["required"]) == set(
+        proposition_schema["properties"]
+    )
+    assert {"type": "null"} in proposition_schema["properties"]["event_id"][
+        "anyOf"
+    ]
+
+    with pytest.raises(ValueError):
+        ParsedOutcome(
+            outcome="Yes",
+            subject=[],
+            predicate=None,
+            object=None,
+            operator=None,
+            threshold=None,
+            unit=None,
+            time_start=None,
+            time_end=None,
+            competition=None,
+            event_scope=None,
+            jurisdiction=None,
+            polarity="positive",
+            parse_confidence=0.99,
+        )
 
 
 def test_numeric_interval_implication_handles_mixed_operators_and_polarity() -> None:
@@ -62,7 +148,7 @@ def test_numeric_interval_implication_handles_mixed_operators_and_polarity() -> 
         "inclusive",
     )
     assert relation["rule_id"] == "threshold.interval_containment.v2"
-    candidates = _generate_candidates(
+    candidates = _candidate_rows(
         [strict, inclusive],
         DiscoveryConfig(top_k=1, max_candidates=10),
         lambda texts, _: np.eye(len(texts), dtype=np.float32),
@@ -109,6 +195,78 @@ def test_numeric_interval_implication_handles_mixed_operators_and_polarity() -> 
     assert _deterministic_relation(strict, cross_event_duplicate, 0.95) is None
 
 
+def test_time_stage_and_single_winner_rules_require_matching_scope() -> None:
+    broad = _proposition("broad")
+    narrow = {
+        **broad,
+        "proposition_id": "narrow",
+        "market_id": "market-narrow",
+        "time_start": datetime(2026, 3, 1, tzinfo=timezone.utc),
+        "time_end": datetime(2026, 4, 1, tzinfo=timezone.utc),
+    }
+    time_relation = _deterministic_relation(narrow, broad, 0.95)
+    assert time_relation is not None
+    assert (
+        time_relation["src_node_id"],
+        time_relation["dst_node_id"],
+    ) == ("narrow", "broad")
+
+    final = {
+        **_proposition("final"),
+        "subject": ["Alpha"],
+        "predicate": "reach",
+        "object": "final",
+        "operator": None,
+        "threshold": None,
+        "unit": None,
+        "competition": "World Cup",
+    }
+    semifinal = {
+        **final,
+        "proposition_id": "semifinal",
+        "market_id": "market-semifinal",
+        "object": "semifinal",
+    }
+    stage_relation = _deterministic_relation(final, semifinal, 0.95)
+    assert stage_relation is not None
+    assert (
+        stage_relation["src_node_id"],
+        stage_relation["dst_node_id"],
+    ) == ("final", "semifinal")
+
+    alice = {
+        **final,
+        "proposition_id": "alice",
+        "market_id": "market-alice",
+        "subject": ["Alice"],
+        "predicate": "win",
+        "object": "winner",
+        "event_id": "election",
+        "event_slug": "election",
+        "event_scope": "single_winner",
+    }
+    bob = {
+        **alice,
+        "proposition_id": "bob",
+        "market_id": "market-bob",
+        "subject": ["Bob"],
+    }
+    winner_relation = _deterministic_relation(alice, bob, 0.95)
+    assert winner_relation is not None
+    assert winner_relation["edge_type"] == "mutually_exclusive"
+    assert (
+        _deterministic_relation(
+            {**alice, "event_scope": "multi_winner"},
+            {**bob, "event_scope": "multi_winner"},
+            0.95,
+        )
+        is None
+    )
+    assert not _is_winner_proposition(
+        {**alice, "predicate": "wind speed", "object": None}
+    )
+
+
 def test_blockwise_embeddings_are_stable_and_reusable() -> None:
     propositions = [
         _proposition(str(index), market_id=f"m-{index}")
@@ -132,7 +290,7 @@ def test_blockwise_embeddings_are_stable_and_reusable() -> None:
         embedding_block_size=2,
         max_candidates=100,
     )
-    first = _generate_candidates(
+    first = _candidate_rows(
         propositions,
         config,
         embed,
@@ -153,7 +311,7 @@ def test_blockwise_embeddings_are_stable_and_reusable() -> None:
         raise AssertionError("unchanged vectors must be reused")
 
     replay_state: list[dict[str, Any]] = []
-    replay = _generate_candidates(
+    replay = _candidate_rows(
         propositions,
         config,
         unexpected,
@@ -168,6 +326,60 @@ def test_blockwise_embeddings_are_stable_and_reusable() -> None:
         for row in first
     ]
     assert all(row["reused"] for row in replay_state)
+
+
+def test_bounded_candidate_store_applies_stable_global_cap() -> None:
+    propositions = [
+        {
+            **_proposition(f"p-{index:02d}"),
+            "predicate": f"predicate-{index:02d}",
+            "object": f"object-{index:02d}",
+        }
+        for index in range(20)
+    ]
+    rows = _candidate_rows(
+        propositions,
+        DiscoveryConfig(top_k=1, max_candidates=25),
+        lambda texts, _: np.eye(len(texts), dtype=np.float32),
+    )
+
+    pairs = [
+        (row["proposition_a_id"], row["proposition_b_id"])
+        for row in rows
+    ]
+    assert len(pairs) == 25
+    assert len(set(pairs)) == 25
+    assert all(a_id < b_id for a_id, b_id in pairs)
+    assert pairs == sorted(pairs)
+
+
+def test_candidate_cap_never_truncates_deterministic_proofs() -> None:
+    propositions = [
+        {
+            **_proposition(f"choice-{index}", market_id="categorical"),
+            "outcome": f"Choice {index}",
+            "_expected_tokens": 3,
+        }
+        for index in range(3)
+    ]
+
+    with pytest.raises(ValueError, match="refusing to truncate proven relations"):
+        _candidate_rows(
+            propositions,
+            DiscoveryConfig(top_k=1, max_candidates=2),
+            lambda texts, _: np.eye(len(texts), dtype=np.float32),
+        )
+
+
+def test_candidate_store_rejects_invalid_embedding_matrix() -> None:
+    propositions = [_proposition("a"), _proposition("b")]
+
+    with pytest.raises(ValueError, match="invalid matrix"):
+        _candidate_rows(
+            propositions,
+            DiscoveryConfig(top_k=1, max_candidates=10),
+            lambda texts, _: np.full((len(texts), 1), np.nan),
+        )
 
 
 def test_linear_top_k_preserves_score_and_stable_id_ties() -> None:
@@ -219,8 +431,6 @@ def test_classifier_direction_and_supporting_field_validation() -> None:
     assert "require supporting-field" in str(
         _classification_validation_error(uncited_positive, a, b)
     )
-
-
 def test_rc2_preserves_same_market_fact_and_records_rejection() -> None:
     complement = _edge(
         "complement",
@@ -235,8 +445,8 @@ def test_rc2_preserves_same_market_fact_and_records_rejection() -> None:
         "a",
         "b",
         confidence=0.99,
-        method="llm",
-        basis="llm_classifier",
+        method="generative_model",
+        basis="generative_model_classifier",
     )
     accepted, rejected, stats = solve_proposals([exclusion, complement])
 
@@ -260,8 +470,8 @@ def test_rc2_publishes_one_strongest_proposal_per_typed_pair() -> None:
         "a",
         "b",
         confidence=0.98,
-        method="llm",
-        basis="llm_classifier",
+        method="generative_model",
+        basis="generative_model_classifier",
     )
     weaker["proposal_id"] = "weaker"
     stronger = {
@@ -283,16 +493,16 @@ def test_rc2_publishes_one_strongest_proposal_per_typed_pair() -> None:
         "a",
         "b",
         confidence=0.99,
-        method="llm",
-        basis="llm_classifier",
+        method="generative_model",
+        basis="generative_model_classifier",
     )
     exclusion = _edge(
         "mutually_exclusive",
         "a",
         "b",
         confidence=0.99,
-        method="llm",
-        basis="llm_classifier",
+        method="generative_model",
+        basis="generative_model_classifier",
     )
     accepted, _, _ = solve_proposals([exclusion, complement])
     assert [row["edge_type"] for row in accepted] == ["complement"]
@@ -304,24 +514,24 @@ def test_rc2_enforces_equivalence_class_relation_consistency() -> None:
         "a",
         "b",
         confidence=0.99,
-        method="llm",
-        basis="llm_classifier",
+        method="generative_model",
+        basis="generative_model_classifier",
     )
     complement = _edge(
         "complement",
         "a",
         "c",
         confidence=0.98,
-        method="llm",
-        basis="llm_classifier",
+        method="generative_model",
+        basis="generative_model_classifier",
     )
     compatible = _edge(
         "compatible",
         "b",
         "c",
         confidence=0.97,
-        method="llm",
-        basis="llm_classifier",
+        method="generative_model",
+        basis="generative_model_classifier",
     )
 
     accepted, rejected, _ = solve_proposals(
@@ -365,24 +575,24 @@ def test_rc2_prevents_exclusion_inside_equivalence_class() -> None:
         "a",
         "b",
         confidence=0.99,
-        method="llm",
-        basis="llm_classifier",
+        method="generative_model",
+        basis="generative_model_classifier",
     )
     b_c = _edge(
         "equivalent",
         "b",
         "c",
         confidence=0.99,
-        method="llm",
-        basis="llm_classifier",
+        method="generative_model",
+        basis="generative_model_classifier",
     )
     a_c = _edge(
         "mutually_exclusive",
         "a",
         "c",
         confidence=0.97,
-        method="llm",
-        basis="llm_classifier",
+        method="generative_model",
+        basis="generative_model_classifier",
     )
 
     accepted, rejected, _ = solve_proposals([a_b, b_c, a_c])
@@ -409,7 +619,7 @@ def test_method_specific_relation_recall_uses_all_positive_truth() -> None:
         {
             "expected": "equivalent",
             "predicted": "equivalent",
-            "method": "llm",
+            "method": "generative_model",
             "confidence": 0.99,
             "correct": True,
         },
@@ -421,62 +631,19 @@ def test_method_specific_relation_recall_uses_all_positive_truth() -> None:
     assert deterministic["recall"] == 0.5
 
 
-def test_pricing_uses_accounted_tokens_and_per_task_models(
-    tmp_path: Path,
-) -> None:
-    pricing = tmp_path / "pricing.json"
-    pricing.write_text(
-        json.dumps(
-            {
-                "version": "test-v1",
-                "models": {
-                    "parse-model": {
-                        "input_per_million": 1.0,
-                        "output_per_million": 2.0,
-                    },
-                    "classify-model": {
-                        "input_per_million": 3.0,
-                        "output_per_million": 4.0,
-                    },
-                },
-            }
-        )
+@pytest.mark.parametrize("method", ["generative_model", "nli"])
+def test_model_provenance_methods_are_current(method: str) -> None:
+    edge = _edge(
+        "compatible",
+        "a",
+        "b",
+        confidence=0.99,
+        method=method,
+        basis=f"{method}_test",
     )
-    task_usage = {
-        "accounted_total": {
-            "input_tokens": 1_000_000,
-            "output_tokens": 1_000_000,
-            "total_tokens": 2_000_000,
-        }
-    }
-    result = _cost_metrics(
-        tmp_path,
-        pricing,
-        run_metadata={
-            "usage": {
-                "input_tokens": 0,
-                "output_tokens": 0,
-                "total_tokens": 0,
-                "accounted_total": {
-                    "input_tokens": 2_000_000,
-                    "output_tokens": 2_000_000,
-                    "total_tokens": 4_000_000,
-                },
-                "tasks": {
-                    "parse": task_usage,
-                    "classify": task_usage,
-                },
-            },
-            "models": {
-                "parse": {"requested": "parse-model"},
-                "classify": {"requested": "classify-model"},
-            },
-        },
-    )
-
-    assert result["estimated_usd"] == 10.0
-    assert result["total_tokens"] == 4_000_000
-    assert result["current_request"]["total_tokens"] == 0
+    accepted, reviews = _validate_logic_edges([edge])
+    assert reviews == []
+    assert accepted[0]["discovery_method"] == method
 
 
 def test_benchmark_compile_requires_adjudication_and_preserves_reviewers(
@@ -515,7 +682,7 @@ def test_benchmark_compile_requires_adjudication_and_preserves_reviewers(
     sampling.write_text(
         json.dumps(
             {
-                "benchmark_version": "v0.6.0",
+                "benchmark_version": "v0.7.0",
                 "source_sha256": hashlib.sha256(
                     REAL_INPUT.read_bytes()
                 ).hexdigest(),
@@ -628,8 +795,12 @@ def _edge(
         "evidence": "evidence",
         "discovery_method": method,
         "rule_version": "rules-v2" if method == "deterministic" else None,
-        "model_version": "fake-model" if method == "llm" else None,
-        "prompt_version": "prompt-v2" if method == "llm" else None,
+        "model_version": (
+            "fake-model" if method in {"generative_model", "nli"} else None
+        ),
+        "prompt_version": (
+            "prompt-v2" if method in {"generative_model", "nli"} else None
+        ),
         "explanation": "evidence",
         "assumptions": [],
         "rule_id": (

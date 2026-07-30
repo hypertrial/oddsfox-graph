@@ -73,72 +73,6 @@ def structural_member_limit(max_candidates: int) -> int:
     return max(64, int(math.sqrt(2 * int(max_candidates))) + 1)
 
 
-def generate_candidates(
-    propositions: Sequence[dict[str, Any]],
-    config: Any,
-    embedder: Callable[[list[str], Any], Any],
-    *,
-    semantic_keys: Sequence[str],
-    hashable: Callable[[object], object],
-    proposition_signature: Callable[[dict[str, Any]], tuple[object, ...]],
-    deterministic_relation: Callable[
-        [dict[str, Any], dict[str, Any], float],
-        dict[str, Any] | None,
-    ],
-    embedding_text: Callable[[dict[str, Any]], str],
-    stage_rank: Callable[[dict[str, Any]], int | None],
-    is_winner: Callable[[dict[str, Any]], bool],
-    baseline_embeddings: dict[str, list[float]] | None = None,
-    baseline_neighbors: Sequence[dict[str, Any]] | None = None,
-    embedding_state_sink: list[dict[str, Any]] | None = None,
-    neighbor_state_sink: list[dict[str, Any]] | None = None,
-    neighborhood_execution_sink: list[dict[str, Any]] | None = None,
-    baseline_candidate_blocks: Any | None = None,
-    baseline_candidate_reasons: Any | None = None,
-    enabled_rule_ids: set[str] | None = None,
-) -> list[dict[str, Any]]:
-    """Compatibility wrapper returning candidates for focused tests and callers."""
-    store = generate_candidate_store(
-        propositions,
-        config,
-        embedder,
-        semantic_keys=semantic_keys,
-        hashable=hashable,
-        proposition_signature=proposition_signature,
-        deterministic_relation=deterministic_relation,
-        embedding_text=embedding_text,
-        stage_rank=stage_rank,
-        is_winner=is_winner,
-        baseline_embeddings=baseline_embeddings,
-        baseline_neighbors=baseline_neighbors,
-        embedding_state_sink=embedding_state_sink,
-        neighbor_state_sink=neighbor_state_sink,
-        neighborhood_execution_sink=neighborhood_execution_sink,
-        baseline_candidate_blocks=baseline_candidate_blocks,
-        baseline_candidate_reasons=baseline_candidate_reasons,
-        enabled_rule_ids=enabled_rule_ids,
-    )
-    try:
-        candidates = store.rows(order_by="proposition_a_id, proposition_b_id")
-    finally:
-        store.close()
-    proposition_by_id = {
-        str(proposition["proposition_id"]): proposition
-        for proposition in propositions
-    }
-    for row in candidates:
-        if row.get("deterministic_relation") is None:
-            continue
-        relation = deterministic_relation(
-            proposition_by_id[str(row["proposition_a_id"])],
-            proposition_by_id[str(row["proposition_b_id"])],
-            float(config.parse_confidence),
-        )
-        if relation is not None:
-            row["_deterministic"] = relation
-    return candidates
-
-
 def generate_candidate_store(
     propositions: Sequence[dict[str, Any]],
     config: Any,
@@ -494,7 +428,7 @@ def _embedding_reason_rows(
         import numpy as np
     except ImportError as exc:  # pragma: no cover - dependency installation guard
         raise ImportError(
-            'Automated discovery requires `pip install -e ".[discovery]"`.'
+            "Automated discovery dependencies are missing; reinstall oddsfox-graph."
         ) from exc
 
     texts = [embedding_text(proposition_by_id[proposition_id]) for proposition_id in ids]

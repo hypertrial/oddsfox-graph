@@ -638,7 +638,9 @@ def test_profiled_nli_never_proposes_complement_exclusion_or_compatibility() -> 
     assert relation not in {"complement", "mutually_exclusive", "compatible"}
 
 
-def test_model_tree_hash_and_v05_cache_rejection(tmp_path: Path) -> None:
+def test_model_tree_hash_and_incompatible_cache_rejection(
+    tmp_path: Path,
+) -> None:
     model = tmp_path / "model"
     model.mkdir()
     (model / "weights.gguf").write_bytes(b"weights")
@@ -654,7 +656,7 @@ def test_model_tree_hash_and_v05_cache_rejection(tmp_path: Path) -> None:
         json.dumps({"version": 3, "state": "success"}),
         encoding="utf-8",
     )
-    with pytest.raises(ValueError, match="predates the v0.6"):
+    with pytest.raises(ValueError, match="Incompatible discovery cache"):
         cache.get("legacy")
 
 
@@ -700,14 +702,6 @@ def test_manifest_creation_and_canonical_id_validation(
     destination.write_text(json.dumps(tampered), encoding="utf-8")
     with pytest.raises(ValueError, match="canonical content"):
         load_model_manifest(destination)
-
-
-def test_discovery_config_rejects_mixed_cost_models() -> None:
-    with pytest.raises(ValueError, match="mutually exclusive"):
-        DiscoveryConfig(
-            pricing_file=Path("historical.json"),
-            compute_profile=Path("compute.json"),
-        ).validate()
 
 
 def test_profile_never_calibrates_unsupported_positive_truth(

@@ -1,5 +1,4 @@
 include constraints-dev.txt
-recursive-include benchmarks *.json
 recursive-include docs *.md *.json
 recursive-include scripts *.py
 recursive-include oddsfox_graph/benchmarks *

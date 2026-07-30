@@ -5,8 +5,8 @@
   "additionalProperties": false,
   "required": ["schema_version", "package_version", "source_sha256", "files", "trees"],
   "properties": {
-    "schema_version": {"const": "discovery-release-fixture-v2"},
-    "package_version": {"const": "0.6.0"},
+    "schema_version": {"const": "discovery-release-fixture-v3"},
+    "package_version": {"const": "0.7.0"},
     "source_sha256": {
       "const": "790bd1595b379472ad65ba0073105b4eb630974d04e7b44d58c8a4929f274aa2"
     },

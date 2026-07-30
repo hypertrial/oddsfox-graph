@@ -4,13 +4,20 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "oddsfox-graph"
-version = "0.6.0"
-description = "Build and discover structural logic graph artifacts from Polymarket data."
+version = "0.7.0"
+description = "Discover structural logic graph artifacts from Polymarket market snapshots."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
 authors = [{name = "Hypertrial"}]
-dependencies = ["duckdb>=1.0"]
+dependencies = [
+  "duckdb>=1.0",
+  "httpx>=0.27",
+  "numpy>=1.26",
+  "pydantic>=2",
+  "python-sat==1.9.dev7",
+  "sentence-transformers>=5",
+]
 classifiers = [
   "Programming Language :: Python :: 3",
   "Topic :: Scientific/Engineering :: Information Analysis",
@@ -21,19 +28,8 @@ Repository = "https://github.com/hypertrial/oddsfox-graph"
 DataPipeline = "https://github.com/hypertrial/oddsfox-pipeline"
 
 [project.optional-dependencies]
-discovery = [
-  "httpx>=0.27",
-  "numpy>=1.26",
-  "pydantic>=2",
-  "python-sat==1.9.dev7",
-  "sentence-transformers>=5",
-]
 dev = [
   "build>=1",
-  "httpx>=0.27",
-  "numpy>=1.26",
-  "pydantic>=2",
-  "python-sat==1.9.dev7",
   "pytest>=8",
   "ruff>=0.11",
   "mypy>=1.15",
@@ -70,11 +66,8 @@ oddsfox-graph = "oddsfox_graph.cli:main"
 include = ["oddsfox_graph*"]
 
 [tool.setuptools.package-data]
-oddsfox_graph = ["benchmarks/*.md", "benchmarks/*.parquet", "taxonomies/*.json"]
+oddsfox_graph = ["benchmarks/*.md", "benchmarks/*.parquet"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
-markers = [
-  "full_output: checks that require existing output/wc2026 artifacts",
-]
