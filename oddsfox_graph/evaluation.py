@@ -14,13 +14,19 @@ from pathlib import Path
 from typing import Any
 
 from ._discovery.bulk import create_and_fill
+from ._discovery.evaluation_metrics import (
+    calibration as _calibration,
+    f1 as _f1,
+    precision as _precision,
+)
 from ._discovery.input import load_source_markets
 from .queries import DuckDB, q
+from ._discovery.incremental import ExecutionPlan
+from ._discovery.versions import DOMAIN_TAXONOMY_VERSION
 
 
 BENCHMARK_VERSION = "v0.4.0"
 BENCHMARK_SCHEMA_VERSION = "benchmark-v1"
-DOMAIN_TAXONOMY_VERSION = "domains-v1"
 CANONICAL_SOURCE_SHA256 = (
     "790bd1595b379472ad65ba0073105b4eb630974d04e7b44d58c8a4929f274aa2"
 )
@@ -694,31 +700,34 @@ def evaluate_build(
         and int(incremental.get("embedding_vectors_recomputed", 1)) == 0
         and int(solver_execution.get("components_recomputed", 1)) == 0
     )
-    changed_units = int(incremental.get("markets_changed", 0)) + int(
-        incremental.get("markets_removed", 0)
-    )
+    execution_plan = dict(incremental.get("execution_plan") or {})
+    execution_plan_path = out_dir / "state" / "execution_plan.parquet"
+    verified_execution_plan: dict[str, Any] = {}
+    if execution_plan_path.is_file():
+        plan_db = DuckDB()
+        try:
+            plan_rows = plan_db.rows(
+                f"""
+                SELECT *
+                FROM read_parquet('{q(execution_plan_path)}')
+                ORDER BY stage, unit_type, unit_id
+                """
+            )
+        finally:
+            plan_db.close()
+        verified_execution_plan = ExecutionPlan.from_rows(
+            incremental=bool(
+                incremental.get("enabled")
+                or incremental.get("offline_state_replay")
+            ),
+            rows=plan_rows,
+        ).manifest()
     affected_components_only = bool(
-        incremental.get("enabled")
-        or incremental.get("offline_state_replay")
-    ) and (
-        (
-            changed_units == 0
-            and bool(incremental.get("candidate_generation_reused"))
-            and int(solver_execution.get("components_recomputed", 1)) == 0
-        )
-        or (
-            changed_units > 0
-            and int(
-                incremental.get("semantic_neighborhoods_reused", 0)
-            )
-            > 0
-            and int(
-                incremental.get("candidate_components_reused", 0)
-            )
-            > 0
-            and int(solver_execution.get("components_reused", 0)) > 0
-        )
+        verified_execution_plan.get("affected_only_verified")
+        and verified_execution_plan.get("hash") == execution_plan.get("hash")
+        and not verified_execution_plan.get("verification_errors")
     )
+    rule_execution = dict(execution.get("rules") or {})
     selected_propositions = int(execution.get("tokens", 0))
     local_m4_completion = (
         selected_propositions in {5_000, 20_000}
@@ -746,6 +755,9 @@ def evaluate_build(
         "benchmark_complete": benchmark_complete,
         "deterministic_cached_replay": replay_without_recompute,
         "affected_incremental_components_only": affected_components_only,
+        "no_unbenchmarked_rule_override": not bool(
+            rule_execution.get("allow_unbenchmarked_rules")
+        ),
         "local_m4_completion": local_m4_completion,
     }
     failed_predictions = [
@@ -1439,27 +1451,6 @@ def _prediction_metrics(
     }
 
 
-def _calibration(rows: list[dict[str, Any]]) -> tuple[float | None, float | None]:
-    if not rows:
-        return None, None
-    bins: list[list[dict[str, Any]]] = [[] for _ in range(10)]
-    for row in rows:
-        index = min(9, int(float(row["confidence"]) * 10))
-        bins[index].append(row)
-    ece = 0.0
-    for bucket in bins:
-        if not bucket:
-            continue
-        accuracy = sum(bool(row["correct"]) for row in bucket) / len(bucket)
-        confidence = sum(float(row["confidence"]) for row in bucket) / len(bucket)
-        ece += len(bucket) / len(rows) * abs(accuracy - confidence)
-    brier = sum(
-        (float(row["confidence"]) - float(bool(row["correct"]))) ** 2
-        for row in rows
-    ) / len(rows)
-    return ece, brier
-
-
 def _parser_attributable_failures(
     failures: list[dict[str, Any]],
     parse_benchmark: list[dict[str, Any]],
@@ -1614,22 +1605,6 @@ def _metric_equal(left: object, right: object) -> bool:
     if hasattr(right, "isoformat"):
         right = right.isoformat()  # type: ignore[union-attr]
     return str(left) == str(right) if left is not None and right is not None else left is right
-
-
-def _precision(rows: list[dict[str, Any]]) -> float | None:
-    return (
-        sum(bool(row["correct"]) for row in rows) / len(rows)
-        if rows
-        else None
-    )
-
-
-def _f1(precision: float, recall: float) -> float:
-    return (
-        2 * precision * recall / (precision + recall)
-        if precision + recall
-        else 0.0
-    )
 
 
 def _required_bool(value: object, record_id: str) -> bool:

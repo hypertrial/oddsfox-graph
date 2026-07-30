@@ -24,32 +24,52 @@ RULE_REGISTRY = {
     "same_market.binary_complement.v1": {
         "version": "1",
         "basis": "same_market",
+        "applicability": "same_market_binary_yes_no",
+        "hard_fact": True,
     },
     "same_market.categorical_exclusion.v1": {
         "version": "1",
         "basis": "same_market",
+        "applicability": "same_market_distinct_outcomes",
+        "hard_fact": True,
     },
     "equivalence.normalized_fields.v1": {
         "version": "1",
         "basis": "normalized_equivalence",
+        "applicability": "same_normalized_fields_and_authoritative_scope",
+        "hard_fact": False,
     },
     "threshold.interval_containment.v2": {
         "version": "2",
         "basis": "numeric_threshold",
+        "applicability": "same_scope_interval_set_containment",
+        "hard_fact": False,
     },
     "time.interval_containment.v1": {
         "version": "1",
         "basis": "time_window_containment",
+        "applicability": "same_scope_time_interval_containment",
+        "hard_fact": False,
     },
     "tournament.stage_progression.v1": {
         "version": "1",
         "basis": "tournament_stage",
+        "applicability": "same_scope_positive_tournament_progression",
+        "hard_fact": False,
     },
     "event.single_winner.v1": {
         "version": "1",
         "basis": "single_winner",
+        "applicability": "same_authoritative_single_winner_event",
+        "hard_fact": False,
     },
 }
+
+HARD_FACT_RULE_IDS = frozenset(
+    rule_id
+    for rule_id, metadata in RULE_REGISTRY.items()
+    if metadata["hard_fact"]
+)
 
 _STAGE_RANKS = {
     "round of 32": 0,

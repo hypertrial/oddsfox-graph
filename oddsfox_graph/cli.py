@@ -36,6 +36,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--incremental-from", type=Path, default=None)
     p.add_argument("--pricing-file", type=Path, default=None)
     p.add_argument("--require-ready", action="store_true")
+    p.add_argument(
+        "--allow-unbenchmarked-rules",
+        action="store_true",
+        help=(
+            "Publish experimental parse-derived deterministic rules. "
+            "This opt-in is recorded and prevents READY_TO_SCALE."
+        ),
+    )
     p.add_argument("--offline", action="store_true")
     p.add_argument("--parse-model", default="gpt-5.6-terra")
     p.add_argument("--classify-model", default="gpt-5.6-terra")
@@ -149,6 +157,7 @@ def main(argv: list[str] | None = None) -> int:
                     incremental_from=args.incremental_from,
                     pricing_file=args.pricing_file,
                     require_ready=args.require_ready,
+                    allow_unbenchmarked_rules=args.allow_unbenchmarked_rules,
                     offline=args.offline,
                     parse_model=args.parse_model,
                     classify_model=args.classify_model,

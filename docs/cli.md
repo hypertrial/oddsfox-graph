@@ -27,6 +27,7 @@ minutely/hourly export.
 | `--out` | yes | Atomically published output directory |
 | `--cache-dir` | no | Content-addressed request cache; defaults beside `--out` |
 | `--benchmark` | no | Reviewed v0.4 benchmark; enables rule gates and evaluation |
+| `--allow-unbenchmarked-rules` | no | Opt into experimental parse-derived rules; recorded in provenance and prevents `READY_TO_SCALE` |
 | `--incremental-from` | no | Distinct, manifest-complete discovery baseline |
 | `--pricing-file` | no | Versioned per-model token pricing JSON |
 | `--require-ready` | no | Exit nonzero unless evaluation returns `READY_TO_SCALE` |
@@ -47,6 +48,10 @@ minutely/hourly export.
 
 Default relation thresholds are 0.995 for complement, 0.99 for equivalence and
 mutual exclusion, and 0.98 for implication and compatibility.
+Without a benchmark, only same-market hard facts publish deterministically.
+`--allow-unbenchmarked-rules` is diagnostic-only and prevents
+`READY_TO_SCALE`. Incremental baselines must carry compatible v0.5 candidate
+block, reason, and execution-plan state.
 
 ## `benchmark-export`
 

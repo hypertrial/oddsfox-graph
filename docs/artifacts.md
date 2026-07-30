@@ -161,11 +161,13 @@ the exit decision.
 
 Incremental state includes `market_state.parquet`,
 `proposition_fingerprints.parquet`, `proposition_embeddings.parquet`,
-`semantic_neighbors.parquet`, `candidate_components.parquet`, and
-`solver_components.parquet`. These retain source/parse fingerprints, normalized
-vectors, directed top-k neighborhoods, candidate-neighborhood fingerprints, and
-solver proposal decisions. State hashes are recorded separately from logical
-artifact hashes.
+`semantic_neighbors.parquet`, `candidate_components.parquet`,
+`candidate_blocks.parquet`, `candidate_reason_rows.parquet`,
+`solver_components.parquet`, and `execution_plan.parquet`. These retain
+source/parse fingerprints, normalized vectors, directed top-k neighborhoods,
+candidate-neighborhood fingerprints, reusable structured contributions, solver
+proposal decisions, and stage/unit reuse evidence. State hashes are recorded
+separately from logical artifact hashes.
 
 ### `evaluation.json`
 

@@ -2,8 +2,9 @@
 
 `oddsfox-graph` has two publication paths. The legacy `build` path is a
 sequential DuckDB build using the WC2026 taxonomy. The `discover` path uses
-Python for typed parsing, retrieval, rules, classification, and component
-consistency solving, then DuckDB for deterministic artifact publication.
+Python for typed parsing, bounded model calls, and component consistency
+solving, with a disk-backed DuckDB workspace for candidate retrieval and
+deterministic artifact publication.
 
 The legacy source parquet can be minutely or hourly. Both formats normalize
 into `input_prices`. Price columns remain in the input schema for pipeline
@@ -37,10 +38,12 @@ snapshots directly.
    `sentence-transformers/all-MiniLM-L6-v2` revision. Compute exact cosine
    similarity in deterministic blocks and retain each proposition's stable
    top-k neighbors; vectors are cached by normalized-text hash.
-5. Write structural and embedding reason rows to temporary DuckDB relations.
-   Reserve every deterministic proof, aggregate reasons relationally, and
-   materialize only the stable capped candidate set in Python.
-6. Apply benchmark-enabled same-market, equivalence, interval-set numeric,
+5. Persist structural block memberships and reason contributions in a temporary
+   DuckDB workspace. Bound oversized block membership, reserve every
+   deterministic proof, aggregate reasons relationally, and keep the stable
+   capped candidate set on disk. Python reads only deterministic proposals and
+   the bounded classifier slice.
+6. Always enable same-market hard facts. Apply equivalence, interval-set numeric,
    time containment, tournament-stage, and single-winner rules from the
    versioned rule registry.
 7. Classify only prioritized unresolved pairs with bounded asynchronous
@@ -52,7 +55,8 @@ snapshots directly.
    other proposals are confidence-weighted soft facts. Rejected proposals carry
    conflict explanations.
 9. Evaluate against a source-hash-bound human benchmark when supplied.
-10. Bulk-bind typed rows into DuckDB, stage, validate, sort, and atomically
+10. Attach the candidate workspace, bulk-bind the remaining bounded typed rows,
+    stage, validate, sort, and atomically
     publish non-manifest artifacts and incremental state. Freeze run statistics,
     then write `build_manifest.json` last.
 
@@ -76,6 +80,12 @@ implementation modules live under `oddsfox_graph._discovery`:
 - `relations`: registered deterministic rule semantics
 - `solver`: componentized, deterministic RC2 consistency selection
 - `bulk`: typed chunked DuckDB list-of-struct insertion
+- `workspace`: disk-backed candidate lifecycle, bounded reads, updates, and
+  zero-rebind publication
+- `incremental`: typed execution-plan records and affected-only verification
+- `publication`: deterministic sorted parquet export helpers
+- `evaluation_metrics`: relation calibration and scalar metric primitives
+- `versions`: independent compatibility versions for every discovery stage
 
 `oddsfox_graph.evaluation` owns benchmark export/compilation, domain taxonomy,
 parser/retrieval/relation/calibration metrics, pricing, and deterministic exit
@@ -102,9 +112,10 @@ embedding dependencies to DuckDB-only installations.
 
 Incremental state is stored separately under `state/`: market/source and
 proposition/parse fingerprints, reusable embedding vectors,
-candidate-neighborhood fingerprints, and proposal/solver-component
-fingerprints. A baseline must be immutable, complete, and distinct from the new
-output directory.
+candidate-neighborhood fingerprints, structured block memberships and reason
+rows, proposal/solver-component fingerprints, and `execution_plan.parquet`.
+A baseline must be immutable, v0.5-compatible, complete, and distinct from the
+new output directory.
 
 ## Edge Lifecycle
 
@@ -130,7 +141,9 @@ Discovery adds parse-backed deterministic candidates and local embedding
 neighbors. Embeddings only retrieve candidates; they never accept edges. A
 deterministic rule publishes edges only when the compiled benchmark has at
 least ten positive and ten adversarial examples for that stable rule ID;
-otherwise it is reported as experimental.
+otherwise it is reported as experimental. Same-market hard facts are exempt.
+An explicit `--allow-unbenchmarked-rules` diagnostic override is recorded and
+blocks `READY_TO_SCALE`.
 Symmetric relations are stored once in stable ID order. `equivalent` behaves
 bidirectionally internally, `complement` is stronger than exclusion, and
 directional classifications normalize to one `implies` orientation.

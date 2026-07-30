@@ -115,6 +115,44 @@ class _FakeClient:
         self.responses = _FakeResponses()
 
 
+class _StableFakeResponses:
+    async def parse(self, **kwargs: object) -> _Response:
+        payload = json.loads(kwargs["input"][1]["content"])  # type: ignore[index]
+        if kwargs["text_format"] is ParsedMarketBatch:
+            return _Response(_parse_markets(payload))
+        return _Response(
+            PairClassificationBatch(
+                pairs=[
+                    PairClassification(
+                        pair_id=item["pair_id"],
+                        relation="unrelated",
+                        confidence=0.99,
+                        supporting_fields=[],
+                        explanation="the propositions are unrelated",
+                        assumptions=[],
+                        a_implies_b={
+                            "supported": False,
+                            "supporting_fields": [],
+                            "assumptions": [],
+                        },
+                        b_implies_a={
+                            "supported": False,
+                            "supporting_fields": [],
+                            "assumptions": [],
+                        },
+                        requires_review=False,
+                    )
+                    for item in payload
+                ]
+            )
+        )
+
+
+class _StableFakeClient:
+    def __init__(self) -> None:
+        self.responses = _StableFakeResponses()
+
+
 def _parse_markets(payload: list[dict[str, Any]]) -> ParsedMarketBatch:
     markets = []
     for market in payload:
@@ -254,6 +292,17 @@ def test_discover_real_compact_input_and_offline_replay(
     assert (out / "reports" / "coverage.md").is_file()
     assert first_manifest["models"]["embedding"]["revision"]
     assert set(first_hashes) == set(DISCOVERY_PARQUET_ARTIFACTS)
+    assert first_manifest["version"] == "0.5.0"
+    assert first_manifest["versions"]["candidate_state"] == "candidate-components-v2"
+    assert first_manifest["rules"]["enabled"] == [
+        "same_market.binary_complement.v1",
+        "same_market.categorical_exclusion.v1",
+    ]
+    assert first_manifest["rules"]["experimental"]
+    assert first_manifest["rules"]["allow_unbenchmarked_rules"] is False
+    assert (out / "state" / "candidate_blocks.parquet").is_file()
+    assert (out / "state" / "candidate_reason_rows.parquet").is_file()
+    assert (out / "state" / "execution_plan.parquet").is_file()
 
     db = DuckDB()
     try:
@@ -639,6 +688,153 @@ def test_threshold_only_incremental_reuses_candidates_and_classifications(
     assert stats["incremental"]["baseline_classification_entries_seeded"] == 100
     assert "relation_thresholds" in stats["incremental"]["invalidation_reasons"]
     assert stats["solver"]["components_recomputed"] == 0
+
+
+def test_classification_budget_change_matches_clean_build(
+    tmp_path: Path,
+    real_input: Path,
+    real_discovery: dict[str, Any],
+) -> None:
+    incremental = tmp_path / "budget-incremental"
+    clean = tmp_path / "budget-clean"
+    common = {
+        "top_k": 5,
+        "max_propositions": 500,
+        "max_candidates": 10_000,
+        "max_llm_pairs": 50,
+    }
+    discover(
+        real_input,
+        incremental,
+        config=DiscoveryConfig(
+            cache_dir=tmp_path / "budget-incremental-cache",
+            incremental_from=real_discovery["out"],
+            **common,
+        ),
+        _client=_FakeClient(),
+        _embedder=lambda *_: (_ for _ in ()).throw(
+            AssertionError("classification budget changes must reuse candidates")
+        ),
+    )
+    discover(
+        real_input,
+        clean,
+        config=DiscoveryConfig(
+            cache_dir=tmp_path / "budget-clean-cache",
+            **common,
+        ),
+        _client=_FakeClient(),
+        _embedder=_fake_embeddings,
+    )
+    incremental_manifest = json.loads(
+        (incremental / "build_manifest.json").read_text()
+    )
+    clean_manifest = json.loads((clean / "build_manifest.json").read_text())
+    assert (
+        incremental_manifest["artifact_hashes"]
+        == clean_manifest["artifact_hashes"]
+    )
+
+
+def test_candidate_cap_change_invalidates_structured_contributions(
+    tmp_path: Path,
+    real_input: Path,
+    real_discovery: dict[str, Any],
+) -> None:
+    incremental = tmp_path / "candidate-cap-incremental"
+    clean = tmp_path / "candidate-cap-clean"
+    common = {
+        "classify_model": "candidate-cap-test-classifier",
+        "top_k": 5,
+        "max_propositions": 500,
+        "max_candidates": 1_000,
+        "max_llm_pairs": 50,
+    }
+    incremental_stats = discover(
+        real_input,
+        incremental,
+        config=DiscoveryConfig(
+            cache_dir=tmp_path / "candidate-cap-incremental-cache",
+            incremental_from=real_discovery["out"],
+            **common,
+        ),
+        _client=_StableFakeClient(),
+        _embedder=lambda *_: (_ for _ in ()).throw(
+            AssertionError("unchanged embedding vectors must be reused")
+        ),
+    )
+    discover(
+        real_input,
+        clean,
+        config=DiscoveryConfig(
+            cache_dir=tmp_path / "candidate-cap-clean-cache",
+            **common,
+        ),
+        _client=_StableFakeClient(),
+        _embedder=_fake_embeddings,
+    )
+    incremental_manifest = json.loads(
+        (incremental / "build_manifest.json").read_text()
+    )
+    clean_manifest = json.loads((clean / "build_manifest.json").read_text())
+    assert "max_candidates" in incremental_stats["incremental"][
+        "invalidation_reasons"
+    ]
+    assert incremental_stats["incremental"]["candidate_blocks_reused"] == 0
+    assert incremental_stats["incremental"]["candidate_blocks_recomputed"] > 0
+    assert (
+        incremental_manifest["artifact_hashes"]
+        == clean_manifest["artifact_hashes"]
+    )
+
+
+def test_incompatible_solver_state_is_not_reported_as_reused(
+    tmp_path: Path,
+    real_input: Path,
+    real_discovery: dict[str, Any],
+) -> None:
+    baseline = tmp_path / "solver-version-baseline"
+    shutil.copytree(real_discovery["out"], baseline)
+    solver_state = baseline / "state" / "solver_components.parquet"
+    replacement = baseline / "state" / "solver-components-replacement.parquet"
+    db = DuckDB()
+    try:
+        db.execute(
+            f"""
+            COPY (
+                SELECT * REPLACE ('incompatible-solver' AS solver_version)
+                FROM read_parquet('{q(solver_state)}')
+            ) TO '{q(replacement)}' (FORMAT PARQUET)
+            """
+        )
+    finally:
+        db.close()
+    replacement.replace(solver_state)
+
+    stats = discover(
+        real_input,
+        tmp_path / "solver-version-incremental",
+        config=DiscoveryConfig(
+            cache_dir=tmp_path / "solver-version-cache",
+            incremental_from=baseline,
+            top_k=5,
+            max_propositions=500,
+            max_candidates=10_000,
+            max_llm_pairs=100,
+        ),
+        _client=_FakeClient(),
+        _embedder=lambda *_: (_ for _ in ()).throw(
+            AssertionError("candidate state must remain reusable")
+        ),
+    )
+
+    assert stats["solver"]["components_reused"] == 0
+    assert stats["solver"]["components_recomputed"] > 0
+    solver_plan = stats["incremental"]["execution_plan"]["stage_counts"][
+        "solver_components"
+    ]
+    assert solver_plan.get("reused", 0) == 0
+    assert solver_plan["recomputed"] > 0
 
 
 def test_classifier_change_invalidates_only_classification_cache(
@@ -1032,6 +1228,9 @@ def test_one_changed_real_market_matches_clean_rebuild(
         "semantic_neighborhoods_recomputed"
     ] < 100
     assert incremental_stats["incremental"]["candidate_components_reused"] > 0
+    assert incremental_stats["incremental"]["candidate_blocks_reused"] > 0
+    assert incremental_stats["incremental"]["candidate_blocks_recomputed"] == 0
+    assert incremental_stats["incremental"]["affected_only_verified"] is True
     assert incremental_stats["solver"]["components_reused"] > 0
     assert (
         incremental_manifest["artifact_hashes"]
@@ -1087,11 +1286,42 @@ def test_one_changed_real_market_matches_clean_rebuild(
     assert removed_stats["incremental"]["markets_reused"] == 49
     assert removed_stats["incremental"]["semantic_neighborhoods_reused"] > 0
     assert removed_stats["incremental"]["candidate_components_reused"] > 0
+    assert removed_stats["incremental"]["candidate_blocks_reused"] > 0
+    assert removed_stats["incremental"]["candidate_blocks_removed"] > 0
+    assert removed_stats["incremental"]["affected_only_verified"] is True
     assert removed_stats["solver"]["components_reused"] > 0
     assert (
         removed_incremental_manifest["artifact_hashes"]
         == removed_clean_manifest["artifact_hashes"]
     )
+
+
+def test_pre_v050_incremental_state_is_rejected_with_clean_build_guidance(
+    tmp_path: Path,
+    real_input: Path,
+) -> None:
+    baseline = tmp_path / "v040"
+    baseline.mkdir()
+    (baseline / "build_manifest.json").write_text(
+        json.dumps(
+            {
+                "command": "discover",
+                "version": "0.4.0",
+                "versions": {"candidate_state": "candidate-components-v1"},
+            }
+        )
+    )
+    with pytest.raises(ValueError, match="clean v0.5 discover build"):
+        discover(
+            real_input,
+            tmp_path / "out",
+            config=DiscoveryConfig(
+                incremental_from=baseline,
+                max_propositions=2,
+            ),
+            _client=_FakeClient(),
+            _embedder=_fake_embeddings,
+        )
 
 
 def test_deterministic_relation_directions_and_consistency() -> None:
@@ -1761,6 +1991,36 @@ def test_candidate_generation_caps_adversarial_shared_groups() -> None:
     )
 
 
+def test_experimental_rules_do_not_consume_deterministic_candidate_reservation() -> None:
+    propositions = [
+        {
+            **_proposition(),
+            "proposition_id": f"equivalent-{index:02d}",
+            "market_id": f"market-{index:02d}",
+            "parse_status": "parsed",
+        }
+        for index in range(20)
+    ]
+    candidates = _generate_candidates(
+        propositions,
+        DiscoveryConfig(
+            top_k=1,
+            max_candidates=100,
+        ),
+        _fake_embeddings,
+        enabled_rule_ids={
+            "same_market.binary_complement.v1",
+            "same_market.categorical_exclusion.v1",
+        },
+    )
+
+    assert len(candidates) == 100
+    assert all(
+        candidate["deterministic_relation"] is None
+        for candidate in candidates
+    )
+
+
 def test_candidate_cap_preserves_reason_priority_and_stable_ids() -> None:
     propositions = [
         {
@@ -1900,6 +2160,12 @@ def test_review_export_and_score_quality_gates(
 
     with labels.open(newline="", encoding="utf-8") as stream:
         rows = list(csv.DictReader(stream))
+    assert len(
+        {
+            (row["proposition_a_id"], row["proposition_b_id"])
+            for row in rows
+        }
+    ) == len(rows)
     for row in rows:
         if row["sample_type"] == "accepted_edge":
             row["reviewer_correct"] = "true"

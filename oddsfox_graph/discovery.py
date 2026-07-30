@@ -30,7 +30,9 @@ from ._discovery.cache import (
 )
 from ._discovery.candidates import (
     candidate_sort_key as _candidate_sort_key,
+    generate_candidate_store as _generate_candidate_store_bounded,
     generate_candidates as _generate_candidates_bounded,
+    structural_member_limit as _structural_member_limit,
 )
 from ._discovery.contracts import (
     DEFAULT_EMBEDDING_REVISION,
@@ -51,7 +53,11 @@ from ._discovery.input import (
     utc_datetime as _utc_datetime,
 )
 from ._discovery.metrics import RunState, StageRecorder
+from ._discovery.incremental import EXECUTION_PLAN_COLUMNS, ExecutionPlan
+from ._discovery.publication import copy_sorted_parquet as _copy_table
+from ._discovery.types import IncrementalStats
 from ._discovery.relations import (
+    HARD_FACT_RULE_IDS,
     RULE_REGISTRY,
     SEMANTIC_KEYS as _SEMANTIC_KEYS,
     deterministic_relation as _deterministic_relation,
@@ -66,6 +72,23 @@ from ._discovery.solver import (
     SOLVER_VERSION,
     proposal_set_hash,
     solve_proposals,
+)
+from ._discovery.versions import (
+    CANDIDATE_STATE_VERSION,
+    CLASSIFY_PROMPT_VERSION,
+    DOMAIN_TAXONOMY_VERSION,
+    NORMALIZATION_VERSION,
+    PARSE_PROMPT_VERSION,
+    PUBLICATION_VERSION,
+    RETRIEVAL_VERSION,
+    RULE_VERSION,
+    EXECUTION_PLAN_VERSION,
+)
+from ._discovery.workspace import (
+    CANDIDATE_BLOCK_COLUMNS,
+    CANDIDATE_COLUMNS,
+    CANDIDATE_REASON_COLUMNS,
+    CandidateStore,
 )
 from . import __version__
 from .artifacts import ARTIFACT_COLUMNS, REPORTS, reports
@@ -92,14 +115,6 @@ __all__ = [
 ]
 
 
-PARSE_PROMPT_VERSION = "proposition-parse-v2"
-CLASSIFY_PROMPT_VERSION = "relation-classify-v2"
-RULE_VERSION = "discovery-rules-v2"
-NORMALIZATION_VERSION = "normalization-v2"
-DOMAIN_TAXONOMY_VERSION = "domains-v1"
-RETRIEVAL_VERSION = "blockwise-cosine-v2"
-CANDIDATE_STATE_VERSION = "candidate-components-v1"
-
 DISCOVERY_PARQUET_ARTIFACTS = (
     "nodes.parquet",
     "market_groups.parquet",
@@ -117,7 +132,10 @@ STATE_ARTIFACTS = (
     "state/proposition_embeddings.parquet",
     "state/semantic_neighbors.parquet",
     "state/candidate_components.parquet",
+    "state/candidate_blocks.parquet",
+    "state/candidate_reason_rows.parquet",
     "state/solver_components.parquet",
+    "state/execution_plan.parquet",
 )
 
 PROPOSITION_COLUMNS = {
@@ -157,29 +175,6 @@ PROPOSITION_COLUMNS = {
     "parser_model": "VARCHAR",
     "prompt_version": "VARCHAR",
     "source_format": "VARCHAR",
-}
-
-CANDIDATE_COLUMNS = {
-    "proposition_a_id": "VARCHAR",
-    "proposition_b_id": "VARCHAR",
-    "candidate_reasons": "VARCHAR[]",
-    "embedding_similarity": "DOUBLE",
-    "embedding_rank": "INTEGER",
-    "deterministic_relation": "VARCHAR",
-    "rule_id": "VARCHAR",
-    "rule_status": "VARCHAR",
-    "classification_relation": "VARCHAR",
-    "classification_confidence": "DOUBLE",
-    "supporting_fields": "VARCHAR",
-    "a_implies_b": "BOOLEAN",
-    "b_implies_a": "BOOLEAN",
-    "explanation": "VARCHAR",
-    "assumptions": "VARCHAR[]",
-    "requires_review": "BOOLEAN",
-    "status": "VARCHAR",
-    "discovery_method": "VARCHAR",
-    "model_version": "VARCHAR",
-    "prompt_version": "VARCHAR",
 }
 
 REVIEW_COLUMNS = {
@@ -430,6 +425,41 @@ def discover(
         "_baseline_semantic_neighbors",
         [],
     )
+    prior_market_hashes = incremental_stats.pop("_prior_market_hashes", {})
+    prior_solver_hashes = set(
+        incremental_stats.pop("_prior_solver_hashes", [])
+    )
+    execution_plan = ExecutionPlan(
+        incremental=bool(
+            incremental_stats.get("enabled")
+            or incremental_stats.get("offline_state_replay")
+        )
+    )
+    current_market_hashes = {
+        market.market_id: market.source_hash for market in markets
+    }
+    for market_id, source_hash in sorted(current_market_hashes.items()):
+        prior_hash = prior_market_hashes.get(market_id)
+        execution_plan.add(
+            stage="markets",
+            unit_type="market",
+            unit_id=market_id,
+            status="reused" if prior_hash == source_hash else "recomputed",
+            invalidation_reasons=(
+                [] if prior_hash == source_hash else ["source_hash_or_selection"]
+            ),
+            input_fingerprint=prior_hash,
+            output_fingerprint=source_hash,
+        )
+    for market_id in sorted(set(prior_market_hashes) - set(current_market_hashes)):
+        execution_plan.add(
+            stage="markets",
+            unit_type="market",
+            unit_id=market_id,
+            status="removed",
+            invalidation_reasons=["selection_or_removal"],
+            input_fingerprint=prior_market_hashes[market_id],
+        )
     state = RunState()
     propositions, parse_reviews = recorder.run(
         "parse_propositions",
@@ -442,20 +472,55 @@ def discover(
             _client,
         ),
     )
+    rule_support = recorder.run(
+        "benchmark_rule_gates",
+        lambda: _apply_benchmark_rule_gates(
+            propositions,
+            config,
+        ),
+    )
+    enabled_rule_ids = set(rule_support["enabled"])
     reusable_candidates_path = incremental_stats.pop(
         "_reusable_candidates_path",
         None,
     )
+    prior_enabled_rules = set(
+        incremental_stats.pop("_prior_enabled_rules", [])
+    )
+    if (
+        reusable_candidates_path is not None
+        and prior_enabled_rules != enabled_rule_ids
+    ):
+        reusable_candidates_path = None
+        incremental_stats["invalidation_reasons"] = sorted(
+            {
+                *incremental_stats.get("invalidation_reasons", []),
+                "enabled_rule_set",
+            }
+        )
+    baseline_candidate_blocks = incremental_stats.pop(
+        "_baseline_candidate_blocks",
+        None,
+    )
+    baseline_candidate_reasons = incremental_stats.pop(
+        "_baseline_candidate_reasons",
+        None,
+    )
     embedding_state: list[dict[str, Any]] = []
     semantic_neighbor_state: list[dict[str, Any]] = []
+    semantic_execution: list[dict[str, Any]] = []
     if reusable_candidates_path is not None:
-        candidates = recorder.run(
+        candidate_store = recorder.run(
             "generate_candidates",
-            lambda: _load_reusable_candidates(
+            lambda: CandidateStore.from_parquet(
                 Path(reusable_candidates_path),
-                propositions,
-                config,
+                block_path=Path(str(baseline_candidate_blocks)),
+                reason_path=Path(str(baseline_candidate_reasons)),
             ),
+        )
+        candidate_store.reset_for_run()
+        candidate_store.structural_member_limit = _structural_member_limit(
+            config.max_candidates
         )
         embedding_state.extend(
             _reused_embedding_state(
@@ -465,11 +530,18 @@ def discover(
             )
         )
         semantic_neighbor_state.extend(baseline_neighbors)
+        semantic_execution.extend(
+            {
+                "proposition_id": str(row["proposition_id"]),
+                "status": "reused",
+            }
+            for row in propositions
+        )
         incremental_stats["candidate_generation_reused"] = True
     else:
-        candidates = recorder.run(
+        candidate_store = recorder.run(
             "generate_candidates",
-            lambda: _generate_candidates(
+            lambda: _generate_candidate_store(
                 propositions,
                 config,
                 _embedder or _embed_texts,
@@ -477,46 +549,90 @@ def discover(
                 baseline_neighbors=baseline_neighbors,
                 embedding_state_sink=embedding_state,
                 neighbor_state_sink=semantic_neighbor_state,
+                neighborhood_execution_sink=semantic_execution,
+                baseline_candidate_blocks=baseline_candidate_blocks,
+                baseline_candidate_reasons=baseline_candidate_reasons,
+                enabled_rule_ids=enabled_rule_ids,
             ),
         )
         incremental_stats["candidate_generation_reused"] = False
+    block_execution = candidate_store.block_execution_rows()
+    for row in block_execution:
+        execution_plan.add(
+            stage="candidate_blocks",
+            unit_type="structured_block",
+            unit_id=str(row["block_id"]),
+            status=str(row["status"]),
+            invalidation_reasons=(
+                [] if row["status"] == "reused" else ["membership_fingerprint"]
+            ),
+            input_fingerprint=(
+                str(row["input_fingerprint"])
+                if row["input_fingerprint"] is not None
+                else None
+            ),
+            output_fingerprint=(
+                str(row["output_fingerprint"])
+                if row["output_fingerprint"] is not None
+                else None
+            ),
+        )
+    incremental_stats["candidate_blocks_reused"] = sum(
+        row["status"] == "reused" for row in block_execution
+    )
+    incremental_stats["candidate_blocks_recomputed"] = sum(
+        row["status"] == "recomputed" for row in block_execution
+    )
+    incremental_stats["candidate_blocks_removed"] = sum(
+        row["status"] == "removed" for row in block_execution
+    )
     _record_semantic_neighborhood_reuse(
         incremental_stats,
         baseline_neighbors,
         semantic_neighbor_state,
+        execution_plan,
+        semantic_execution,
     )
+    if isinstance(baseline_neighbors, list):
+        baseline_neighbors.clear()
     proposition_fingerprint_state = _proposition_fingerprint_rows(propositions)
-    candidate_component_state = _candidate_component_state_rows(
-        candidates,
-        propositions,
+    candidate_component_state = candidate_store.component_rows(
+        sorted(str(row["proposition_id"]) for row in propositions),
+        CANDIDATE_STATE_VERSION,
     )
     _record_candidate_component_reuse(
         incremental_stats,
         candidate_component_state,
     )
+    deterministic_candidates = candidate_store.deterministic_rows()
+    _hydrate_deterministic_candidates(
+        deterministic_candidates,
+        propositions,
+        config,
+    )
+    candidate_store.update_rows(deterministic_candidates)
+    deterministic_edges = recorder.run(
+        "derive_deterministic_relations",
+        lambda: _derive_deterministic_edges(
+            deterministic_candidates,
+            propositions,
+        ),
+    )
+    candidate_store.mark_classification_budget()
+    classification_candidates = candidate_store.classification_rows(
+        config.max_llm_pairs
+    )
     _seed_classification_cache_from_incremental(
         cache,
-        candidates,
+        classification_candidates,
         propositions,
         config,
         incremental_stats,
     )
-    rule_support = recorder.run(
-        "benchmark_rule_gates",
-        lambda: _apply_benchmark_rule_gates(
-            candidates,
-            propositions,
-            config.benchmark_path,
-        ),
-    )
-    deterministic_edges = recorder.run(
-        "derive_deterministic_relations",
-        lambda: _derive_deterministic_edges(candidates, propositions),
-    )
     llm_edges, llm_reviews = recorder.run(
         "classify_pairs",
         lambda: _classify_candidates(
-            candidates,
+            classification_candidates,
             propositions,
             config,
             cache,
@@ -524,6 +640,7 @@ def discover(
             _client,
         ),
     )
+    candidate_store.update_rows(classification_candidates)
     logic_edges, rejected_edges, consistency_reviews, solver_stats = recorder.run(
         "solve_consistency",
         lambda: _solve_logic_edges(
@@ -535,6 +652,44 @@ def discover(
         logic_edges,
         rejected_edges,
     )
+    current_solver_hashes = {
+        str(row["proposal_hash"]): str(row["solver_component_id"])
+        for row in solver_component_state
+    }
+    for proposal_hash, component_id in sorted(current_solver_hashes.items()):
+        reused = proposal_hash in prior_solver_hashes
+        execution_plan.add(
+            stage="solver_components",
+            unit_type="proposal_component",
+            unit_id=component_id,
+            status="reused" if reused else "recomputed",
+            invalidation_reasons=[] if reused else ["proposal_set_hash"],
+            input_fingerprint=proposal_hash if reused else None,
+            output_fingerprint=proposal_hash,
+        )
+    for proposal_hash in sorted(
+        prior_solver_hashes - set(current_solver_hashes)
+    ):
+        execution_plan.add(
+            stage="solver_components",
+            unit_type="proposal_component",
+            unit_id=proposal_hash,
+            status="removed",
+            invalidation_reasons=["proposal_set_removed"],
+            input_fingerprint=proposal_hash,
+        )
+    execution_plan.add(
+        stage="candidate_cap",
+        unit_type="global_stage",
+        unit_id="canonical_candidate_aggregation",
+        status="required",
+        invalidation_reasons=["global_cap_and_priority_order"],
+    )
+    execution_summary = execution_plan.manifest()
+    incremental_stats["execution_plan"] = execution_summary
+    incremental_stats["affected_only_verified"] = execution_summary[
+        "affected_only_verified"
+    ]
     review_rows = _dedupe_reviews(parse_reviews + llm_reviews + consistency_reviews)
     parse_error_rows = _parse_error_rows(propositions, parse_reviews)
 
@@ -548,7 +703,7 @@ def discover(
                 staging,
                 markets,
                 propositions,
-                candidates,
+                candidate_store,
                 logic_edges,
                 rejected_edges,
                 parse_error_rows,
@@ -563,6 +718,10 @@ def discover(
                 proposition_fingerprint_state=proposition_fingerprint_state,
                 candidate_component_state=candidate_component_state,
                 solver_component_state=solver_component_state,
+                execution_plan_rows=execution_plan.rows(),
+                candidate_member_limit=int(
+                    candidate_store.structural_member_limit or 0
+                ),
                 incremental_stats=incremental_stats,
             ),
         )
@@ -641,6 +800,7 @@ def discover(
             )
         return dict(manifest["stats"])
     finally:
+        candidate_store.close()
         shutil.rmtree(staging, ignore_errors=True)
 
 
@@ -679,7 +839,7 @@ def _prepare_incremental(
 ) -> tuple[
     dict[str, list[float]],
     dict[str, dict[str, Any]],
-    dict[str, Any],
+    IncrementalStats,
 ]:
     explicit_baseline = config.incremental_from.resolve() if config.incremental_from else None
     offline_replay_baseline = (
@@ -708,12 +868,32 @@ def _prepare_incremental(
     if explicit_baseline is not None and baseline == out_dir:
         raise ValueError("--incremental-from must be distinct from --out")
     manifest_path = baseline / "build_manifest.json"
+    if not manifest_path.is_file():
+        raise ValueError(
+            "Incremental baseline is incomplete; missing " + str(manifest_path)
+        )
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    baseline_versions = manifest.get("versions") or {}
+    if (
+        str(manifest.get("version") or "").split(".")[:2]
+        != __version__.split(".")[:2]
+        or baseline_versions.get("candidate_state") != CANDIDATE_STATE_VERSION
+    ):
+        raise ValueError(
+            "Incremental baseline uses incompatible pre-v0.5 discovery state; "
+            "run one clean v0.5 discover build and use that completed output "
+            "as --incremental-from"
+        )
     market_state_path = baseline / "state" / "market_state.parquet"
     proposition_fingerprint_path = (
         baseline / "state" / "proposition_fingerprints.parquet"
     )
     embedding_state_path = baseline / "state" / "proposition_embeddings.parquet"
     candidate_state_path = baseline / "state" / "candidate_components.parquet"
+    candidate_blocks_path = baseline / "state" / "candidate_blocks.parquet"
+    candidate_reasons_path = (
+        baseline / "state" / "candidate_reason_rows.parquet"
+    )
     semantic_neighbor_state_path = (
         baseline / "state" / "semantic_neighbors.parquet"
     )
@@ -722,12 +902,13 @@ def _prepare_incremental(
     candidates_path = baseline / "relation_candidates.parquet"
     rejected_edges_path = baseline / "rejected_edges.parquet"
     required = (
-        manifest_path,
         market_state_path,
         proposition_fingerprint_path,
         embedding_state_path,
         semantic_neighbor_state_path,
         candidate_state_path,
+        candidate_blocks_path,
+        candidate_reasons_path,
         solver_state_path,
         propositions_path,
         candidates_path,
@@ -738,7 +919,6 @@ def _prepare_incremental(
         raise ValueError(
             "Incremental baseline is incomplete; missing " + ", ".join(missing)
         )
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     if manifest.get("command") != "discover":
         raise ValueError("Incremental baseline is not a discovery build")
 
@@ -877,6 +1057,8 @@ def _prepare_incremental(
         sorted(config.relation_thresholds.items())
     ):
         reasons.append("relation_thresholds")
+    if previous_limits.get("max_candidates") != config.max_candidates:
+        reasons.append("max_candidates")
     candidate_compatible = (
         not changed_market_ids
         and not removed_market_ids
@@ -933,6 +1115,10 @@ def _prepare_incremental(
         "baseline_embedding_vectors_available": len(baseline_embeddings),
         "baseline_solver_components_available": len(reusable_solver_components),
         "_prior_candidate_components": prior_candidate_components,
+        "_prior_market_hashes": prior_markets,
+        "_prior_solver_hashes": sorted(
+            reusable_solver_components
+        ),
         "_baseline_semantic_neighbors": (
             semantic_neighbor_rows
             if embedding_compatible
@@ -942,10 +1128,23 @@ def _prepare_incremental(
         "_prior_classifications": (
             prior_classifications if classification_compatible else []
         ),
+        "_prior_enabled_rules": list(
+            (manifest.get("rules") or {}).get("enabled") or []
+        ),
         "_prior_propositions": prior_propositions,
         "_unchanged_market_ids": sorted(unchanged_market_ids),
         "_reusable_candidates_path": (
             str(candidates_path) if candidate_compatible else None
+        ),
+        "_baseline_candidate_blocks": (
+            str(candidate_blocks_path)
+            if previous_limits.get("max_candidates") == config.max_candidates
+            else None
+        ),
+        "_baseline_candidate_reasons": (
+            str(candidate_reasons_path)
+            if previous_limits.get("max_candidates") == config.max_candidates
+            else None
         ),
         "invalidation_reasons": sorted(set(reasons)) or ["none"],
     }
@@ -1385,6 +1584,8 @@ def _generate_candidates(
     baseline_neighbors: Sequence[dict[str, Any]] | None = None,
     embedding_state_sink: list[dict[str, Any]] | None = None,
     neighbor_state_sink: list[dict[str, Any]] | None = None,
+    neighborhood_execution_sink: list[dict[str, Any]] | None = None,
+    enabled_rule_ids: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     return _generate_candidates_bounded(
         propositions,
@@ -1401,75 +1602,64 @@ def _generate_candidates(
         baseline_neighbors=baseline_neighbors,
         embedding_state_sink=embedding_state_sink,
         neighbor_state_sink=neighbor_state_sink,
+        neighborhood_execution_sink=neighborhood_execution_sink,
+        enabled_rule_ids=enabled_rule_ids,
     )
 
 
-def _load_reusable_candidates(
-    path: Path,
+def _generate_candidate_store(
     propositions: Sequence[dict[str, Any]],
     config: DiscoveryConfig,
-) -> list[dict[str, Any]]:
-    db = DuckDB()
-    try:
-        rows = db.rows(
-            f"""
-            SELECT *
-            FROM read_parquet('{q(path)}')
-            ORDER BY proposition_a_id, proposition_b_id
-            """
+    embedder: Callable[[list[str], DiscoveryConfig], Any],
+    *,
+    baseline_embeddings: dict[str, list[float]] | None = None,
+    baseline_neighbors: Sequence[dict[str, Any]] | None = None,
+    embedding_state_sink: list[dict[str, Any]] | None = None,
+    neighbor_state_sink: list[dict[str, Any]] | None = None,
+    neighborhood_execution_sink: list[dict[str, Any]] | None = None,
+    baseline_candidate_blocks: str | None = None,
+    baseline_candidate_reasons: str | None = None,
+    enabled_rule_ids: set[str] | None = None,
+) -> CandidateStore:
+    return _generate_candidate_store_bounded(
+        propositions,
+        config,
+        embedder,
+        semantic_keys=_SEMANTIC_KEYS,
+        hashable=_hashable,
+        proposition_signature=_proposition_signature,
+        deterministic_relation=_deterministic_relation,
+        embedding_text=_embedding_text,
+        stage_rank=_stage_rank,
+        is_winner=_is_winner_proposition,
+        baseline_embeddings=baseline_embeddings,
+        baseline_neighbors=baseline_neighbors,
+        embedding_state_sink=embedding_state_sink,
+        neighbor_state_sink=neighbor_state_sink,
+        neighborhood_execution_sink=neighborhood_execution_sink,
+        baseline_candidate_blocks=baseline_candidate_blocks,
+        baseline_candidate_reasons=baseline_candidate_reasons,
+        enabled_rule_ids=enabled_rule_ids,
+    )
+
+
+def _hydrate_deterministic_candidates(
+    candidates: Sequence[dict[str, Any]],
+    propositions: Sequence[dict[str, Any]],
+    config: DiscoveryConfig,
+) -> None:
+    by_id = {str(row["proposition_id"]): row for row in propositions}
+    for row in candidates:
+        relation = _deterministic_relation(
+            by_id[str(row["proposition_a_id"])],
+            by_id[str(row["proposition_b_id"])],
+            config.parse_confidence,
         )
-    finally:
-        db.close()
-    by_id = {
-        str(row["proposition_id"]): row for row in propositions
-    }
-    candidates = []
-    for raw in rows:
-        row = dict(raw)
-        a_id = str(row["proposition_a_id"])
-        b_id = str(row["proposition_b_id"])
-        if a_id not in by_id or b_id not in by_id:
+        if relation is None or relation.get("rule_id") != row.get("rule_id"):
             raise RuntimeError(
-                "Reusable candidate state references a missing proposition"
+                "Candidate workspace deterministic identity does not match current rules"
             )
-        relation = (
-            _deterministic_relation(
-                by_id[a_id],
-                by_id[b_id],
-                config.parse_confidence,
-            )
-            if row.get("rule_id")
-            else None
-        )
-        row.update(
-            {
-                "classification_relation": None,
-                "classification_confidence": None,
-                "supporting_fields": None,
-                "a_implies_b": None,
-                "b_implies_a": None,
-                "explanation": None,
-                "assumptions": [],
-                "requires_review": False,
-                "status": "pending",
-                "discovery_method": None,
-                "model_version": None,
-                "prompt_version": None,
-            }
-        )
-        if relation is not None:
-            if relation.get("rule_id") != row.get("rule_id"):
-                raise RuntimeError(
-                    "Reusable candidate rule identity does not match current rules"
-                )
-            row["_deterministic"] = relation
-            row["deterministic_relation"] = relation["edge_type"]
-            row["rule_status"] = "enabled"
-            row["status"] = "accepted"
-            row["discovery_method"] = "deterministic"
-            row["explanation"] = relation["explanation"]
-        candidates.append(row)
-    return candidates
+        row["_deterministic"] = relation
 
 
 def _reused_embedding_state(
@@ -1502,17 +1692,25 @@ def _reused_embedding_state(
 
 
 def _apply_benchmark_rule_gates(
-    candidates: Sequence[dict[str, Any]],
     propositions: Sequence[dict[str, Any]],
-    benchmark_path: Path | None,
+    config: DiscoveryConfig,
 ) -> dict[str, Any]:
+    benchmark_path = config.benchmark_path
+    hard_rules = set(HARD_FACT_RULE_IDS)
     if benchmark_path is None:
+        enabled = (
+            set(RULE_REGISTRY)
+            if config.allow_unbenchmarked_rules
+            else hard_rules
+        )
         return {
             "benchmark_enforced": False,
+            "allow_unbenchmarked_rules": config.allow_unbenchmarked_rules,
+            "ready_eligible": not config.allow_unbenchmarked_rules,
             "minimum_positive_examples": 10,
             "minimum_adversarial_examples": 10,
-            "enabled": sorted(RULE_REGISTRY),
-            "experimental": [],
+            "enabled": sorted(enabled),
+            "experimental": sorted(set(RULE_REGISTRY) - enabled),
             "support": {},
         }
     benchmark_path = benchmark_path.resolve()
@@ -1534,14 +1732,6 @@ def _apply_benchmark_rule_gates(
         str(proposition["proposition_id"]): proposition
         for proposition in propositions
     }
-    candidate_by_pair = {
-        (
-            str(candidate["proposition_a_id"]),
-            str(candidate["proposition_b_id"]),
-        ): candidate
-        for candidate in candidates
-        if candidate.get("_deterministic")
-    }
     support = {
         rule_id: {"positive": 0, "adversarial": 0}
         for rule_id in RULE_REGISTRY
@@ -1555,39 +1745,35 @@ def _apply_benchmark_rule_gates(
         )
         if a_id not in by_id or b_id not in by_id:
             continue
-        candidate = candidate_by_pair.get((a_id, b_id))
+        relation = _deterministic_relation(
+            by_id[a_id],
+            by_id[b_id],
+            config.parse_confidence,
+        )
         expected = str(benchmark["expected_relation"])
-        if candidate is not None:
-            relation = candidate["_deterministic"]
+        if relation is not None:
             rule_id = str(relation["rule_id"])
             if _relation_matches_benchmark(relation, a_id, b_id, expected):
                 support[rule_id]["positive"] += 1
             else:
                 support[rule_id]["adversarial"] += 1
         for rule_id in RULE_REGISTRY:
-            if candidate is not None and candidate.get("rule_id") == rule_id:
+            if relation is not None and relation.get("rule_id") == rule_id:
                 continue
             if _rule_near_applicable(rule_id, by_id[a_id], by_id[b_id]):
                 support[rule_id]["adversarial"] += 1
 
-    enabled = {
+    enabled = hard_rules | {
         rule_id
         for rule_id, counts in support.items()
         if counts["positive"] >= 10 and counts["adversarial"] >= 10
     }
-    for candidate in candidates:
-        rule_id = candidate.get("rule_id")
-        if not rule_id:
-            continue
-        if rule_id in enabled:
-            candidate["rule_status"] = "enabled"
-            continue
-        candidate.pop("_deterministic", None)
-        candidate["rule_status"] = "experimental"
-        candidate["status"] = "pending"
-        candidate["discovery_method"] = None
+    if config.allow_unbenchmarked_rules:
+        enabled = set(RULE_REGISTRY)
     return {
         "benchmark_enforced": True,
+        "allow_unbenchmarked_rules": config.allow_unbenchmarked_rules,
+        "ready_eligible": not config.allow_unbenchmarked_rules,
         "minimum_positive_examples": 10,
         "minimum_adversarial_examples": 10,
         "enabled": sorted(enabled),
@@ -2441,41 +2627,6 @@ def _proposition_fingerprint_rows(
     ]
 
 
-def _candidate_component_state_rows(
-    candidates: Sequence[dict[str, Any]],
-    propositions: Sequence[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    by_proposition: dict[str, list[dict[str, Any]]] = {
-        str(row["proposition_id"]): [] for row in propositions
-    }
-    for row in candidates:
-        payload = {
-            "a": str(row["proposition_a_id"]),
-            "b": str(row["proposition_b_id"]),
-            "reasons": sorted(row.get("candidate_reasons") or []),
-            "similarity": row.get("embedding_similarity"),
-            "rank": row.get("embedding_rank"),
-            "rule_id": row.get("rule_id"),
-        }
-        by_proposition[payload["a"]].append(payload)
-        by_proposition[payload["b"]].append(payload)
-    return [
-        {
-            "component_id": proposition_id,
-            "component_fingerprint": _text_hash(
-                json.dumps(
-                    sorted(rows, key=lambda row: (row["a"], row["b"])),
-                    sort_keys=True,
-                    separators=(",", ":"),
-                )
-            ),
-            "pair_count": len(rows),
-            "candidate_version": CANDIDATE_STATE_VERSION,
-        }
-        for proposition_id, rows in sorted(by_proposition.items())
-    ]
-
-
 def _record_candidate_component_reuse(
     incremental_stats: dict[str, Any],
     candidate_components: Sequence[dict[str, Any]],
@@ -2499,6 +2650,8 @@ def _record_semantic_neighborhood_reuse(
     incremental_stats: dict[str, Any],
     prior_rows: Sequence[dict[str, Any]],
     current_rows: Sequence[dict[str, Any]],
+    execution_plan: ExecutionPlan | None = None,
+    execution_rows: Sequence[dict[str, Any]] | None = None,
 ) -> None:
     def fingerprints(
         rows: Sequence[dict[str, Any]],
@@ -2521,8 +2674,13 @@ def _record_semantic_neighborhood_reuse(
 
     prior = fingerprints(prior_rows)
     current = fingerprints(current_rows)
+    execution_status = {
+        str(row["proposition_id"]): str(row["status"])
+        for row in execution_rows or []
+    }
     reused = sum(
-        prior.get(proposition_id) == fingerprint
+        execution_status.get(proposition_id) == "reused"
+        and prior.get(proposition_id) == fingerprint
         for proposition_id, fingerprint in current.items()
     )
     incremental_stats["semantic_neighborhoods_reused"] = reused
@@ -2532,6 +2690,32 @@ def _record_semantic_neighborhood_reuse(
     incremental_stats["semantic_neighborhoods_removed"] = len(
         set(prior) - set(current)
     )
+    if execution_plan is None:
+        return
+    for proposition_id, fingerprint in sorted(current.items()):
+        prior_fingerprint = prior.get(proposition_id)
+        reused = (
+            execution_status.get(proposition_id) == "reused"
+            and prior_fingerprint == fingerprint
+        )
+        execution_plan.add(
+            stage="semantic_neighborhoods",
+            unit_type="proposition",
+            unit_id=proposition_id,
+            status="reused" if reused else "recomputed",
+            invalidation_reasons=[] if reused else ["embedding_or_neighbor_set"],
+            input_fingerprint=prior_fingerprint,
+            output_fingerprint=fingerprint,
+        )
+    for proposition_id in sorted(set(prior) - set(current)):
+        execution_plan.add(
+            stage="semantic_neighborhoods",
+            unit_type="proposition",
+            unit_id=proposition_id,
+            status="removed",
+            invalidation_reasons=["proposition_removed"],
+            input_fingerprint=prior[proposition_id],
+        )
 
 
 def _seed_classification_cache_from_incremental(
@@ -2656,7 +2840,7 @@ def _write_discovery_artifacts(
     directory: Path,
     markets: Sequence[SourceMarket],
     propositions: Sequence[dict[str, Any]],
-    candidates: Sequence[dict[str, Any]],
+    candidates: CandidateStore,
     logic_edges: Sequence[dict[str, Any]],
     rejected_edges: Sequence[dict[str, Any]],
     parse_errors: Sequence[dict[str, Any]],
@@ -2672,11 +2856,16 @@ def _write_discovery_artifacts(
     proposition_fingerprint_state: Sequence[dict[str, Any]],
     candidate_component_state: Sequence[dict[str, Any]],
     solver_component_state: Sequence[dict[str, Any]],
+    execution_plan_rows: Sequence[dict[str, Any]],
+    candidate_member_limit: int,
     incremental_stats: dict[str, Any],
 ) -> dict[str, object]:
     db = DuckDB(directory / "oddsfox_graph.duckdb")
     try:
         db.execute("SET TimeZone = 'UTC'")
+        db.execute(
+            f"SET temp_directory = '{q(directory / '.duckdb-spill')}'"
+        )
         parser_by_market = {
             str(row["market_id"]): str(row["parser_model"])
             for row in propositions
@@ -2711,12 +2900,7 @@ def _write_discovery_artifacts(
             MARKET_GROUP_COLUMNS,
             market_rows,
         )
-        _create_and_fill(
-            db,
-            "relation_candidates_v",
-            CANDIDATE_COLUMNS,
-            [_published_candidate(row) for row in candidates],
-        )
+        candidates.attach_to(db)
         _create_and_fill(db, "logic_edges_v", LOGIC_EDGE_COLUMNS, logic_edges)
         _create_and_fill(
             db,
@@ -2776,6 +2960,12 @@ def _write_discovery_artifacts(
             "solver_components_v",
             SOLVER_COMPONENT_STATE_COLUMNS,
             solver_component_state,
+        )
+        _create_and_fill(
+            db,
+            "execution_plan_v",
+            EXECUTION_PLAN_COLUMNS,
+            execution_plan_rows,
         )
 
         _copy_table(
@@ -2873,13 +3063,53 @@ def _write_discovery_artifacts(
         )
         _copy_table(
             db,
+            "candidate_blocks_v",
+            state_directory / "candidate_blocks.parquet",
+            list(CANDIDATE_BLOCK_COLUMNS),
+            "block_id",
+        )
+        _copy_table(
+            db,
+            "candidate_reason_rows_v",
+            state_directory / "candidate_reason_rows.parquet",
+            list(CANDIDATE_REASON_COLUMNS),
+            "block_id, proposition_a_id, proposition_b_id",
+        )
+        _copy_table(
+            db,
             "solver_components_v",
             state_directory / "solver_components.parquet",
             list(SOLVER_COMPONENT_STATE_COLUMNS),
             "solver_component_id",
         )
+        _copy_table(
+            db,
+            "execution_plan_v",
+            state_directory / "execution_plan.parquet",
+            list(EXECUTION_PLAN_COLUMNS),
+            "stage, unit_type, unit_id",
+        )
         write_conditionals(db, directory)
         write_graph_snapshot(db, directory)
+        candidate_stats = {
+            key: int(
+                db.scalar(
+                    f"""
+                    SELECT count(*)
+                    FROM relation_candidates_v
+                    {where}
+                    """
+                )
+                or 0
+            )
+            for key, where in {
+                "candidate_edges": "",
+                "classified_pairs": "WHERE discovery_method = 'llm'",
+                "unclassified_budget_pairs": (
+                    "WHERE status = 'not_classified_budget'"
+                ),
+            }.items()
+        }
         stats: dict[str, object] = {
             "input_rows": input_rows,
             "input_format": source_format,
@@ -2888,13 +3118,7 @@ def _write_discovery_artifacts(
             "tokens": len(propositions),
             "active_markets": sum(1 for market in markets if market.is_active),
             "closed_markets": sum(1 for market in markets if market.is_closed),
-            "candidate_edges": len(candidates),
-            "classified_pairs": sum(
-                1 for row in candidates if row.get("discovery_method") == "llm"
-            ),
-            "unclassified_budget_pairs": sum(
-                1 for row in candidates if row.get("status") == "not_classified_budget"
-            ),
+            **candidate_stats,
             "logic_edges": len(logic_edges),
             "deterministic_logic_edges": sum(
                 1
@@ -2914,6 +3138,29 @@ def _write_discovery_artifacts(
             ),
             "solver": solver_stats,
             "rules": rule_support,
+            "candidate_workspace": {
+                "structured_member_limit": candidate_member_limit,
+                "structured_blocks": int(
+                    db.scalar("SELECT count(*) FROM candidate_blocks_v") or 0
+                ),
+                "truncated_structured_blocks": int(
+                    db.scalar(
+                        """
+                        SELECT count(*)
+                        FROM candidate_blocks_v
+                        WHERE member_count > ?
+                        """,
+                        [candidate_member_limit],
+                    )
+                    or 0
+                ),
+                "persisted_reason_contributions": int(
+                    db.scalar(
+                        "SELECT count(*) FROM candidate_reason_rows_v"
+                    )
+                    or 0
+                ),
+            },
             "incremental": {
                 **incremental_stats,
                 "embedding_vectors_reused": sum(
@@ -2945,25 +3192,6 @@ def _write_discovery_artifacts(
         return stats
     finally:
         db.close()
-
-
-def _copy_table(
-    db: DuckDB,
-    table: str,
-    path: Path,
-    columns: Sequence[str],
-    order_by: str,
-) -> None:
-    projection = ", ".join(columns)
-    db.execute(
-        f"""
-        COPY (
-            SELECT {projection}
-            FROM {table}
-            ORDER BY {order_by}
-        ) TO '{q(path)}' (FORMAT PARQUET)
-        """
-    )
 
 
 def _node_rows(
@@ -3052,10 +3280,6 @@ def _market_group_rows(
     return rows
 
 
-def _published_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
-    return {name: candidate.get(name) for name in CANDIDATE_COLUMNS}
-
-
 def _validate_discovery_artifacts(db: DuckDB, directory: Path) -> None:
     contracts = {
         "nodes.parquet": NODE_COLUMNS,
@@ -3075,7 +3299,10 @@ def _validate_discovery_artifacts(db: DuckDB, directory: Path) -> None:
         "state/proposition_embeddings.parquet": EMBEDDING_STATE_COLUMNS,
         "state/semantic_neighbors.parquet": SEMANTIC_NEIGHBOR_STATE_COLUMNS,
         "state/candidate_components.parquet": CANDIDATE_COMPONENT_STATE_COLUMNS,
+        "state/candidate_blocks.parquet": CANDIDATE_BLOCK_COLUMNS,
+        "state/candidate_reason_rows.parquet": CANDIDATE_REASON_COLUMNS,
         "state/solver_components.parquet": SOLVER_COMPONENT_STATE_COLUMNS,
+        "state/execution_plan.parquet": EXECUTION_PLAN_COLUMNS,
     }
     for artifact, expected in contracts.items():
         path = directory / artifact
@@ -3107,6 +3334,39 @@ def _validate_discovery_artifacts(db: DuckDB, directory: Path) -> None:
     )
     if duplicate_edges:
         raise RuntimeError(f"logic_edges.parquet contains {duplicate_edges} duplicate edges")
+    invalid_candidates = int(
+        db.scalar(
+            """
+            SELECT count(*)
+            FROM relation_candidates_v
+            WHERE proposition_a_id >= proposition_b_id
+            """
+        )
+        or 0
+    )
+    if invalid_candidates:
+        raise RuntimeError(
+            f"relation_candidates.parquet contains {invalid_candidates} "
+            "non-canonical pairs"
+        )
+    invalid_execution_rows = int(
+        db.scalar(
+            """
+            SELECT count(*)
+            FROM execution_plan_v
+            WHERE status = 'reused'
+              AND (
+                    input_fingerprint IS NULL
+                    OR input_fingerprint != output_fingerprint
+              )
+            """
+        )
+        or 0
+    )
+    if invalid_execution_rows:
+        raise RuntimeError(
+            "execution_plan.parquet contains invalid reuse evidence"
+        )
 
 
 def _discovery_manifest(
@@ -3172,6 +3432,8 @@ def _discovery_manifest(
             "rules": RULE_VERSION,
             "retrieval": RETRIEVAL_VERSION,
             "candidate_state": CANDIDATE_STATE_VERSION,
+            "execution_plan": EXECUTION_PLAN_VERSION,
+            "publication": PUBLICATION_VERSION,
             "cache": CACHE_ENTRY_VERSION,
             "rule_registry_hash": _text_hash(
                 json.dumps(RULE_REGISTRY, sort_keys=True)
@@ -3189,6 +3451,7 @@ def _discovery_manifest(
             "max_candidates": config.max_candidates,
             "max_llm_pairs": config.max_llm_pairs,
             "llm_concurrency": config.llm_concurrency,
+            "allow_unbenchmarked_rules": config.allow_unbenchmarked_rules,
         },
         "incremental": {
             "baseline": (

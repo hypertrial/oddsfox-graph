@@ -2,7 +2,7 @@
 
 `oddsfox-graph` turns Polymarket market or token-odds parquet into a proposition
 graph. Each `clob_token_id` becomes a node. The offline `build` command preserves
-the WC2026 structural workflow; the v0.4.0 `discover` command adds typed parsing,
+the WC2026 structural workflow; the v0.5.0 `discover` command adds typed parsing,
 blockwise local semantic retrieval, benchmark-gated rules, selective LLM
 classification, RC2 consistency solving, incremental execution, review tooling,
 and complete provenance.
@@ -57,13 +57,13 @@ columns are absent.
 From the repo root:
 
 ```bash
-python -m pip install -e ".[dev]"
+python -m pip install -c constraints-dev.txt -e ".[dev]"
 ```
 
 Install the optional discovery runtime for live discovery:
 
 ```bash
-python -m pip install -e ".[discovery]"
+python -m pip install -c constraints-dev.txt -e ".[discovery]"
 ```
 
 Legacy `build` remains DuckDB-only. Live discovery also requires
@@ -74,6 +74,7 @@ Legacy `build` remains DuckDB-only. Live discovery also requires
 ```bash
 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest -q
 python -m ruff check .
+python -m mypy
 python -m build
 python -m oddsfox_graph.cli --help
 ```
@@ -130,7 +131,9 @@ python -m oddsfox_graph.cli discover \
 Discovery additionally publishes `propositions.parquet`,
 `relation_candidates.parquet`, `rejected_edges.parquet`,
 `parse_errors.parquet`, and `review_queue.parquet`, with reusable implementation
-state under `state/`. Export and score a legacy v0.3 human review:
+state under `state/`. v0.5 state includes structured block/reason contributions
+and `execution_plan.parquet`, which evaluation verifies instead of trusting
+manifest reuse counters. Export and score a legacy v0.3 human review:
 
 ```bash
 python -m oddsfox_graph.cli review-export \
@@ -178,11 +181,20 @@ release criterion passes. Use `--incremental-from` with a distinct,
 manifest-complete output to reuse unchanged work; results must be logically
 identical to a clean build.
 
+Without a compiled benchmark, only same-market complement and categorical
+exclusion facts publish deterministically. Other rules remain experimental.
+`--allow-unbenchmarked-rules` restores the pre-v0.5 opt-in behavior for
+diagnostics, records the override, and makes the run ineligible for
+`READY_TO_SCALE`.
+
 The protected manual release workflow consumes the real parquet, complete
 cache, immutable 5,000/20,000 baselines, expected online hashes, a compiled
 benchmark, and a pricing snapshot. The equivalent local gate is:
 
 ```bash
+python scripts/create_release_fixture_manifest.py \
+  --fixture-root <release-fixture>
+
 python scripts/validate_discovery_release.py \
   --input data/polymarket_all_markets_20260730T093857Z.parquet \
   --cache-dir <complete-cache> \
@@ -190,8 +202,14 @@ python scripts/validate_discovery_release.py \
   --work-dir output/release-validation \
   --expected-hashes <expected-artifact-hashes.json> \
   --benchmark <compiled-benchmark.parquet> \
-  --pricing-file <pricing.json>
+  --pricing-file <pricing.json> \
+  --fixture-manifest <fixture-manifest.json>
 ```
+
+Use `scripts/benchmark_discovery.py` for process-isolated clean, offline, and
+one-market incremental measurements at 500, 2,000, 5,000, and 20,000
+propositions. It uses the supplied parquet plus deterministic fake model
+adapters and verifies offline and incremental logical hashes.
 
 ## Inspect Results
 
@@ -242,6 +260,7 @@ python -m oddsfox_graph.cli benchmark-summary --out "$ODDSFOX_DATA_DIR/artifacts
 ```bash
 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest -q
 python -m ruff check .
+python -m mypy
 python -m build
 python -m oddsfox_graph.cli --help
 ```

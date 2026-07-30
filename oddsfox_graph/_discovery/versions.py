@@ -1,0 +1,11 @@
+"""Independent version identifiers for discovery pipeline compatibility."""
+
+PARSE_PROMPT_VERSION = "proposition-parse-v2"
+CLASSIFY_PROMPT_VERSION = "relation-classify-v2"
+RULE_VERSION = "discovery-rules-v3"
+NORMALIZATION_VERSION = "normalization-v2"
+DOMAIN_TAXONOMY_VERSION = "domains-v1"
+RETRIEVAL_VERSION = "blockwise-cosine-v3"
+CANDIDATE_STATE_VERSION = "candidate-components-v2"
+EXECUTION_PLAN_VERSION = "execution-plan-v1"
+PUBLICATION_VERSION = "discovery-publication-v2"

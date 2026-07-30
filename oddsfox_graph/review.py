@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import csv
 import hashlib
-import heapq
 import json
 from collections import defaultdict
 from pathlib import Path
@@ -61,51 +60,73 @@ def export_review(
             ORDER BY discovery_method, edge_type, src_node_id, dst_node_id
             """
         )
-        candidates = db.rows(
-            f"""
-            SELECT
-                proposition_a_id,
-                proposition_b_id,
-                coalesce(classification_relation, deterministic_relation, '') AS proposed_relation,
-                coalesce(discovery_method, '') AS discovery_method,
-                coalesce(explanation, '') AS explanation,
-                status
-            FROM read_parquet('{q(out_dir / "relation_candidates.parquet")}')
-            ORDER BY status, proposition_a_id, proposition_b_id
-            """
+        accepted_rows = _stratified_take(
+            edges,
+            accepted,
+            seed=seed,
+            group_keys=("discovery_method", "proposed_relation"),
         )
-        propositions = db.rows(
+        accepted_pairs = {
+            tuple(
+                sorted(
+                    (
+                        str(row["proposition_a_id"]),
+                        str(row["proposition_b_id"]),
+                    )
+                )
+            )
+            for row in accepted_rows
+        }
+        candidate_pool = db.rows(
             f"""
-            SELECT proposition_id, category, competition
-            FROM read_parquet('{q(out_dir / "propositions.parquet")}')
-            ORDER BY proposition_id
-            """
+            WITH ranked AS (
+                SELECT
+                    proposition_a_id,
+                    proposition_b_id,
+                    coalesce(
+                        classification_relation,
+                        deterministic_relation,
+                        ''
+                    ) AS proposed_relation,
+                    coalesce(discovery_method, '') AS discovery_method,
+                    coalesce(explanation, '') AS explanation,
+                    status,
+                    row_number() OVER (
+                        PARTITION BY status
+                        ORDER BY sha256(
+                            '{int(seed) + 1}|' ||
+                            proposition_a_id || '|' || proposition_b_id
+                        )
+                    ) AS stratum_rank
+                FROM read_parquet(
+                    '{q(out_dir / "relation_candidates.parquet")}'
+                )
+            )
+            SELECT * EXCLUDE (stratum_rank)
+            FROM ranked
+            ORDER BY stratum_rank, status, proposition_a_id, proposition_b_id
+            LIMIT ?
+            """,
+            [recall_pairs // 2 + accepted],
+        )
+        candidate_rows = [
+            row
+            for row in candidate_pool
+            if (
+                str(row["proposition_a_id"]),
+                str(row["proposition_b_id"]),
+            )
+            not in accepted_pairs
+        ][: recall_pairs // 2]
+        noncandidate_rows = _near_miss_pairs_duckdb(
+            db,
+            out_dir,
+            recall_pairs - len(candidate_rows),
+            seed=seed + 2,
         )
     finally:
         db.close()
 
-    accepted_rows = _stratified_take(
-        edges,
-        accepted,
-        seed=seed,
-        group_keys=("discovery_method", "proposed_relation"),
-    )
-    candidate_rows = _stratified_take(
-        candidates,
-        recall_pairs // 2,
-        seed=seed + 1,
-        group_keys=("status",),
-    )
-    candidate_pairs = {
-        tuple(sorted((str(row["proposition_a_id"]), str(row["proposition_b_id"]))))
-        for row in candidates
-    }
-    noncandidate_rows = _near_miss_pairs(
-        propositions,
-        candidate_pairs,
-        recall_pairs - len(candidate_rows),
-        seed=seed + 2,
-    )
     if len(accepted_rows) < accepted:
         raise ValueError(
             f"Requested {accepted} accepted edges, but only "
@@ -290,89 +311,146 @@ def _stratified_take(
     return selected
 
 
-def _near_miss_pairs(
-    propositions: list[dict[str, object]],
-    candidates: set[tuple[str, str]],
+def _near_miss_pairs_duckdb(
+    db: DuckDB,
+    out_dir: Path,
     limit: int,
     *,
     seed: int,
 ) -> list[dict[str, object]]:
-    heap: list[tuple[int, str, str]] = []
-    by_id = {str(row["proposition_id"]): row for row in propositions}
-    ids = sorted(by_id)
-    if len(ids) < 2:
+    if limit < 1:
         return []
-    groups: dict[tuple[str, str], list[str]] = defaultdict(list)
-    for proposition_id in ids:
-        row = by_id[proposition_id]
-        groups[
-            (
-                str(row.get("category") or ""),
-                str(row.get("competition") or ""),
+    position_limit = max(256, limit * 4)
+    group_limit = max(32, limit // 2)
+    propositions_path = out_dir / "propositions.parquet"
+    candidates_path = out_dir / "relation_candidates.parquet"
+    return db.rows(
+        f"""
+        WITH propositions AS (
+            SELECT
+                proposition_id,
+                category,
+                competition
+            FROM read_parquet('{q(propositions_path)}')
+        ),
+        structured_groups AS (
+            SELECT
+                list(proposition_id ORDER BY proposition_id)[:64] AS ids
+            FROM propositions
+            WHERE category IS NOT NULL OR competition IS NOT NULL
+            GROUP BY coalesce(category, ''), coalesce(competition, '')
+            ORDER BY sha256(
+                '{int(seed)}|' || coalesce(category, '') || '|' ||
+                coalesce(competition, '')
             )
-        ].append(proposition_id)
-    pair_budget = max(10_000, limit * 200)
-    seen: set[tuple[str, str]] = set()
-    pair_stream: list[tuple[str, str]] = []
-    for key in sorted(groups):
-        group = groups[key]
-        for index, a_id in enumerate(group):
-            for b_id in group[index + 1 : index + 65]:
-                pair_stream.append((a_id, b_id))
-                if len(pair_stream) >= pair_budget:
-                    break
-            if len(pair_stream) >= pair_budget:
-                break
-        if len(pair_stream) >= pair_budget:
-            break
-    step = max(1, len(ids) // 2 - 1)
-    for index, a_id in enumerate(ids):
-        for offset in range(1, min(65, len(ids))):
-            b_id = ids[(index + offset * step) % len(ids)]
-            if a_id == b_id:
-                continue
-            pair_stream.append(tuple(sorted((a_id, b_id))))
-            if len(pair_stream) >= pair_budget:
-                break
-        if len(pair_stream) >= pair_budget:
-            break
-    for a_id, b_id in pair_stream:
-        pair = tuple(sorted((a_id, b_id)))
-        if pair in seen:
-            continue
-        seen.add(pair)
-        a_id, b_id = pair
-        if pair in candidates:
-            continue
-        a, b = by_id[a_id], by_id[b_id]
-        related_metadata = bool(
-            (a.get("category") and a.get("category") == b.get("category"))
-            or (
-                a.get("competition")
-                and a.get("competition") == b.get("competition")
+            LIMIT {group_limit}
+        ),
+        structured AS (
+            SELECT
+                list_extract(g.ids, positions_a.position)
+                    AS proposition_a_id,
+                list_extract(g.ids, positions_b.position)
+                    AS proposition_b_id,
+                true AS related_metadata
+            FROM structured_groups g
+            CROSS JOIN range(1, len(g.ids) + 1) positions_a(position)
+            CROSS JOIN range(
+                positions_a.position + 1,
+                len(g.ids) + 1
+            ) positions_b(position)
+        ),
+        all_ids AS (
+            SELECT
+                list(proposition_id ORDER BY proposition_id) AS ids,
+                count(*)::BIGINT AS total
+            FROM propositions
+        ),
+        sampled_positions AS (
+            SELECT positions.position
+            FROM all_ids
+            CROSS JOIN range(1, all_ids.total + 1) positions(position)
+            ORDER BY sha256(
+                '{int(seed)}|' || positions.position::VARCHAR
             )
+            LIMIT {position_limit}
+        ),
+        independent AS (
+            SELECT
+                least(
+                    list_extract(all_ids.ids, positions.position),
+                    list_extract(
+                        all_ids.ids,
+                        (
+                            (
+                                positions.position - 1
+                                + deltas.delta
+                                  * greatest(1, all_ids.total // 2 - 1)
+                            ) % all_ids.total
+                        ) + 1
+                    )
+                ) AS proposition_a_id,
+                greatest(
+                    list_extract(all_ids.ids, positions.position),
+                    list_extract(
+                        all_ids.ids,
+                        (
+                            (
+                                positions.position - 1
+                                + deltas.delta
+                                  * greatest(1, all_ids.total // 2 - 1)
+                            ) % all_ids.total
+                        ) + 1
+                    )
+                ) AS proposition_b_id,
+                false AS related_metadata
+            FROM all_ids
+            CROSS JOIN sampled_positions positions
+            CROSS JOIN range(1, 65) deltas(delta)
+            WHERE list_extract(all_ids.ids, positions.position)
+                != list_extract(
+                    all_ids.ids,
+                    (
+                        (
+                            positions.position - 1
+                            + deltas.delta
+                              * greatest(1, all_ids.total // 2 - 1)
+                        ) % all_ids.total
+                    ) + 1
+                )
+        ),
+        possible AS (
+            SELECT * FROM structured
+            UNION
+            SELECT * FROM independent
+        ),
+        noncandidates AS (
+            SELECT p.*
+            FROM possible p
+            LEFT JOIN read_parquet('{q(candidates_path)}') c
+              ON c.proposition_a_id = p.proposition_a_id
+             AND c.proposition_b_id = p.proposition_b_id
+            WHERE c.proposition_a_id IS NULL
         )
-        score = int(
-            hashlib.sha256(f"{seed}|{a_id}|{b_id}".encode()).hexdigest()[:16],
-            16,
-        )
-        if not related_metadata:
-            score += 1 << 64
-        item = (-score, a_id, b_id)
-        if len(heap) < limit:
-            heapq.heappush(heap, item)
-        elif item > heap[0]:
-            heapq.heapreplace(heap, item)
-    return [
-        {
-            "proposition_a_id": a_id,
-            "proposition_b_id": b_id,
-            "proposed_relation": "",
-            "discovery_method": "",
-            "explanation": "Independent near-miss pair absent from candidate generation",
-        }
-        for _, a_id, b_id in sorted(heap, reverse=True)
-    ]
+        SELECT
+            proposition_a_id,
+            proposition_b_id,
+            '' AS proposed_relation,
+            '' AS discovery_method,
+            'Independent near-miss pair absent from candidate generation'
+                AS explanation,
+            '' AS status
+        FROM noncandidates
+        ORDER BY
+            related_metadata DESC,
+            sha256(
+                '{int(seed)}|' || proposition_a_id || '|' || proposition_b_id
+            ),
+            proposition_a_id,
+            proposition_b_id
+        LIMIT ?
+        """,
+        [limit],
+    )
 
 
 def _review_record(

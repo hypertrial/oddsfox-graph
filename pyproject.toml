@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "oddsfox-graph"
-version = "0.4.0"
+version = "0.5.0"
 description = "Build and discover structural logic graph artifacts from Polymarket data."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -36,7 +36,22 @@ dev = [
   "python-sat==1.9.dev7",
   "pytest>=8",
   "ruff>=0.11",
+  "mypy>=1.15",
 ]
+
+[tool.mypy]
+python_version = "3.11"
+files = [
+  "oddsfox_graph/_discovery/contracts.py",
+  "oddsfox_graph/_discovery/evaluation_metrics.py",
+  "oddsfox_graph/_discovery/incremental.py",
+  "oddsfox_graph/_discovery/publication.py",
+  "oddsfox_graph/_discovery/types.py",
+  "oddsfox_graph/_discovery/versions.py",
+  "oddsfox_graph/_discovery/workspace.py",
+  "oddsfox_graph/queries.py",
+]
+strict = true
 
 [project.scripts]
 oddsfox-graph = "oddsfox_graph.cli:main"

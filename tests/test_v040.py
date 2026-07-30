@@ -11,6 +11,7 @@ import numpy as np
 import pytest
 
 from oddsfox_graph._discovery.contracts import PairClassification
+from oddsfox_graph._discovery.candidates import _top_k_indices
 from oddsfox_graph._discovery.input import load_source_markets
 from oddsfox_graph._discovery.solver import solve_proposals
 from oddsfox_graph.discovery import (
@@ -167,6 +168,11 @@ def test_blockwise_embeddings_are_stable_and_reusable() -> None:
         for row in first
     ]
     assert all(row["reused"] for row in replay_state)
+
+
+def test_linear_top_k_preserves_score_and_stable_id_ties() -> None:
+    scores = np.asarray([0.5, 0.7, 0.7, 0.7, 0.1], dtype=np.float32)
+    assert _top_k_indices(scores, 2, np).tolist() == [1, 2]
 
 
 def test_classifier_direction_and_supporting_field_validation() -> None:

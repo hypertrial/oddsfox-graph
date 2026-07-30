@@ -1,6 +1,6 @@
 # Builds
 
-v0.4.0 preserves the offline structural builder and turns automated logical
+v0.5.0 preserves the offline structural builder and turns automated logical
 discovery into a benchmark-driven, component-incremental pipeline with
 blockwise retrieval and RC2 consistency solving.
 
@@ -53,7 +53,8 @@ proposals are solved in independent RC2 components. Same-market facts are hard
 clauses; other proposals are weighted soft clauses. Rejected positive proposals
 retain the selected conflicts and named constraints that exclude them.
 
-`--incremental-from` requires a distinct, manifest-complete baseline. Source,
+`--incremental-from` requires a distinct, manifest-complete v0.5 baseline.
+Older candidate state is rejected with clean-build guidance. Source,
 parser, normalization, embedding, rule, classifier, threshold, and solver
 versions drive stage-specific reuse. State is an implementation detail under
 `state/`; the public logical artifacts must match a clean run byte-for-byte in
@@ -61,7 +62,13 @@ their canonical content. An unchanged candidate population is copied from the
 baseline; partial changes recompute candidate neighborhoods while reusing
 unchanged normalized vectors and classifications only when the complete typed
 pair evidence remains identical. Solver
-proposal components are reused independently by fingerprint. For changed or
+proposal components are reused independently by fingerprint. Structured
+candidate contributions are persisted per versioned block; an incremental run
+copies unchanged block rows exactly and regenerates changed blocks before the
+required global cap and priority aggregation. Changing `--max-candidates`
+invalidates those contributions because it also changes the per-block
+membership bound; changing the benchmark-enabled rule set invalidates the
+capped candidate population. For changed or
 added propositions, semantic retrieval scores changed-to-all; an unchanged
 proposition is rescored globally only when a changed or removed node occupied
 its prior top-k.
@@ -102,16 +109,23 @@ Discovery `stats.input_selection` records `input_rows`, `input_propositions`,
 `selected_markets`, `selected_propositions`, selection `strategy`, and whether
 the catalog was `truncated`.
 
+`state/execution_plan.parquet` is the auditable execution proof. It records
+market, semantic-neighborhood, structured-block, solver-component, and required
+global-stage decisions with input/output fingerprints and invalidation reasons.
+Evaluation reads and verifies this artifact and its logical hash; reused-count
+claims in the manifest alone cannot satisfy the incremental release gate.
+
 ## Scratch Database
 
-Builds also write `oddsfox_graph.duckdb` under `--out` as a working database.
-It is cleared on rebuild and is not a published contract artifact.
+The legacy `build` command writes `oddsfox_graph.duckdb` under `--out` as a
+working database. Discovery uses an equivalent staging-only database and does
+not publish it. Neither database is a contract artifact.
 
 ## Publication And Reproducibility
 
 Discovery writes into a temporary staging directory, validates schemas, counts,
-edge invariants, and deterministic ordering, then atomically publishes all
-non-manifest files and state. It records input, logical-artifact, state,
+edge invariants, and deterministic ordering, then atomically replaces each
+non-manifest artifact and state file. It records input, logical-artifact, state,
 benchmark, pricing, and component hashes, then writes the manifest as the last
 completion marker. A failure
 after artifact publication but before the manifest leaves no false completion
@@ -136,13 +150,24 @@ download. The protected manual workflow requires a
 - `expected-artifact-hashes.json` keyed by `5000` and `20000`
 - `benchmark.parquet`
 - `pricing.json`
+- `fixture-manifest.json`, conforming to
+  [`release-fixture-manifest.schema.json`](release-fixture-manifest.schema.json)
 
-Missing inputs fail the workflow. It verifies the input hash, runs 5,000- and
+Missing or provenance-mismatched inputs fail the workflow. The fixture manifest
+binds every critical file and the cache/baseline trees. Validation verifies the
+input hash, runs 5,000- and
 20,000-proposition incremental/offline discovery, compares online/offline and
 clean/incremental logical hashes, requires `READY_TO_SCALE`, builds the wheel,
 and uploads the complete validation record. Genuine human labels, notes,
 adjudication, complete caches, model access, and the M4 runs remain external
 release prerequisites.
+
+Generate the provenance file only after the fixture is immutable:
+
+```bash
+python scripts/create_release_fixture_manifest.py \
+  --fixture-root <release-fixture>
+```
 
 `oddsfox_graph.duckdb` is an implementation scratch file. Consumers should use
 the published parquet, reports, snapshot, and manifest.

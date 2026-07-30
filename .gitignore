@@ -220,6 +220,7 @@ __marimo__/
 # oddsgraph generated artifacts
 *.duckdb
 *.duckdb.wal
+.tmp/
 output/
 .benchmarks/
 

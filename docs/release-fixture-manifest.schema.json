@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "OddsFox discovery release fixture",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "package_version", "source_sha256", "files", "trees"],
+  "properties": {
+    "schema_version": {"const": "discovery-release-fixture-v1"},
+    "package_version": {"const": "0.5.0"},
+    "source_sha256": {
+      "const": "790bd1595b379472ad65ba0073105b4eb630974d04e7b44d58c8a4929f274aa2"
+    },
+    "files": {
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+$"
+      },
+      "required": [
+        "input.parquet",
+        "benchmark.parquet",
+        "pricing.json",
+        "expected-artifact-hashes.json",
+        "baselines/5000/build_manifest.json",
+        "baselines/20000/build_manifest.json"
+      ],
+      "additionalProperties": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{64}$"
+      }
+    },
+    "trees": {
+      "type": "object",
+      "propertyNames": {
+        "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+$"
+      },
+      "required": ["cache", "baselines/5000", "baselines/20000"],
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sha256", "file_count"],
+        "properties": {
+          "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "file_count": {"type": "integer", "minimum": 1}
+        }
+      }
+    }
+  }
+}

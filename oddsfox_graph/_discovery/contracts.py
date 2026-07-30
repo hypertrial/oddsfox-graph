@@ -204,6 +204,7 @@ class DiscoveryConfig:
     incremental_from: Path | None = None
     pricing_file: Path | None = None
     require_ready: bool = False
+    allow_unbenchmarked_rules: bool = False
     offline: bool = False
     parse_model: str = "gpt-5.6-terra"
     classify_model: str = "gpt-5.6-terra"

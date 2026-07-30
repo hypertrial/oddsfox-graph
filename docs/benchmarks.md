@@ -58,6 +58,37 @@ Do not synthesize or copy model predictions into the human-label columns.
 
 ## M4 Release Runs
 
+The reproducible fake-model performance harness runs each measurement in a
+fresh process, writes raw samples and medians as JSON, and proves offline and
+incremental hash equality:
+
+```bash
+python scripts/benchmark_discovery.py \
+  --input data/polymarket_all_markets_20260730T093857Z.parquet \
+  --output output/discovery-benchmark.json \
+  --sizes 500,2000,5000,20000 \
+  --modes clean,offline,one-market-incremental \
+  --repetitions 3
+```
+
+The 500- and 2,000-proposition sizes are correctness and profiling diagnostics.
+Incremental candidate-speed ratios are enforced only at the 5,000 and 20,000
+release envelopes, where timings are large enough to be stable; offline reuse
+and clean runtime/RSS regression gates still apply wherever the required
+samples and baseline exist.
+
+For the recorded v0.4 regression comparison, use the matching 100-pair fake
+classification envelope and require every ratio gate:
+
+```bash
+python scripts/benchmark_discovery.py \
+  --input data/polymarket_all_markets_20260730T093857Z.parquet \
+  --output output/discovery-regression.json \
+  --max-llm-pairs 100 \
+  --baseline-json benchmarks/discovery-v040-baseline.json \
+  --require-pass
+```
+
 Use the real local catalog and a fresh cache:
 
 ```bash
@@ -101,8 +132,18 @@ python scripts/validate_discovery_release.py \
   --work-dir output/release-validation \
   --expected-hashes <expected-artifact-hashes.json> \
   --benchmark <compiled-benchmark.parquet> \
-  --pricing-file <pricing.json>
+  --pricing-file <pricing.json> \
+  --fixture-manifest <fixture-manifest.json>
 ```
+
+## v0.5 Performance Reference
+
+On the July 30, 2026 development M4, a 5,000-proposition fresh real-catalog run
+with deterministic fake adapters improved from 10.339 seconds to 5.433 seconds.
+Candidate generation fell from 1.637 to 1.254 seconds, artifact publication
+from 6.699 to 2.364 seconds, and reported peak RSS from 1,073 MB to 956 MB.
+These are machine-local observations; acceptance is ratio-based and uses the
+process-isolated harness rather than fixed CI wall-clock limits.
 
 ## Historical v0.3.1 Performance Reference
 
@@ -122,4 +163,5 @@ three fresh-cache runs. Treat them as a machine-specific reference, not a CI
 wall-clock assertion.
 
 The legacy `review-score` thresholds remain available only for v0.3
-compatibility. v0.4 release decisions come from `evaluation_report.json`.
+compatibility. v0.5 consumes the source-bound v0.4 human truth set and records
+release decisions in `evaluation_report.json`.

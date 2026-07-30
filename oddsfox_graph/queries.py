@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from pathlib import Path
+from typing import cast
 
 import duckdb
 
@@ -32,7 +33,7 @@ class DuckDB:
         rows = self.rows(sql, params)
         if not rows:
             return None
-        return next(iter(rows[0].values()))
+        return cast(str | int | float | None, next(iter(rows[0].values())))
 
 
 def q(s: str | Path) -> str:

@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import hashlib
+import math
 from collections.abc import Callable, Sequence
 from typing import Any
 
 from .bulk import create_and_fill
-from ..queries import DuckDB
+from .workspace import CandidateStore
+from .versions import CANDIDATE_STATE_VERSION
+from ..queries import q
 
 
 _MEMBERSHIP_COLUMNS = {
@@ -24,13 +27,6 @@ _DETERMINISTIC_MEMBERSHIP_COLUMNS = {
     "subject_key": "VARCHAR",
 }
 
-_EMBEDDING_REASON_COLUMNS = {
-    "proposition_a_id": "VARCHAR",
-    "proposition_b_id": "VARCHAR",
-    "embedding_similarity": "DOUBLE",
-    "embedding_rank": "INTEGER",
-}
-
 _FEATURE_COLUMNS = {
     "proposition_id": "VARCHAR",
     "predicate": "VARCHAR",
@@ -39,9 +35,14 @@ _FEATURE_COLUMNS = {
     "time_end": "TIMESTAMPTZ",
 }
 
-_PAIR_COLUMNS = {
+SIMILARITY_DECIMALS = 4
+
+_DETERMINISTIC_RELATION_COLUMNS = {
     "proposition_a_id": "VARCHAR",
     "proposition_b_id": "VARCHAR",
+    "edge_type": "VARCHAR",
+    "rule_id": "VARCHAR",
+    "explanation": "VARCHAR",
 }
 
 
@@ -53,6 +54,10 @@ def candidate_sort_key(row: dict[str, Any]) -> tuple[object, ...]:
         str(row["proposition_a_id"]),
         str(row["proposition_b_id"]),
     )
+
+
+def structural_member_limit(max_candidates: int) -> int:
+    return max(64, int(math.sqrt(2 * int(max_candidates))) + 1)
 
 
 def generate_candidates(
@@ -74,8 +79,78 @@ def generate_candidates(
     baseline_neighbors: Sequence[dict[str, Any]] | None = None,
     embedding_state_sink: list[dict[str, Any]] | None = None,
     neighbor_state_sink: list[dict[str, Any]] | None = None,
+    neighborhood_execution_sink: list[dict[str, Any]] | None = None,
+    baseline_candidate_blocks: Any | None = None,
+    baseline_candidate_reasons: Any | None = None,
+    enabled_rule_ids: set[str] | None = None,
 ) -> list[dict[str, Any]]:
-    """Generate capped candidates without materializing structural all-pairs in Python."""
+    """Compatibility wrapper returning candidates for focused tests and callers."""
+    store = generate_candidate_store(
+        propositions,
+        config,
+        embedder,
+        semantic_keys=semantic_keys,
+        hashable=hashable,
+        proposition_signature=proposition_signature,
+        deterministic_relation=deterministic_relation,
+        embedding_text=embedding_text,
+        stage_rank=stage_rank,
+        is_winner=is_winner,
+        baseline_embeddings=baseline_embeddings,
+        baseline_neighbors=baseline_neighbors,
+        embedding_state_sink=embedding_state_sink,
+        neighbor_state_sink=neighbor_state_sink,
+        neighborhood_execution_sink=neighborhood_execution_sink,
+        baseline_candidate_blocks=baseline_candidate_blocks,
+        baseline_candidate_reasons=baseline_candidate_reasons,
+        enabled_rule_ids=enabled_rule_ids,
+    )
+    try:
+        candidates = store.rows(order_by="proposition_a_id, proposition_b_id")
+    finally:
+        store.close()
+    proposition_by_id = {
+        str(proposition["proposition_id"]): proposition
+        for proposition in propositions
+    }
+    for row in candidates:
+        if row.get("deterministic_relation") is None:
+            continue
+        relation = deterministic_relation(
+            proposition_by_id[str(row["proposition_a_id"])],
+            proposition_by_id[str(row["proposition_b_id"])],
+            float(config.parse_confidence),
+        )
+        if relation is not None:
+            row["_deterministic"] = relation
+    return candidates
+
+
+def generate_candidate_store(
+    propositions: Sequence[dict[str, Any]],
+    config: Any,
+    embedder: Callable[[list[str], Any], Any],
+    *,
+    semantic_keys: Sequence[str],
+    hashable: Callable[[object], object],
+    proposition_signature: Callable[[dict[str, Any]], tuple[object, ...]],
+    deterministic_relation: Callable[
+        [dict[str, Any], dict[str, Any], float],
+        dict[str, Any] | None,
+    ],
+    embedding_text: Callable[[dict[str, Any]], str],
+    stage_rank: Callable[[dict[str, Any]], int | None],
+    is_winner: Callable[[dict[str, Any]], bool],
+    baseline_embeddings: dict[str, list[float]] | None = None,
+    baseline_neighbors: Sequence[dict[str, Any]] | None = None,
+    embedding_state_sink: list[dict[str, Any]] | None = None,
+    neighbor_state_sink: list[dict[str, Any]] | None = None,
+    neighborhood_execution_sink: list[dict[str, Any]] | None = None,
+    baseline_candidate_blocks: Any | None = None,
+    baseline_candidate_reasons: Any | None = None,
+    enabled_rule_ids: set[str] | None = None,
+) -> CandidateStore:
+    """Generate candidates into a disk-backed relational working set."""
 
     proposition_by_id = {
         str(proposition["proposition_id"]): proposition
@@ -84,6 +159,9 @@ def generate_candidates(
     ids = sorted(proposition_by_id)
     structural_memberships: list[dict[str, Any]] = []
     deterministic_memberships: list[dict[str, Any]] = []
+
+    def rule_enabled(rule_id: str) -> bool:
+        return enabled_rule_ids is None or rule_id in enabled_rule_ids
 
     def add_structural(kind: str, key: object, proposition_id: str) -> None:
         structural_memberships.append(
@@ -120,12 +198,16 @@ def generate_candidates(
     for proposition_id in ids:
         proposition = proposition_by_id[proposition_id]
         add_structural("market", proposition["market_id"], proposition_id)
-        add_deterministic(
-            "market",
-            proposition["market_id"],
-            proposition_id,
-            proposition,
-        )
+        if (
+            rule_enabled("same_market.binary_complement.v1")
+            or rule_enabled("same_market.categorical_exclusion.v1")
+        ):
+            add_deterministic(
+                "market",
+                proposition["market_id"],
+                proposition_id,
+                proposition,
+            )
         event_key = proposition.get("event_id") or proposition.get("event_slug")
         if event_key:
             add_structural("event", event_key, proposition_id)
@@ -162,13 +244,16 @@ def generate_candidates(
 
         if high_confidence:
             signature = proposition_signature(proposition)
-            add_deterministic(
-                "signature",
-                signature,
-                proposition_id,
-                proposition,
-            )
+            if rule_enabled("equivalence.normalized_fields.v1"):
+                add_deterministic(
+                    "signature",
+                    signature,
+                    proposition_id,
+                    proposition,
+                )
             if (
+                rule_enabled("threshold.interval_containment.v2")
+                and
                 proposition.get("threshold") is not None
                 and proposition.get("operator")
                 in {
@@ -190,7 +275,11 @@ def generate_candidates(
                     proposition,
                     numeric_value=float(proposition["threshold"]),
                 )
-            if proposition.get("time_start") and proposition.get("time_end"):
+            if (
+                rule_enabled("time.interval_containment.v1")
+                and proposition.get("time_start")
+                and proposition.get("time_end")
+            ):
                 time_key = tuple(
                     hashable(proposition.get(key))
                     for key in semantic_keys
@@ -203,7 +292,11 @@ def generate_candidates(
                     proposition,
                 )
             rank = stage_rank(proposition)
-            if rank is not None and proposition.get("polarity") == "positive":
+            if (
+                rule_enabled("tournament.stage_progression.v1")
+                and rank is not None
+                and proposition.get("polarity") == "positive"
+            ):
                 add_deterministic(
                     "stage",
                     (
@@ -219,6 +312,8 @@ def generate_candidates(
                     rank=rank,
                 )
             if (
+                rule_enabled("event.single_winner.v1")
+                and
                 event_key
                 and is_winner(proposition)
                 and proposition.get("polarity") == "positive"
@@ -230,7 +325,10 @@ def generate_candidates(
                     proposition,
                 )
 
-    embedding_rows = _embedding_reason_rows(
+    effective_neighbor_sink = (
+        neighbor_state_sink if neighbor_state_sink is not None else []
+    )
+    _embedding_reason_rows(
         ids,
         proposition_by_id,
         config,
@@ -239,7 +337,9 @@ def generate_candidates(
         baseline_embeddings=baseline_embeddings,
         baseline_neighbors=baseline_neighbors,
         embedding_state_sink=embedding_state_sink,
-        neighbor_state_sink=neighbor_state_sink,
+        neighbor_state_sink=effective_neighbor_sink,
+        include_reason_rows=False,
+        neighborhood_execution_sink=neighborhood_execution_sink,
     )
     feature_rows = [
         {
@@ -252,14 +352,18 @@ def generate_candidates(
         for proposition_id in ids
     ]
 
-    db = DuckDB()
+    store = CandidateStore()
+    db = store.db
     try:
-        db.execute("SET TimeZone = 'UTC'")
         create_and_fill(
             db,
             "structural_memberships",
             _MEMBERSHIP_COLUMNS,
             structural_memberships,
+        )
+        db.execute(
+            _CREATE_CANDIDATE_BLOCKS_SQL,
+            [CANDIDATE_STATE_VERSION],
         )
         create_and_fill(
             db,
@@ -269,9 +373,26 @@ def generate_candidates(
         )
         create_and_fill(
             db,
-            "embedding_reasons",
-            _EMBEDDING_REASON_COLUMNS,
-            embedding_rows,
+            "directed_embedding_neighbors",
+            {
+                "proposition_id": "VARCHAR",
+                "neighbor_id": "VARCHAR",
+                "similarity": "DOUBLE",
+                "neighbor_rank": "INTEGER",
+            },
+            effective_neighbor_sink,
+        )
+        db.execute(
+            """
+            CREATE TABLE embedding_reasons AS
+            SELECT
+                least(proposition_id, neighbor_id) AS proposition_a_id,
+                greatest(proposition_id, neighbor_id) AS proposition_b_id,
+                max(similarity) AS embedding_similarity,
+                min(neighbor_rank)::INTEGER AS embedding_rank
+            FROM directed_embedding_neighbors
+            GROUP BY 1, 2
+            """
         )
         create_and_fill(db, "proposition_features", _FEATURE_COLUMNS, feature_rows)
         db.execute(_DETERMINISTIC_PAIR_SQL)
@@ -290,7 +411,13 @@ def generate_candidates(
                 proposition_by_id[b_id],
                 float(config.parse_confidence),
             )
-            if relation is not None:
+            if (
+                relation is not None
+                and (
+                    enabled_rule_ids is None
+                    or relation.get("rule_id") in enabled_rule_ids
+                )
+            ):
                 deterministic_relations[(a_id, b_id)] = relation
         deterministic_pair_count = len(deterministic_relations)
         if deterministic_pair_count > int(config.max_candidates):
@@ -303,59 +430,37 @@ def generate_candidates(
         create_and_fill(
             db,
             "accepted_deterministic_pairs",
-            _PAIR_COLUMNS,
+            _DETERMINISTIC_RELATION_COLUMNS,
             [
                 {
                     "proposition_a_id": pair[0],
                     "proposition_b_id": pair[1],
+                    "edge_type": relation["edge_type"],
+                    "rule_id": relation.get("rule_id"),
+                    "explanation": relation["explanation"],
                 }
-                for pair in deterministic_relations
+                for pair, relation in deterministic_relations.items()
             ],
         )
-        rows = db.rows(
-            _CAPPED_CANDIDATE_SQL,
-            [int(config.max_candidates)],
+        member_limit = structural_member_limit(int(config.max_candidates))
+        store.structural_member_limit = member_limit
+        _create_candidate_reason_state(
+            db,
+            member_limit,
+            baseline_candidate_blocks,
+            baseline_candidate_reasons,
         )
-    finally:
-        db.close()
-
-    candidates = []
-    for raw in rows:
-        a_id = str(raw["proposition_a_id"])
-        b_id = str(raw["proposition_b_id"])
-        relation = deterministic_relations.get((a_id, b_id))
-        row: dict[str, Any] = {
-            "proposition_a_id": a_id,
-            "proposition_b_id": b_id,
-            "candidate_reasons": list(raw["candidate_reasons"] or []),
-            "embedding_similarity": raw["embedding_similarity"],
-            "embedding_rank": raw["embedding_rank"],
-            "deterministic_relation": None,
-            "rule_id": None,
-            "rule_status": None,
-            "classification_relation": None,
-            "classification_confidence": None,
-            "supporting_fields": None,
-            "a_implies_b": None,
-            "b_implies_a": None,
-            "explanation": None,
-            "assumptions": [],
-            "requires_review": False,
-            "status": "pending",
-            "discovery_method": None,
-            "model_version": None,
-            "prompt_version": None,
-        }
-        if relation is not None:
-            row["_deterministic"] = relation
-            row["deterministic_relation"] = str(relation["edge_type"])
-            row["rule_id"] = relation.get("rule_id")
-            row["rule_status"] = "enabled"
-            row["status"] = "accepted"
-            row["discovery_method"] = "deterministic"
-            row["explanation"] = relation["explanation"]
-        candidates.append(row)
-    return candidates
+        db.execute(
+            _CREATE_CANDIDATE_STORE_SQL,
+            [
+                int(config.max_candidates),
+                int(config.max_candidates),
+            ],
+        )
+        return store
+    except Exception:
+        store.close()
+        raise
 
 
 def _embedding_reason_rows(
@@ -369,6 +474,8 @@ def _embedding_reason_rows(
     baseline_neighbors: Sequence[dict[str, Any]] | None = None,
     embedding_state_sink: list[dict[str, Any]] | None = None,
     neighbor_state_sink: list[dict[str, Any]] | None = None,
+    include_reason_rows: bool = True,
+    neighborhood_execution_sink: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     try:
         import numpy as np
@@ -446,20 +553,23 @@ def _embedding_reason_rows(
     def emit(
         proposition_id: str,
         ranked_neighbors: Sequence[tuple[str, float]],
+        *,
+        status: str,
     ) -> None:
         for rank, (other_id, similarity) in enumerate(
             ranked_neighbors,
             start=1,
         ):
             a_id, b_id = sorted((proposition_id, other_id))
-            rows.append(
-                {
-                    "proposition_a_id": a_id,
-                    "proposition_b_id": b_id,
-                    "embedding_similarity": similarity,
-                    "embedding_rank": rank,
-                }
-            )
+            if include_reason_rows:
+                rows.append(
+                    {
+                        "proposition_a_id": a_id,
+                        "proposition_b_id": b_id,
+                        "embedding_similarity": similarity,
+                        "embedding_rank": rank,
+                    }
+                )
             if neighbor_state_sink is not None:
                 neighbor_state_sink.append(
                     {
@@ -477,6 +587,13 @@ def _embedding_reason_rows(
                         "embedding_revision": str(config.embedding_revision),
                     }
                 )
+        if neighborhood_execution_sink is not None:
+            neighborhood_execution_sink.append(
+                {
+                    "proposition_id": proposition_id,
+                    "status": status,
+                }
+            )
 
     if can_reuse_neighbors:
         for proposition_id in ids:
@@ -506,17 +623,22 @@ def _embedding_reason_rows(
                 )
             )
             if must_recompute_full:
-                scores = np.round(matrix[index] @ matrix.T, decimals=6)
+                scores = np.round(
+                    matrix[index] @ matrix.T,
+                    decimals=SIMILARITY_DECIMALS,
+                )
                 scores[index] = -np.inf
-                ranked_indices = np.argsort(
-                    -scores,
-                    kind="stable",
-                )[:neighbor_count]
+                ranked_indices = _top_k_indices(scores, neighbor_count, np)
                 ranked_neighbors = [
                     (ids[int(other_index)], float(scores[int(other_index)]))
                     for other_index in ranked_indices
                 ]
+                execution_status = "recomputed"
             else:
+                prior_neighbors = [
+                    (str(row["neighbor_id"]), float(row["similarity"]))
+                    for row in prior
+                ]
                 options = {
                     str(row["neighbor_id"]): float(row["similarity"])
                     for row in prior
@@ -527,20 +649,29 @@ def _embedding_reason_rows(
                     options[changed_id] = float(
                         np.round(
                             matrix[index] @ matrix[id_to_index[changed_id]],
-                            decimals=6,
+                            decimals=SIMILARITY_DECIMALS,
                         )
                     )
                 ranked_neighbors = sorted(
                     options.items(),
                     key=lambda item: (-item[1], item[0]),
                 )[:neighbor_count]
-            emit(proposition_id, ranked_neighbors)
+                execution_status = (
+                    "reused"
+                    if ranked_neighbors == prior_neighbors
+                    else "recomputed"
+                )
+            emit(
+                proposition_id,
+                ranked_neighbors,
+                status=execution_status,
+            )
     else:
         for block_start in range(0, len(ids), block_size):
             block_end = min(block_start + block_size, len(ids))
             similarities = np.round(
                 matrix[block_start:block_end] @ matrix.T,
-                decimals=6,
+                decimals=SIMILARITY_DECIMALS,
             )
             for block_offset, index in enumerate(
                 range(block_start, block_end)
@@ -548,10 +679,7 @@ def _embedding_reason_rows(
                 proposition_id = ids[index]
                 scores = similarities[block_offset]
                 scores[index] = -np.inf
-                ranked = np.argsort(
-                    -scores,
-                    kind="stable",
-                )[:neighbor_count]
+                ranked = _top_k_indices(scores, neighbor_count, np)
                 emit(
                     proposition_id,
                     [
@@ -561,8 +689,31 @@ def _embedding_reason_rows(
                         )
                         for other_index in ranked
                     ],
+                    status="recomputed",
                 )
     return rows
+
+
+def _top_k_indices(scores: Any, count: int, np: Any) -> Any:
+    """Return exact score-descending, stable-index top-k without a full sort."""
+    if count <= 0:
+        return np.asarray([], dtype=np.int64)
+    if count >= len(scores):
+        candidates = np.arange(len(scores), dtype=np.int64)
+    else:
+        partition = np.argpartition(-scores, count - 1)[:count]
+        boundary = float(np.min(scores[partition]))
+        above = np.flatnonzero(scores > boundary)
+        needed = count - len(above)
+        equal = np.flatnonzero(scores == boundary)[:needed]
+        candidates = np.concatenate((above, equal))
+    return np.asarray(
+        sorted(
+            (int(index) for index in candidates),
+            key=lambda index: (-float(scores[index]), index),
+        ),
+        dtype=np.int64,
+    )
 
 
 _DETERMINISTIC_PAIR_SQL = """
@@ -609,19 +760,144 @@ WHERE a.kind IN ('market', 'signature')
 """
 
 
-_CAPPED_CANDIDATE_SQL = """
-WITH raw_reasons AS (
+_CREATE_CANDIDATE_BLOCKS_SQL = """
+CREATE TABLE candidate_blocks_work AS
+SELECT
+    sha256(kind || ':' || group_key) AS block_id,
+    kind AS reason_kind,
+    group_key,
+    sha256(string_agg(proposition_id, '|' ORDER BY proposition_id))
+        AS member_fingerprint,
+    count(*)::INTEGER AS member_count,
+    ?::VARCHAR AS candidate_version
+FROM structural_memberships
+GROUP BY kind, group_key
+"""
+
+_STRUCTURAL_CONTRIBUTION_SQL = """
+WITH ranked_memberships AS (
     SELECT
-        a.proposition_id AS proposition_a_id,
-        b.proposition_id AS proposition_b_id,
-        'shared_' || a.kind AS reason,
-        NULL::DOUBLE AS embedding_similarity,
-        NULL::INTEGER AS embedding_rank
-    FROM structural_memberships a
-    JOIN structural_memberships b
-      ON a.kind = b.kind
-     AND a.group_key = b.group_key
-     AND a.proposition_id < b.proposition_id
+        *,
+        row_number() OVER (
+            PARTITION BY kind, group_key
+            ORDER BY proposition_id
+        ) AS member_rank
+    FROM structural_memberships
+),
+bounded_memberships AS (
+    SELECT
+        kind,
+        group_key,
+        proposition_id,
+        sha256(kind || ':' || group_key) AS block_id
+    FROM ranked_memberships
+    WHERE member_rank <= ?
+),
+recomputed_memberships AS (
+    SELECT m.*
+    FROM bounded_memberships m
+    JOIN candidate_block_execution_work e USING (block_id)
+    WHERE e.status = 'recomputed'
+)
+SELECT
+    a.block_id,
+    a.proposition_id AS proposition_a_id,
+    b.proposition_id AS proposition_b_id,
+    'shared_' || a.kind AS reason,
+    NULL::DOUBLE AS embedding_similarity,
+    NULL::INTEGER AS embedding_rank,
+    ?::VARCHAR AS candidate_version
+FROM recomputed_memberships a
+JOIN recomputed_memberships b
+  ON a.block_id = b.block_id
+ AND a.proposition_id < b.proposition_id
+"""
+
+
+def _create_candidate_reason_state(
+    db: Any,
+    member_limit: int,
+    baseline_candidate_blocks: Any | None,
+    baseline_candidate_reasons: Any | None,
+) -> None:
+    if baseline_candidate_blocks is None or baseline_candidate_reasons is None:
+        db.execute(
+            """
+            CREATE TABLE candidate_block_execution_work AS
+            SELECT
+                block_id,
+                'recomputed'::VARCHAR AS status,
+                NULL::VARCHAR AS input_fingerprint,
+                member_fingerprint AS output_fingerprint
+            FROM candidate_blocks_work
+            """
+        )
+        db.execute(
+            "CREATE TABLE candidate_reason_rows_work AS "
+            + _STRUCTURAL_CONTRIBUTION_SQL,
+            [member_limit, CANDIDATE_STATE_VERSION],
+        )
+        return
+    block_path = q(baseline_candidate_blocks)
+    reason_path = q(baseline_candidate_reasons)
+    db.execute(
+        f"""
+        CREATE TABLE candidate_block_execution_work AS
+        WITH prior AS (
+            SELECT block_id, member_fingerprint
+            FROM read_parquet('{block_path}')
+            WHERE candidate_version = '{CANDIDATE_STATE_VERSION}'
+        )
+        SELECT
+            coalesce(c.block_id, p.block_id) AS block_id,
+            CASE
+                WHEN c.block_id IS NULL THEN 'removed'
+                WHEN p.member_fingerprint = c.member_fingerprint THEN 'reused'
+                ELSE 'recomputed'
+            END AS status,
+            p.member_fingerprint AS input_fingerprint,
+            c.member_fingerprint AS output_fingerprint
+        FROM candidate_blocks_work c
+        FULL OUTER JOIN prior p USING (block_id)
+        """
+    )
+    db.execute(
+        "CREATE TABLE recomputed_candidate_reason_rows AS "
+        + _STRUCTURAL_CONTRIBUTION_SQL,
+        [member_limit, CANDIDATE_STATE_VERSION],
+    )
+    db.execute(
+        f"""
+        CREATE TABLE candidate_reason_rows_work AS
+        SELECT r.*
+        FROM read_parquet('{reason_path}') r
+        JOIN candidate_block_execution_work e USING (block_id)
+        WHERE e.status = 'reused'
+        UNION ALL
+        SELECT * FROM recomputed_candidate_reason_rows
+        """
+    )
+    db.execute("DROP TABLE recomputed_candidate_reason_rows")
+
+
+_CREATE_CANDIDATE_STORE_SQL = """
+CREATE TABLE relation_candidates_work AS
+WITH
+bounded_structural_reasons AS (
+    SELECT
+        proposition_a_id,
+        proposition_b_id,
+        reason,
+        embedding_similarity,
+        embedding_rank
+    FROM candidate_reason_rows_work
+    QUALIFY row_number() OVER (
+        PARTITION BY reason
+        ORDER BY proposition_a_id, proposition_b_id, block_id
+    ) <= ?
+),
+raw_reasons AS (
+    SELECT * FROM bounded_structural_reasons
 
     UNION ALL
 
@@ -632,6 +908,16 @@ WITH raw_reasons AS (
         embedding_similarity,
         embedding_rank
     FROM embedding_reasons
+
+    UNION ALL
+
+    SELECT
+        proposition_a_id,
+        proposition_b_id,
+        'deterministic_rule' AS reason,
+        NULL::DOUBLE AS embedding_similarity,
+        NULL::INTEGER AS embedding_rank
+    FROM accepted_deterministic_pairs
 ),
 base_pairs AS (
     SELECT DISTINCT proposition_a_id, proposition_b_id
@@ -718,11 +1004,30 @@ prioritized AS (
     LIMIT ?
 )
 SELECT
+    p.proposition_a_id,
+    p.proposition_b_id,
+    p.candidate_reasons,
+    p.embedding_similarity,
+    p.embedding_rank,
+    d.edge_type AS deterministic_relation,
+    d.rule_id,
+    CASE WHEN d.rule_id IS NULL THEN NULL ELSE 'enabled' END AS rule_status,
+    NULL::VARCHAR AS classification_relation,
+    NULL::DOUBLE AS classification_confidence,
+    NULL::VARCHAR AS supporting_fields,
+    NULL::BOOLEAN AS a_implies_b,
+    NULL::BOOLEAN AS b_implies_a,
+    d.explanation,
+    []::VARCHAR[] AS assumptions,
+    false AS requires_review,
+    CASE WHEN d.rule_id IS NULL THEN 'pending' ELSE 'accepted' END AS status,
+    CASE WHEN d.rule_id IS NULL THEN NULL ELSE 'deterministic' END
+        AS discovery_method,
+    NULL::VARCHAR AS model_version,
+    NULL::VARCHAR AS prompt_version
+FROM prioritized p
+LEFT JOIN accepted_deterministic_pairs d USING (
     proposition_a_id,
-    proposition_b_id,
-    candidate_reasons,
-    embedding_similarity,
-    embedding_rank
-FROM prioritized
-ORDER BY proposition_a_id, proposition_b_id
+    proposition_b_id
+)
 """
