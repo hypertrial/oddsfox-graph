@@ -24,9 +24,7 @@ def write_graph_snapshot(
             outcome_label,
             canonical_proposition,
             stage_subject AS team,
-            stage_key,
-            current_price,
-            current_price_devig
+            stage_key
         FROM nodes_v
         ORDER BY stage_subject NULLS LAST, market_id, outcome_index
         """
@@ -38,9 +36,7 @@ def write_graph_snapshot(
             dst_node_id AS target,
             edge_type AS type,
             edge_basis AS basis,
-            confidence,
-            current_p_src,
-            current_p_dst
+            confidence
         FROM logic_edges_v
         ORDER BY confidence DESC, source, target
         """
@@ -51,44 +47,24 @@ def write_graph_snapshot(
             a_node_id,
             b_node_id,
             p_a_given_b,
-            lower_bound,
-            upper_bound,
             method,
             confidence
         FROM conditional_edges_v
-        WHERE p_a_given_b IS NULL OR p_a_given_b BETWEEN 0 AND 1
         ORDER BY confidence DESC, a_node_id, b_node_id
         """
     )
-    violations = db.rows(
-        """
-        SELECT
-            violation_id AS id,
-            violation_type AS type,
-            severity,
-            description,
-            src_node_id,
-            dst_node_id,
-            market_id_src,
-            market_id_dst
-        FROM violations_v
-        ORDER BY severity, id
-        """
-    )
     snapshot = {
-        "version": "v0.1.0",
+        "version": "v0.2.0",
         "built_at": datetime.now(timezone.utc).isoformat(),
         "source_manifest": source_manifest,
         "counts": {
             "nodes": len(nodes),
             "logic_edges": len(logic_edges),
             "conditionals": len(conditionals),
-            "violations": len(violations),
         },
         "nodes": nodes,
         "logic_edges": logic_edges,
         "conditionals": conditionals,
-        "violations": violations,
     }
     (out_dir / GRAPH_SNAPSHOT_ARTIFACT).write_text(
         json.dumps(snapshot, indent=2, sort_keys=True, default=str) + "\n",

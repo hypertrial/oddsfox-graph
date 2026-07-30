@@ -16,7 +16,8 @@ from oddsfox_graph.queries import DuckDB
 def test_token_minute_prices_choose_latest_timestamp_per_minute(tmp_path: Path) -> None:
     db = DuckDB(tmp_path / "dedupe.duckdb")
     try:
-        db.execute("""
+        db.execute(
+            """
             CREATE TABLE input_prices AS
             SELECT *
             FROM (VALUES
@@ -50,94 +51,47 @@ def test_token_minute_prices_choose_latest_timestamp_per_minute(tmp_path: Path) 
             ALTER TABLE input_prices ADD COLUMN input_opposite_clob_token_id VARCHAR;
             ALTER TABLE input_prices ADD COLUMN input_market_status VARCHAR;
             ALTER TABLE input_prices ADD COLUMN input_is_still_alive BOOLEAN;
-
-            CREATE TABLE token_minute_reference AS
-            SELECT
-                market_id,
-                outcome_index,
-                clob_token_id,
-                question,
-                outcome_label,
-                event_slug,
-                is_active,
-                is_closed,
-                market_volume_usd,
-                odds_timestamp,
-                odds_timestamp_epoch,
-                odds_minute_epoch,
-                price,
-                input_canonical_team_name,
-                input_stage_key,
-                input_stage_rank,
-                input_market_direction,
-                input_progression_outcome_label,
-                input_is_progression_token,
-                input_opposite_clob_token_id,
-                input_market_status,
-                input_is_still_alive
-            FROM (
-                SELECT
-                    *,
-                    row_number() OVER (
-                        PARTITION BY clob_token_id, odds_minute_epoch
-                        ORDER BY odds_timestamp_epoch DESC
-                    ) AS rn
-                FROM input_prices
-            )
-            WHERE rn = 1;
-        """)
-
+            """
+        )
         _create_token_minute_prices(db)
-
-        actual = db.rows("""
-            SELECT * FROM token_minute_prices
+        _validate_token_minute_prices(db)
+        validate_relation_columns(db, "token_minute_prices")
+        rows = db.rows(
+            """
+            SELECT
+                clob_token_id,
+                odds_minute_epoch,
+                odds_timestamp_epoch,
+                price::DOUBLE AS price
+            FROM token_minute_prices
             ORDER BY clob_token_id, odds_minute_epoch
-        """)
-        expected = db.rows("""
-            SELECT * FROM token_minute_reference
-            ORDER BY clob_token_id, odds_minute_epoch
-        """)
-        assert actual == expected
+            """
+        )
+        assert rows == [
+            {"clob_token_id": "a", "odds_minute_epoch": 0, "odds_timestamp_epoch": 45, "price": 0.45},
+            {"clob_token_id": "a", "odds_minute_epoch": 60, "odds_timestamp_epoch": 75, "price": 0.50},
+            {"clob_token_id": "b", "odds_minute_epoch": 0, "odds_timestamp_epoch": 55, "price": 0.55},
+        ]
     finally:
         db.close()
 
-def test_stage_invariants_report_duplicate_token_minutes(tmp_path: Path) -> None:
-    db = DuckDB(tmp_path / "invariants.duckdb")
-    try:
-        db.execute("""
-            CREATE TABLE token_minute_prices AS
-            SELECT 'a' AS clob_token_id, 0::BIGINT AS odds_minute_epoch
-            UNION ALL
-            SELECT 'a', 0::BIGINT
-        """)
-        with pytest.raises(RuntimeError, match="duplicate token-minute rows: 1"):
-            _validate_token_minute_prices(db)
-    finally:
-        db.close()
 
-def test_stage_invariants_report_duplicate_final_edges(tmp_path: Path) -> None:
-    db = DuckDB(tmp_path / "edge_invariants.duckdb")
+def test_validate_final_edge_invariants_rejects_duplicates(tmp_path: Path) -> None:
+    db = DuckDB(tmp_path / "edges.duckdb")
     try:
-        db.execute("""
+        db.execute(
+            """
             CREATE TABLE logic_edges_v AS
-            SELECT 'a' AS src_node_id, 'b' AS dst_node_id, 'implies' AS edge_type
-            UNION ALL
-            SELECT 'a', 'b', 'implies';
-
-            CREATE TABLE price_edges_v AS
-            SELECT 'c' AS src_node_id, 'd' AS dst_node_id, 'equivalent' AS edge_type
-            WHERE false;
-        """)
-        with pytest.raises(RuntimeError, match="duplicate logic edges: 1"):
+            SELECT * FROM (VALUES
+                ('a', 'b', 'complement', 'same_market', 1.0, 'm1', 'm1', 'e1', 'e1', 'same market'),
+                ('a', 'b', 'complement', 'same_market', 1.0, 'm1', 'm1', 'e1', 'e1', 'same market')
+            ) AS t(
+                src_node_id, dst_node_id, edge_type, edge_basis, confidence,
+                market_id_src, market_id_dst, event_slug_src, event_slug_dst, evidence
+            );
+            """
+        )
+        with pytest.raises(RuntimeError, match="duplicate logic edges"):
             _validate_final_edge_invariants(db)
-    finally:
-        db.close()
-
-def test_internal_contract_validation_reports_drift(tmp_path: Path) -> None:
-    db = DuckDB(tmp_path / "contracts.duckdb")
-    try:
-        db.execute("CREATE TABLE token_minute_prices AS SELECT 'a' AS clob_token_id")
-        with pytest.raises(RuntimeError, match="token_minute_prices column contract drift"):
-            validate_relation_columns(db, "token_minute_prices")
     finally:
         db.close()

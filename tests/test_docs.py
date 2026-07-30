@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from oddsfox_graph.artifacts import ARTIFACT_COLUMNS, OPTIONAL_PARQUET_ARTIFACTS, PARQUET_ARTIFACTS, REPORTS
+from oddsfox_graph.artifacts import ARTIFACT_COLUMNS, PARQUET_ARTIFACTS, REPORTS
 from oddsfox_graph.cli import build_parser
 
 
@@ -15,7 +15,6 @@ def test_cli_docs_cover_subcommands_and_build_flags() -> None:
     subcommands = _subcommand_parsers(build_parser())
     cli_doc = (DOCS / "cli.md").read_text(encoding="utf-8")
     builds_doc = (DOCS / "builds.md").read_text(encoding="utf-8")
-    benchmark_doc = (DOCS / "benchmarks.md").read_text(encoding="utf-8")
 
     assert subcommands
     for command in sorted(subcommands):
@@ -27,17 +26,11 @@ def test_cli_docs_cover_subcommands_and_build_flags() -> None:
     for flag in sorted(flags):
         assert flag in documented_flags
 
-    benchmark_flags = _long_options(subcommands["benchmark-compare"])
-    benchmark_docs = cli_doc + "\n" + benchmark_doc
-    for flag in sorted(benchmark_flags):
-        assert flag in benchmark_docs
-
 
 def test_artifact_docs_cover_artifacts_reports_and_columns() -> None:
     artifact_doc = (DOCS / "artifacts.md").read_text(encoding="utf-8")
-    artifacts = (*PARQUET_ARTIFACTS, *OPTIONAL_PARQUET_ARTIFACTS)
 
-    for artifact in artifacts:
+    for artifact in PARQUET_ARTIFACTS:
         assert f"`{artifact}`" in artifact_doc
         for column in ARTIFACT_COLUMNS[artifact]:
             assert f"`{column}`" in artifact_doc
@@ -52,32 +45,16 @@ def test_manifest_shape_is_documented() -> None:
         "input",
         "input_format",
         "input_granularity_seconds",
-        "quotes",
-        "resolutions",
         "taxonomy",
-        "threshold_bucket_counts",
-        "effective_thresholds",
-        "lp_warnings",
-        "build_options",
         "artifacts",
         "reports",
         "stats",
         "stage_timings",
     }
     taxonomy_keys = {"name", "path", "hash"}
-    build_option_keys = {
-        "write_prices",
-        "solve_coherence",
-        "fast_graph",
-        "graph_lookback_days",
-        "current_max_age_hours",
-    }
 
-    for key in sorted(manifest_keys | taxonomy_keys | build_option_keys):
+    for key in sorted(manifest_keys | taxonomy_keys):
         assert f"`{key}`" in builds_doc
-    assert "`stats.history_mode = \"fast_graph_lookback\"`" in builds_doc
-    assert "`full`" in builds_doc
-    assert "`fast_graph_lookback`" in builds_doc
 
 
 def test_local_markdown_links_resolve() -> None:
@@ -97,7 +74,9 @@ def test_local_markdown_links_resolve() -> None:
                 linked_file = markdown_file
                 linked_anchors = anchors
             if anchor:
-                assert anchor in linked_anchors, f"{markdown_file}: missing anchor {target} in {linked_file}"
+                assert (
+                    anchor in linked_anchors
+                ), f"{markdown_file}: missing anchor {target} in {linked_file}"
 
 
 def _markdown_links(text: str) -> list[str]:
