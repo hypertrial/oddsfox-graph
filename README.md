@@ -2,10 +2,10 @@
 
 `oddsfox-graph` turns Polymarket market or token-odds parquet into a proposition
 graph. Each `clob_token_id` becomes a node. The offline `build` command preserves
-the WC2026 structural workflow; the v0.5.0 `discover` command adds typed parsing,
-blockwise local semantic retrieval, benchmark-gated rules, selective LLM
-classification, RC2 consistency solving, incremental execution, review tooling,
-and complete provenance.
+the WC2026 structural workflow; the v0.6.0 `discover` command uses self-hosted
+open models for typed parsing, local retrieval/NLI, compact atomic relation
+judgments, RC2 consistency solving, incremental execution, review tooling, and
+complete provenance.
 
 This is a Python/DuckDB tool for offline structural analysis. It does not score
 prices, solve coherence LPs, or produce trading signals.
@@ -66,8 +66,22 @@ Install the optional discovery runtime for live discovery:
 python -m pip install -c constraints-dev.txt -e ".[discovery]"
 ```
 
-Legacy `build` remains DuckDB-only. Live discovery also requires
-`OPENAI_API_KEY`; a cache-complete `--offline` run does not.
+Legacy `build` remains DuckDB-only. Discovery has no API-key or proprietary
+inference path. It never downloads or launches model weights implicitly.
+Provision the pinned MiniLM embedding and ModernBERT NLI revisions in the local
+Hugging Face cache before discovery; both loaders run with local-only access.
+
+For M4 development, launch the default Apache-2.0 Qwen3-4B Q8 GGUF:
+
+```bash
+llama-server \
+  --model /models/Qwen3-4B-Q8_0.gguf \
+  --alias Qwen/Qwen3-4B-GGUF:Q8_0 \
+  --host 127.0.0.1 --port 8080 --ctx-size 8192
+```
+
+Linux GPU deployments use vLLM with the same Chat Completions schema. Both
+runtimes are external and must be declared in a content-bound model manifest.
 
 ## Validation
 
@@ -104,10 +118,24 @@ Builds also write a portable `graph_snapshot.json` summary.
 The supplied local catalog is the canonical smoke input:
 
 ```bash
+python -m oddsfox_graph.cli model-manifest \
+  --model-path /models/Qwen3-4B-Q8_0.gguf \
+  --model-id Qwen/Qwen3-4B-GGUF:Q8_0 \
+  --revision <upstream-revision> \
+  --license Apache-2.0 \
+  --runtime llama.cpp \
+  --llm-base-url http://127.0.0.1:8080/v1 \
+  --output model-manifest.json
+
+python -m oddsfox_graph.cli model-check \
+  --model-manifest model-manifest.json \
+  --llm-base-url http://127.0.0.1:8080/v1
+
 python -m oddsfox_graph.cli discover \
   --input data/polymarket_all_markets_20260730T093857Z.parquet \
   --out output/discovery-smoke \
-  --cache-dir .cache/oddsfox-graph
+  --cache-dir .cache/oddsfox-graph \
+  --model-manifest model-manifest.json
 ```
 
 `data/` is intentionally unversioned; place the supplied catalog at that path
@@ -118,20 +146,21 @@ to honor `--max-propositions` (default 5,000). Discovery first selects from
 lightweight market summaries and only materializes full arrays for retained
 markets. Unusable source markets and selection counts are recorded in the
 manifest. The default candidate ceiling is 400,000 while classification remains
-bounded at 5,000 pairs. Reproduce the completed run without an API key:
+bounded at 5,000 pairs. Reproduce the completed run without a server request:
 
 ```bash
 python -m oddsfox_graph.cli discover \
   --input data/polymarket_all_markets_20260730T093857Z.parquet \
   --out output/discovery-smoke \
   --cache-dir .cache/oddsfox-graph \
+  --model-manifest model-manifest.json \
   --offline
 ```
 
 Discovery additionally publishes `propositions.parquet`,
 `relation_candidates.parquet`, `rejected_edges.parquet`,
 `parse_errors.parquet`, and `review_queue.parquet`, with reusable implementation
-state under `state/`. v0.5 state includes structured block/reason contributions
+state under `state/`. v0.6 state includes structured block/reason contributions
 and `execution_plan.parquet`, which evaluation verifies instead of trusting
 manifest reuse counters. Export and score a legacy v0.3 human review:
 
@@ -151,7 +180,7 @@ outcome; a later online run retries transient failures instead of treating them
 as permanent. The manifest separates current-request token usage from
 `cached_origin` and `accounted_total` usage.
 
-For v0.4, export two blinded reviewer files, compile only completed independent
+For v0.6, export two blinded reviewer files, compile only completed independent
 reviews and adjudicated disagreements, then evaluate:
 
 ```bash
@@ -165,12 +194,20 @@ python -m oddsfox_graph.cli benchmark-compile \
   --review-a output/benchmark-review/reviewer-a.csv \
   --review-b output/benchmark-review/reviewer-b.csv \
   --adjudication output/benchmark-review/adjudication.csv \
-  --output oddsfox_graph/benchmarks/v0.4.0.parquet
+  --sampling-manifest output/benchmark-review/sampling_manifest.json \
+  --output oddsfox_graph/benchmarks/v0.6.0.parquet
+
+python -m oddsfox_graph.cli model-profile \
+  --input data/polymarket_all_markets_20260730T093857Z.parquet \
+  --benchmark oddsfox_graph/benchmarks/v0.6.0.parquet \
+  --cache-dir .cache/oddsfox-graph \
+  --model-manifest model-manifest.json \
+  --out output/model-profile
 
 python -m oddsfox_graph.cli evaluate \
   --out output/discovery-smoke \
-  --benchmark oddsfox_graph/benchmarks/v0.4.0.parquet \
-  --pricing-file pricing.json
+  --benchmark oddsfox_graph/benchmarks/v0.6.0.parquet \
+  --compute-profile compute-profile.json
 ```
 
 Benchmark labels and notes must be genuine; the tool never fabricates them.
@@ -183,13 +220,14 @@ identical to a clean build.
 
 Without a compiled benchmark, only same-market complement and categorical
 exclusion facts publish deterministically. Other rules remain experimental.
-`--allow-unbenchmarked-rules` restores the pre-v0.5 opt-in behavior for
+`--allow-unbenchmarked-rules` restores the diagnostic opt-in behavior for
 diagnostics, records the override, and makes the run ineligible for
 `READY_TO_SCALE`.
 
 The protected manual release workflow consumes the real parquet, complete
-cache, immutable 5,000/20,000 baselines, expected online hashes, a compiled
-benchmark, and a pricing snapshot. The equivalent local gate is:
+cache, immutable 5,000/20,000 baselines, expected online hashes, benchmark v2,
+model manifest/profile, calibration report, and compute profile. The equivalent
+local gate is:
 
 ```bash
 python scripts/create_release_fixture_manifest.py \
@@ -202,7 +240,10 @@ python scripts/validate_discovery_release.py \
   --work-dir output/release-validation \
   --expected-hashes <expected-artifact-hashes.json> \
   --benchmark <compiled-benchmark.parquet> \
-  --pricing-file <pricing.json> \
+  --compute-profile <compute-profile.json> \
+  --model-manifest <model-manifest.json> \
+  --model-profile <model-profile.json> \
+  --calibration-report <calibration-report.json> \
   --fixture-manifest <fixture-manifest.json>
 ```
 

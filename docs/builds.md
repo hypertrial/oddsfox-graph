@@ -1,6 +1,6 @@
 # Builds
 
-v0.5.0 preserves the offline structural builder and turns automated logical
+v0.6.0 preserves the offline structural builder and turns automated logical
 discovery into a benchmark-driven, component-incremental pipeline with
 blockwise retrieval and RC2 consistency solving.
 
@@ -25,7 +25,8 @@ python -m oddsfox_graph.cli build --input <parquet> --out <dir> [--taxonomy <jso
 python -m oddsfox_graph.cli discover \
   --input <parquet> \
   --out <dir> \
-  --cache-dir <dir>
+  --cache-dir <dir> \
+  --model-manifest <json>
 ```
 
 Compact inputs require `market_id`, `question`, and equal-length nonempty
@@ -39,13 +40,16 @@ When a catalog exceeds `max_propositions`, discovery selects complete markets
 by descending `volume` with `market_id` as a stable tie-breaker. It records
 input, eligible, invalid, and selected counts in `stats.input_selection`.
 
-Live requests use OpenAI Responses structured parsing with `store=False`,
-bounded concurrency, transient retries, and a content-addressed JSON cache.
-The cache key includes task, canonical input, model, reasoning setting, prompt,
-and schema hashes. Versioned entries record `success`, `stable_failure`, or
-`transient_failure`. Online runs retry cached transient failures. `--offline`
-requires complete cache or reusable state coverage, replays recorded terminal
-failures to the review queue, and never reads `OPENAI_API_KEY`.
+Live requests use schema-constrained `POST /v1/chat/completions` calls to a
+declared llama.cpp or vLLM server. Each request contains one market or pair.
+Bounded concurrency, transient retries, and the server's continuous batching
+provide throughput. Cache keys contain the complete inference fingerprint:
+model artifact/runtime manifest, role, sampling parameters, output limit,
+prompt, schema, and canonical input. Versioned entries record `success`,
+`stable_failure`, or `transient_failure`. Online runs retry cached transient
+failures. `--offline` requires complete v0.6 cache/state coverage, reuses the
+saved manifest's runtime and endpoint identity without contacting that
+endpoint, and performs no server request.
 
 Local cosine retrieval processes normalized embeddings in deterministic blocks
 instead of allocating a full similarity matrix. Deterministic and classified
@@ -53,7 +57,7 @@ proposals are solved in independent RC2 components. Same-market facts are hard
 clauses; other proposals are weighted soft clauses. Rejected positive proposals
 retain the selected conflicts and named constraints that exclude them.
 
-`--incremental-from` requires a distinct, manifest-complete v0.5 baseline.
+`--incremental-from` requires a distinct, manifest-complete v0.6 baseline.
 Older candidate state is rejected with clean-build guidance. Source,
 parser, normalization, embedding, rule, classifier, threshold, and solver
 versions drive stage-specific reuse. State is an implementation detail under
@@ -88,9 +92,10 @@ Successful builds write `build_manifest.json` last. Fields:
 | `taxonomy` | Object with `name`, `path`, and `hash` |
 | `models` | Requested/observed parse and classify models plus embedding revision |
 | `prompts` | Parse/classify prompt versions and hashes |
+| `inference` | Manifest/profile IDs, runtime/origin, sampling, and exact fingerprints |
 | `versions` | Independent normalization, taxonomy, retrieval, rules, cache, solver, and state versions |
 | `benchmark` | Compiled benchmark path/hash/source binding and rule-gate status |
-| `pricing` | Pricing snapshot path/hash used for reproducible cost estimates |
+| `compute` | Self-hosted model-stage hours, energy, throughput, and local cost estimates |
 | `solver` | Solver/encoding versions, objectives, components, clauses, and proposals |
 | `rules` | Registry version and enabled/experimental rule evidence |
 | `limits` | Per-relation confidence, retrieval block size, proposition, candidate, LLM, and concurrency limits |
@@ -126,7 +131,7 @@ not publish it. Neither database is a contract artifact.
 Discovery writes into a temporary staging directory, validates schemas, counts,
 edge invariants, and deterministic ordering, then atomically replaces each
 non-manifest artifact and state file. It records input, logical-artifact, state,
-benchmark, pricing, and component hashes, then writes the manifest as the last
+benchmark, model/profile, compute, and component hashes, then writes the manifest as the last
 completion marker. A failure
 after artifact publication but before the manifest leaves no false completion
 marker. Returned statistics exactly match `manifest.stats`.
@@ -134,13 +139,14 @@ marker. Returned statistics exactly match `manifest.stats`.
 A cache-complete offline rerun must reproduce every logical parquet hash.
 Current-run usage is zero offline; originating request usage remains available
 under `usage.cached_origin` and the combined accounting under
-`usage.accounted_total`. Legacy v1 entries remain readable, but their duplicated
-per-item batch usage is deliberately excluded rather than reported as an
-inflated total; `cache.legacy_hits` exposes those reads.
+`usage.accounted_total`. Pre-v0.6 cache entries are deliberately incompatible
+because they do not bind the self-hosted runtime and complete inference
+fingerprint. Embedding and NLI loading is local-only: provision both pinned
+revisions out of band before discovery.
 
 ## Release Validation
 
-Ordinary CI uses lightweight fakes and performs no OpenAI request or embedding
+Ordinary CI uses lightweight HTTP/model fakes and performs no network request or embedding
 download. The protected manual workflow requires a
 `discovery-release-fixture` artifact containing:
 
@@ -149,7 +155,10 @@ download. The protected manual workflow requires a
 - `baselines/5000/` and `baselines/20000/`, including `state/`
 - `expected-artifact-hashes.json` keyed by `5000` and `20000`
 - `benchmark.parquet`
-- `pricing.json`
+- `compute-profile.json`
+- `model-manifest.json`
+- `model-profile.json`
+- `calibration-report.json`
 - `fixture-manifest.json`, conforming to
   [`release-fixture-manifest.schema.json`](release-fixture-manifest.schema.json)
 

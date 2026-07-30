@@ -193,7 +193,9 @@ def accept_logic_edges(db: DuckDB, out_dir: Path) -> None:
             ) AS proposal_id,
             NULL::VARCHAR AS solver_version,
             NULL::VARCHAR AS constraint_version,
-            NULL::VARCHAR AS solver_component_id
+            NULL::VARCHAR AS solver_component_id,
+            NULL::VARCHAR AS inference_fingerprint,
+            NULL::VARCHAR AS model_profile_id
         FROM candidate_edges_v c
         WHERE c.candidate_source IN (
             'same_market',

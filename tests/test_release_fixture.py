@@ -11,6 +11,7 @@ from scripts.validate_discovery_release import (
     PACKAGE_VERSION,
     REQUIRED_FILES,
     REQUIRED_TREES,
+    _baseline_requested_models,
     _sha256,
     _tree_provenance,
     _validate_fixture_manifest,
@@ -55,7 +56,7 @@ def test_release_fixture_manifest_requires_every_provenance_binding(
 ) -> None:
     root, path, manifest = _fixture(tmp_path)
     files = dict(manifest["files"])  # type: ignore[arg-type]
-    files.pop("pricing.json")
+    files.pop("compute-profile.json")
     manifest["files"] = files
     path.write_text(json.dumps(manifest), encoding="utf-8")
 
@@ -74,6 +75,26 @@ def test_release_fixture_manifest_rejects_path_traversal(
 
     with pytest.raises(ValueError, match="Unsafe release fixture path"):
         _validate_fixture_manifest(root, path)
+
+
+def test_release_replay_uses_baseline_selected_models() -> None:
+    assert _baseline_requested_models(
+        {
+            "models": {
+                "parse": {"requested": "open/challenger-parser"},
+                "classify": {"requested": "open/challenger-classifier"},
+            }
+        }
+    ) == ("open/challenger-parser", "open/challenger-classifier")
+    with pytest.raises(ValueError, match="requested classify model"):
+        _baseline_requested_models(
+            {
+                "models": {
+                    "parse": {"requested": "open/parser"},
+                    "classify": {"observed": ["open/classifier"]},
+                }
+            }
+        )
 
 
 def test_performance_speed_gate_applies_only_to_release_envelopes() -> None:

@@ -1,164 +1,118 @@
 # CLI Reference
 
-Entry point:
-
-```bash
-python -m oddsfox_graph.cli <command> ...
-```
+Run commands with `python -m oddsfox_graph.cli <command>`.
 
 ## `build`
 
-Build structural graph artifacts from an input parquet file.
-
-| Flag | Required | Description |
-|---|---|---|
-| `--input` | yes | Source odds parquet path |
-| `--out` | yes | Output directory |
-| `--taxonomy` | no | Optional taxonomy JSON; defaults to bundled WC2026 taxonomy |
+The DuckDB-only legacy builder accepts `--input`, `--out`, and optional
+`--taxonomy`.
 
 ## `discover`
 
-Discover logical relations from a compact market snapshot or OddsFox
-minutely/hourly export.
+Self-hosted discovery accepts:
 
-| Flag | Required | Description |
-|---|---|---|
-| `--input` | yes | Source parquet path |
-| `--out` | yes | Atomically published output directory |
-| `--cache-dir` | no | Content-addressed request cache; defaults beside `--out` |
-| `--benchmark` | no | Reviewed v0.4 benchmark; enables rule gates and evaluation |
-| `--allow-unbenchmarked-rules` | no | Opt into experimental parse-derived rules; recorded in provenance and prevents `READY_TO_SCALE` |
-| `--incremental-from` | no | Distinct, manifest-complete discovery baseline |
-| `--pricing-file` | no | Versioned per-model token pricing JSON |
-| `--require-ready` | no | Exit nonzero unless evaluation returns `READY_TO_SCALE` |
-| `--offline` | no | Require a terminal cache entry for every task, replay cached failures, and never use an API key |
-| `--parse-model` | no | Structured parser model (default `gpt-5.6-terra`) |
-| `--classify-model` | no | Pair classifier model (default `gpt-5.6-terra`) |
-| `--embedding-model` | no | Local sentence-transformer model |
-| `--embedding-revision` | no | Pinned model revision |
-| `--accept-confidence` | no | Minimum accepted classifier confidence (default 0.95) |
-| `--relation-threshold` | no | Repeatable `RELATION=VALUE` acceptance override |
-| `--parse-confidence` | no | Minimum confidence for parse-backed rules (default 0.95) |
-| `--top-k` | no | Semantic neighbors retained per proposition (default 20) |
-| `--embedding-block-size` | no | Exact cosine block size (default 512) |
-| `--max-propositions` | no | Maximum selected propositions (default 5,000) |
-| `--max-candidates` | no | Maximum canonical candidates (default 400,000) |
-| `--max-llm-pairs` | no | Maximum classified unresolved pairs (default 5,000) |
-| `--llm-concurrency` | no | Maximum concurrent Responses calls (default 8) |
+```text
+--input --out --cache-dir --benchmark --incremental-from --compute-profile
+--model-manifest --model-profile --require-ready --allow-unbenchmarked-rules
+--offline --llm-base-url --llm-runtime --allow-remote-inference
+--parse-model --classify-model --embedding-model --embedding-revision
+--accept-confidence --relation-threshold --parse-confidence --top-k
+--embedding-block-size --max-propositions --max-candidates --max-llm-pairs
+--llm-concurrency --sampling-seed --temperature --generation-top-p
+--generation-top-k --presence-penalty --parse-max-output-tokens
+--classify-max-output-tokens
+```
 
-Default relation thresholds are 0.995 for complement, 0.99 for equivalence and
-mutual exclusion, and 0.98 for implication and compatibility.
-Without a benchmark, only same-market hard facts publish deterministically.
-`--allow-unbenchmarked-rules` is diagnostic-only and prevents
-`READY_TO_SCALE`. Incremental baselines must carry compatible v0.5 candidate
-block, reason, and execution-plan state.
+`--input` and `--out` are required. Online runs also require
+`--model-manifest`. The default endpoint is
+`http://127.0.0.1:8080/v1`, the runtime is `llama.cpp`, both production roles
+default to `Qwen/Qwen3-4B-GGUF:Q8_0`, and concurrency defaults to 2.
+`--llm-runtime` also accepts `vllm`. Non-loopback URLs require
+`--allow-remote-inference`; credentials, query strings, and fragments are
+always rejected.
+
+The sampling defaults are seed 0, temperature 0.1, top-p 0.8, top-k 20,
+presence penalty 1.5, 4,096 parse output tokens, and 1,024 classification
+output tokens. A missing or mismatched profile routes model-positive proposals
+to review. `--require-ready` requires a matching profile and test-partition
+evaluation.
+
+## `model-manifest`
+
+Create a content-bound model declaration with:
+
+```text
+--model-path --model-id --revision --license --runtime --llm-base-url
+--allow-remote-inference --output
+```
+
+The command hashes a GGUF file or model tree and preflights the loaded runtime.
+The approved production license is `Apache-2.0`.
+
+## `model-check`
+
+Use `--model-manifest`, `--llm-base-url`, and optional
+`--allow-remote-inference`. The command verifies health, loaded model identity,
+runtime metadata, both production JSON schemas, token accounting, truncation,
+and stable failure behavior.
+
+## `model-profile`
+
+Use `--input`, `--benchmark`, `--cache-dir`, `--model-manifest`, `--out`, and
+optional `--allow-remote-inference`. Only calibration-partition rows are read.
+Outputs are `model_profile.json`, `calibration_predictions.parquet`, and
+`calibration_report.json`.
 
 ## `benchmark-export`
 
-Create deterministic, blinded reviewer templates and a sampling manifest.
-Required flags are `--input`, `--out`, and `--output-dir`; optional flags are
-`--parse-count`, `--pair-count`, and `--seed`.
+Use `--input`, `--out`, `--output-dir`, optional `--parse-count`,
+`--pair-count`, and `--seed`. Defaults are 750 parses and 3,000 pairs.
 
 ## `benchmark-compile`
 
-Compile two independent completed reviews plus adjudication into typed,
-source-hash-bound `benchmark.parquet`. Required flags are `--input`,
-`--review-a`, `--review-b`, `--adjudication`, and `--output`.
+Use `--input`, `--review-a`, `--review-b`, `--adjudication`,
+`--sampling-manifest`, and `--output`. The sampling manifest is required but
+remains separate from blinded reviewer files.
 
 ## `evaluate`
 
-Evaluate a build against a compiled benchmark and write
-`evaluation_report.json`. Required flags are `--out` and `--benchmark`;
-`--pricing-file` and `--output` are optional. The command exits nonzero unless
-the decision is `READY_TO_SCALE`.
+Use `--out`, `--benchmark`, optional `--compute-profile`, and optional
+`--output`. Historical `--pricing-file` remains accepted but is mutually
+exclusive with compute accounting. Only the untouched test partition is
+scored.
 
 ## `review-export`
 
-Export a deterministic, stratified CSV of accepted edges and candidate-recall
-near misses.
-
-| Flag | Required | Description |
-|---|---|---|
-| `--out` | yes | Completed discovery directory |
-| `--output` | yes | Review CSV destination |
-| `--accepted` | no | Accepted-edge sample size (default 200) |
-| `--recall-pairs` | no | Candidate and noncandidate audit pairs (default 200) |
-| `--seed` | no | Deterministic sampling seed (default 0) |
+Use `--out`, `--output`, optional `--accepted`, `--recall-pairs`, and `--seed`.
 
 ## `review-score`
 
-Score completed labels, write `evaluation.json`, and exit nonzero if any
-quality gate fails.
-
-| Flag | Required | Description |
-|---|---|---|
-| `--out` | yes | Completed discovery directory |
-| `--labels` | yes | Completed review CSV |
-| `--output` | no | Evaluation JSON destination |
+Use `--out`, `--labels`, and optional `--output`.
 
 ## `benchmark-summary`
 
-Print runtime and count summary from `build_manifest.json`.
-
-| Flag | Required | Description |
-|---|---|---|
-| `--out` | yes | Completed build directory |
+Use `--out` to summarize a completed manifest.
 
 ## `nodes`
 
-List nodes from `nodes.parquet`.
-
-| Flag | Required | Description |
-|---|---|---|
-| `--out` | yes | Completed build directory |
-| `--top` | no | Max rows (default 50) |
+Use `--out` and optional `--top`.
 
 ## `edges`
 
-List accepted logic edges from `logic_edges.parquet`.
-
-| Flag | Required | Description |
-|---|---|---|
-| `--out` | yes | Completed build directory |
-| `--edge-type` | no | One of `compatible`, `complement`, `equivalent`, `implies`, `mutually_exclusive` |
-| `--top` | no | Max rows (default 50) |
+Use `--out`, optional `--edge-type`, and optional `--top`.
 
 ## `condition`
 
-Show exact conditional rows for a resolved node pair.
-
-| Flag | Required | Description |
-|---|---|---|
-| `--out` | yes | Completed build directory |
-| `--a` | yes | Source node id or unique text |
-| `--b` | yes | Destination node id or unique text |
+Use `--out`, `--a`, and `--b`.
 
 ## `explain`
 
-Explain one node: identity, same-market siblings, logic edges, conditionals.
-
-| Flag | Required | Description |
-|---|---|---|
-| `--out` | yes | Completed build directory |
-| `--node` | yes | Node id or unique text |
+Use `--out` and `--node`.
 
 ## `explain-edge`
 
-Explain one typed logic edge and related conditionals.
-
-| Flag | Required | Description |
-|---|---|---|
-| `--out` | yes | Completed build directory |
-| `--src` | yes | Source node id or unique text |
-| `--dst` | yes | Destination node id or unique text |
-| `--edge-type` | yes | One of `compatible`, `complement`, `equivalent`, `implies`, `mutually_exclusive` |
+Use `--out`, `--src`, `--dst`, and `--edge-type`.
 
 ## `search`
 
-Search nodes by id, question, proposition, or outcome label.
-
-| Flag | Required | Description |
-|---|---|---|
-| `--out` | yes | Completed build directory |
-| `--query` | yes | Search text |
-| `--top` | no | Max rows (default 20) |
+Use `--out`, `--query`, and optional `--top`.

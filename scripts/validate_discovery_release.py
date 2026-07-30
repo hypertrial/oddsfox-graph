@@ -11,12 +11,15 @@ from typing import Any
 CANONICAL_SOURCE_SHA256 = (
     "790bd1595b379472ad65ba0073105b4eb630974d04e7b44d58c8a4929f274aa2"
 )
-FIXTURE_SCHEMA_VERSION = "discovery-release-fixture-v1"
-PACKAGE_VERSION = "0.5.0"
+FIXTURE_SCHEMA_VERSION = "discovery-release-fixture-v2"
+PACKAGE_VERSION = "0.6.0"
 REQUIRED_FILES = (
     "input.parquet",
     "benchmark.parquet",
-    "pricing.json",
+    "compute-profile.json",
+    "model-manifest.json",
+    "model-profile.json",
+    "calibration-report.json",
     "expected-artifact-hashes.json",
     "baselines/5000/build_manifest.json",
     "baselines/20000/build_manifest.json",
@@ -75,7 +78,7 @@ def _validate_fixture_manifest(
     if manifest.get("schema_version") != FIXTURE_SCHEMA_VERSION:
         raise ValueError("Unsupported release fixture manifest schema")
     if manifest.get("package_version") != PACKAGE_VERSION:
-        raise ValueError("Release fixture was not produced for package v0.5.0")
+        raise ValueError("Release fixture was not produced for package v0.6.0")
     if manifest.get("source_sha256") != CANONICAL_SOURCE_SHA256:
         raise ValueError("Release fixture source binding is not canonical")
     files = manifest.get("files")
@@ -120,7 +123,10 @@ def _validate_fixture_argument_bindings(
     file_arguments = {
         "input.parquet": args.input,
         "benchmark.parquet": args.benchmark,
-        "pricing.json": args.pricing_file,
+        "compute-profile.json": args.compute_profile,
+        "model-manifest.json": args.model_manifest,
+        "model-profile.json": args.model_profile,
+        "calibration-report.json": args.calibration_report,
         "expected-artifact-hashes.json": args.expected_hashes,
     }
     for relative, path in file_arguments.items():
@@ -158,6 +164,97 @@ def _validate_fixture_argument_bindings(
             )
 
 
+def _canonical_json_sha256(value: object) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+def _baseline_requested_models(
+    manifest: dict[str, Any],
+) -> tuple[str, str]:
+    models = manifest.get("models")
+    if not isinstance(models, dict):
+        raise ValueError("Release baseline has no model provenance")
+    requested: list[str] = []
+    for role in ("parse", "classify"):
+        role_data = models.get(role)
+        value = (
+            role_data.get("requested")
+            if isinstance(role_data, dict)
+            else None
+        )
+        if not isinstance(value, str) or not value:
+            raise ValueError(
+                f"Release baseline has no requested {role} model"
+            )
+        requested.append(value)
+    return requested[0], requested[1]
+
+
+def _validate_v060_content_bindings(
+    args: argparse.Namespace,
+    limits: list[int],
+) -> None:
+    model_manifest = json.loads(args.model_manifest.read_text(encoding="utf-8"))
+    model_profile = json.loads(args.model_profile.read_text(encoding="utf-8"))
+    calibration = json.loads(args.calibration_report.read_text(encoding="utf-8"))
+    compute = json.loads(args.compute_profile.read_text(encoding="utf-8"))
+    if model_manifest.get("license") != "Apache-2.0":
+        raise ValueError("Release model manifest must use the approved Apache-2.0 license")
+    if model_manifest.get("runtime") not in {"llama.cpp", "vllm"}:
+        raise ValueError("Release model manifest has an unsupported runtime")
+    if (
+        model_profile.get("model_manifest_id") != model_manifest.get("manifest_id")
+        or model_profile.get("model_manifest_sha256")
+        != _canonical_json_sha256(model_manifest)
+    ):
+        raise ValueError("Release model profile is not bound to the model manifest")
+    if (
+        model_profile.get("benchmark_sha256") != _sha256(args.benchmark)
+        or calibration.get("profile_id") != model_profile.get("profile_id")
+    ):
+        raise ValueError("Calibration/profile/benchmark bindings do not match")
+    if (
+        calibration.get("passed") is not True
+        or float(calibration.get("structured_output_validity") or 0.0)
+        < 0.999
+        or "nli" not in (model_profile.get("inference_fingerprints") or {})
+    ):
+        raise ValueError("Release calibration did not pass v0.6 profile gates")
+    if (
+        not isinstance(compute.get("hardware_hour_usd"), (int, float))
+        or isinstance(compute.get("hardware_hour_usd"), bool)
+    ):
+        raise ValueError("Compute profile is missing hardware_hour_usd")
+    for cache_file in args.cache_dir.rglob("*.json"):
+        cache_entry = json.loads(cache_file.read_text(encoding="utf-8"))
+        if cache_entry.get("version") != 4:
+            raise ValueError("Release cache contains pre-v0.6 inference lineage")
+    for limit in limits:
+        manifest = json.loads(
+            (
+                args.baseline_dir / str(limit) / "build_manifest.json"
+            ).read_text(encoding="utf-8")
+        )
+        inference = manifest.get("inference") or {}
+        if (
+            manifest.get("version") != PACKAGE_VERSION
+            or inference.get("model_manifest_id") != model_manifest.get("manifest_id")
+            or inference.get("model_manifest_hash")
+            != _canonical_json_sha256(model_manifest)
+            or inference.get("model_profile_id") != model_profile.get("profile_id")
+            or inference.get("proprietary_cache_lineage") is not False
+        ):
+            raise ValueError(
+                f"Baseline {limit} is not bound to the v0.6 open-model fixture"
+            )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Validate cache-complete discovery against the real catalog."
@@ -168,7 +265,10 @@ def main() -> int:
     parser.add_argument("--work-dir", required=True, type=Path)
     parser.add_argument("--expected-hashes", required=True, type=Path)
     parser.add_argument("--benchmark", required=True, type=Path)
-    parser.add_argument("--pricing-file", required=True, type=Path)
+    parser.add_argument("--compute-profile", required=True, type=Path)
+    parser.add_argument("--model-manifest", required=True, type=Path)
+    parser.add_argument("--model-profile", required=True, type=Path)
+    parser.add_argument("--calibration-report", required=True, type=Path)
     parser.add_argument("--fixture-manifest", required=True, type=Path)
     parser.add_argument("--propositions", default="5000,20000")
     args = parser.parse_args()
@@ -192,10 +292,19 @@ def main() -> int:
         fixture_manifest,
         limits,
     )
+    _validate_v060_content_bindings(args, limits)
 
     results: dict[str, Any] = {}
     results["fixture"] = fixture_manifest
     for limit in limits:
+        baseline_manifest = json.loads(
+            (
+                args.baseline_dir / str(limit) / "build_manifest.json"
+            ).read_text(encoding="utf-8")
+        )
+        parse_model, classify_model = _baseline_requested_models(
+            baseline_manifest
+        )
         out = args.work_dir / str(limit)
         stats = discover(
             args.input,
@@ -204,9 +313,13 @@ def main() -> int:
                 cache_dir=args.cache_dir,
                 benchmark_path=args.benchmark,
                 incremental_from=args.baseline_dir / str(limit),
-                pricing_file=args.pricing_file,
+                compute_profile=args.compute_profile,
+                model_manifest=args.model_manifest,
+                model_profile=args.model_profile,
                 require_ready=True,
                 offline=True,
+                parse_model=parse_model,
+                classify_model=classify_model,
                 max_propositions=limit,
             ),
         )

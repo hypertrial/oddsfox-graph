@@ -17,7 +17,7 @@ For discovery, the summary also reports candidate and review counts. Inspect the
 manifest directly for cache, token usage, selected-input counts, requested and
 observed models, embedding revision, and every stage timing.
 
-## v0.4 Human Benchmark
+## v0.6 Human Benchmark
 
 The benchmark is generated only from the supplied catalog with SHA-256
 `790bd1595b379472ad65ba0073105b4eb630974d04e7b44d58c8a4929f274aa2`.
@@ -29,8 +29,8 @@ python -m oddsfox_graph.cli benchmark-export \
   --input data/polymarket_all_markets_20260730T093857Z.parquet \
   --out output/discovery-5000 \
   --output-dir output/benchmark-review \
-  --parse-count 500 \
-  --pair-count 2000 \
+  --parse-count 750 \
+  --pair-count 3000 \
   --seed 20260730
 ```
 
@@ -51,10 +51,19 @@ python -m oddsfox_graph.cli benchmark-compile \
   --review-a output/benchmark-review/reviewer-a.csv \
   --review-b output/benchmark-review/reviewer-b.csv \
   --adjudication output/benchmark-review/adjudication.csv \
-  --output oddsfox_graph/benchmarks/v0.4.0.parquet
+  --sampling-manifest output/benchmark-review/sampling_manifest.json \
+  --output oddsfox_graph/benchmarks/v0.6.0.parquet
 ```
 
 Do not synthesize or copy model predictions into the human-label columns.
+Compilation deterministically assigns 40% development, 30% calibration, and
+30% untouched test rows. Prompts and rules use development rows; `model-profile`
+uses calibration rows only; final `evaluate` reads test rows only.
+
+An open-weight license does not prove that the model's training data is fully
+reproducible. Release provenance therefore states both the SPDX weight license
+and the immutable upstream/model artifact hashes without making a stronger
+training-data claim.
 
 ## M4 Release Runs
 
@@ -77,7 +86,7 @@ release envelopes, where timings are large enough to be stable; offline reuse
 and clean runtime/RSS regression gates still apply wherever the required
 samples and baseline exist.
 
-For the recorded v0.4 regression comparison, use the matching 100-pair fake
+For the recorded regression comparison, use the matching 100-pair fake
 classification envelope and require every ratio gate:
 
 ```bash
@@ -96,6 +105,7 @@ python -m oddsfox_graph.cli discover \
   --input data/polymarket_all_markets_20260730T093857Z.parquet \
   --out output/discovery-5000 \
   --cache-dir .cache/oddsfox-graph \
+  --model-manifest model-manifest.json \
   --max-propositions 5000 \
   --max-candidates 400000 \
   --max-llm-pairs 5000
@@ -106,13 +116,13 @@ and compare `artifact_hashes` in `build_manifest.json`. Validate incremental
 changes against a distinct immutable baseline and compare each result to a clean
 full build using the same configuration.
 
-Evaluation with a versioned token-pricing snapshot is:
+Evaluation with a self-hosted compute profile is:
 
 ```bash
 python -m oddsfox_graph.cli evaluate \
   --out output/discovery-20000 \
-  --benchmark oddsfox_graph/benchmarks/v0.4.0.parquet \
-  --pricing-file pricing.json
+  --benchmark oddsfox_graph/benchmarks/v0.6.0.parquet \
+  --compute-profile compute-profile.json
 ```
 
 `READY_TO_SCALE` requires deterministic precision at least 0.99, overall
@@ -132,7 +142,10 @@ python scripts/validate_discovery_release.py \
   --work-dir output/release-validation \
   --expected-hashes <expected-artifact-hashes.json> \
   --benchmark <compiled-benchmark.parquet> \
-  --pricing-file <pricing.json> \
+  --compute-profile <compute-profile.json> \
+  --model-manifest <model-manifest.json> \
+  --model-profile <model-profile.json> \
+  --calibration-report <calibration-report.json> \
   --fixture-manifest <fixture-manifest.json>
 ```
 
@@ -163,5 +176,5 @@ three fresh-cache runs. Treat them as a machine-specific reference, not a CI
 wall-clock assertion.
 
 The legacy `review-score` thresholds remain available only for v0.3
-compatibility. v0.5 consumes the source-bound v0.4 human truth set and records
-release decisions in `evaluation_report.json`.
+compatibility. v0.6 consumes the source- and sampling-bound benchmark v2 test
+partition and records release decisions in `evaluation_report.json`.

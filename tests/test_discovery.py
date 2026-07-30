@@ -12,21 +12,20 @@ from typing import Any
 
 import numpy as np
 import pytest
+from pydantic import BaseModel
 
 from oddsfox_graph.benchmark import benchmark_summary
 from oddsfox_graph.cli import main
 from oddsfox_graph._discovery.bulk import create_and_fill
-from oddsfox_graph._discovery.cache import CACHE_ENTRY_VERSION, cache_entry
+from oddsfox_graph._discovery.cache import cache_entry
 import oddsfox_graph.discovery as discovery_module
 from oddsfox_graph.discovery import (
     CLASSIFY_PROMPT_VERSION,
+    AtomicPairAssessment,
     DISCOVERY_PARQUET_ARTIFACTS,
     DiscoveryConfig,
     JsonCache,
-    PairClassification,
-    PairClassificationBatch,
     ParsedMarket,
-    ParsedMarketBatch,
     ParsedOutcome,
     PropositionRecord,
     _candidate_sort_key,
@@ -71,11 +70,48 @@ class _Response:
         self.usage = _Usage()
 
 
-class _FakeResponses:
+class _LegacyEntailment(BaseModel):
+    supported: bool
+    supporting_fields: list[dict[str, Any]]
+    assumptions: list[str]
+
+
+class PairClassification(BaseModel):
+    pair_id: str
+    relation: str
+    confidence: float
+    supporting_fields: list[dict[str, Any]]
+    explanation: str
+    assumptions: list[str]
+    a_implies_b: _LegacyEntailment
+    b_implies_a: _LegacyEntailment
+    requires_review: bool
+
+
+class PairClassificationBatch(BaseModel):
+    pairs: list[PairClassification]
+
+
+class ParsedMarketBatch(BaseModel):
+    markets: list[ParsedMarket]
+
+
+class _StructuredResponse:
+    def __init__(self, parsed: object) -> None:
+        self.parsed = parsed
+        self.observed_model = "Qwen/Qwen3-4B-GGUF:Q8_0"
+        self.usage = {
+            "input_tokens": 20,
+            "output_tokens": 10,
+            "total_tokens": 30,
+        }
+
+
+class _FakeRuntime:
     def __init__(self) -> None:
         self.calls = 0
 
-    async def parse(self, **kwargs: object) -> _Response:
+    async def complete(self, **kwargs: object) -> _Response:
         self.calls += 1
         payload = json.loads(kwargs["input"][1]["content"])  # type: ignore[index]
         if kwargs["text_format"] is ParsedMarketBatch:
@@ -112,11 +148,35 @@ class _FakeResponses:
 
 class _FakeClient:
     def __init__(self) -> None:
-        self.responses = _FakeResponses()
+        self.runtime = _FakeRuntime()
+
+    async def generate(self, **kwargs: object) -> _StructuredResponse:
+        response_model = kwargs["response_model"]
+        payload = kwargs["payload"]
+        legacy_format = (
+            ParsedMarketBatch
+            if response_model is ParsedMarket
+            else PairClassificationBatch
+        )
+        response = await self.runtime.complete(
+            input=[
+                {"role": "system", "content": kwargs["system_prompt"]},
+                {"role": "user", "content": json.dumps([payload], default=str)},
+            ],
+            text_format=legacy_format,
+        )
+        parsed = response.output_parsed
+        if parsed is None:
+            return _StructuredResponse(None)
+        if response_model is ParsedMarket:
+            return _StructuredResponse(parsed.markets[0])
+        legacy = parsed.pairs[0]
+        atomic = _atomic_from_legacy(legacy)
+        return _StructuredResponse(atomic)
 
 
-class _StableFakeResponses:
-    async def parse(self, **kwargs: object) -> _Response:
+class _StableFakeRuntime:
+    async def complete(self, **kwargs: object) -> _Response:
         payload = json.loads(kwargs["input"][1]["content"])  # type: ignore[index]
         if kwargs["text_format"] is ParsedMarketBatch:
             return _Response(_parse_markets(payload))
@@ -148,9 +208,37 @@ class _StableFakeResponses:
         )
 
 
-class _StableFakeClient:
+class _StableFakeClient(_FakeClient):
     def __init__(self) -> None:
-        self.responses = _StableFakeResponses()
+        self.runtime = _StableFakeRuntime()
+
+
+def _atomic_from_legacy(
+    classification: PairClassification,
+) -> AtomicPairAssessment:
+    judgments = {
+        "equivalent": ("yes", "yes", "yes", "no", "yes"),
+        "A_implies_B": ("yes", "no", "yes", "no", "yes"),
+        "B_implies_A": ("no", "yes", "yes", "no", "yes"),
+        "mutually_exclusive": ("no", "no", "no", "no", "yes"),
+        "complement": ("no", "no", "no", "yes", "yes"),
+        "compatible": ("no", "no", "yes", "no", "yes"),
+        "unrelated": ("no", "no", "yes", "no", "no"),
+        "uncertain": ("unknown", "unknown", "unknown", "unknown", "unknown"),
+    }[classification.relation]
+    return AtomicPairAssessment(
+        pair_id=classification.pair_id,
+        a_implies_b=judgments[0],
+        b_implies_a=judgments[1],
+        can_both_be_true=judgments[2],
+        must_one_be_true=judgments[3],
+        logically_related=judgments[4],
+        confidence=classification.confidence,
+        supporting_fields=classification.supporting_fields,
+        assumptions=classification.assumptions,
+        unsupported_assumption=False,
+        requires_review=classification.requires_review,
+    )
 
 
 def _parse_markets(payload: list[dict[str, Any]]) -> ParsedMarketBatch:
@@ -244,7 +332,7 @@ def real_discovery(
     )
     first_manifest = json.loads((out / "build_manifest.json").read_text())
     first_hashes = first_manifest["artifact_hashes"]
-    calls = client.responses.calls
+    calls = client.runtime.calls
 
     offline = DiscoveryConfig(**{**config.__dict__, "offline": True})
     second_stats = discover(
@@ -291,9 +379,13 @@ def test_discover_real_compact_input_and_offline_replay(
     assert (out / "graph_snapshot.json").is_file()
     assert (out / "reports" / "coverage.md").is_file()
     assert first_manifest["models"]["embedding"]["revision"]
-    assert set(first_hashes) == set(DISCOVERY_PARQUET_ARTIFACTS)
-    assert first_manifest["version"] == "0.5.0"
-    assert first_manifest["versions"]["candidate_state"] == "candidate-components-v2"
+    assert set(first_hashes) == {
+        *DISCOVERY_PARQUET_ARTIFACTS,
+        "model_manifest.json",
+        "model_profile.json",
+    }
+    assert first_manifest["version"] == "0.6.0"
+    assert first_manifest["versions"]["candidate_state"] == "candidate-components-v3"
     assert first_manifest["rules"]["enabled"] == [
         "same_market.binary_complement.v1",
         "same_market.categorical_exclusion.v1",
@@ -394,7 +486,7 @@ def test_discover_real_compact_input_and_offline_replay(
     assert main(["search", "--out", str(out), "--query", "Will"]) == 0
     assert second_stats["logic_edges"] == first_stats["logic_edges"]
     assert second_manifest["artifact_hashes"] == first_hashes
-    assert real_discovery["client"].responses.calls == real_discovery["calls"]
+    assert real_discovery["client"].runtime.calls == real_discovery["calls"]
     assert second_manifest["cache"]["misses"] == 0
     assert second_stats == second_manifest["stats"]
     assert second_manifest["solver"] == second_stats["solver"]
@@ -573,7 +665,7 @@ def test_benchmark_export_is_balanced_blinded_and_uses_documented_files(
         seed=20260730,
     )
 
-    assert counts == {"parse_records": 500, "pair_records": 2_000}
+    assert counts == {"parse_records": 750, "pair_records": 3_000}
     assert {
         path.name for path in review_dir.glob("*.csv")
     } == {
@@ -585,11 +677,11 @@ def test_benchmark_export_is_balanced_blinded_and_uses_documented_files(
         (review_dir / "sampling_manifest.json").read_text()
     )
     assert sampling["domains"] == {
-        "cryptocurrency": 100,
-        "date_based": 100,
-        "economic_indicators": 100,
-        "elections": 100,
-        "sports": 100,
+        "cryptocurrency": 150,
+        "date_based": 150,
+        "economic_indicators": 150,
+        "elections": 150,
+        "sports": 150,
     }
     assert set(sampling["pair_sources"]) == {
         "candidate",
@@ -603,7 +695,7 @@ def test_benchmark_export_is_balanced_blinded_and_uses_documented_files(
         encoding="utf-8",
     ) as stream:
         rows = list(csv.DictReader(stream))
-    assert len(rows) == 2_500
+    assert len(rows) == 3_750
     assert all(row["reviewer_alias"] == "reviewer-a" for row in rows)
     assert all(not row["reviewer_notes"] for row in rows)
     assert all(not row["expected_relation"] for row in rows)
@@ -683,7 +775,7 @@ def test_threshold_only_incremental_reuses_candidates_and_classifications(
         ),
     )
 
-    assert client.responses.calls == 0
+    assert client.runtime.calls == 0
     assert stats["incremental"]["candidate_generation_reused"] is True
     assert stats["incremental"]["baseline_classification_entries_seeded"] == 100
     assert "relation_thresholds" in stats["incremental"]["invalidation_reasons"]
@@ -868,7 +960,7 @@ def test_classifier_change_invalidates_only_classification_cache(
     assert "classifier_model_prompt_or_schema" in stats["incremental"][
         "invalidation_reasons"
     ]
-    assert client.responses.calls == 5
+    assert client.runtime.calls == 100
 
 
 def test_normalization_change_does_not_reuse_stale_classifications(
@@ -906,7 +998,7 @@ def test_normalization_change_does_not_reuse_stale_classifications(
     assert "normalization_version" in stats["incremental"][
         "invalidation_reasons"
     ]
-    assert client.responses.calls == 5
+    assert client.runtime.calls == 100
 
 
 def test_benchmark_evaluation_is_staged_and_published(
@@ -948,9 +1040,11 @@ def test_benchmark_evaluation_is_staged_and_published(
         benchmark_rows.append(
             {
                 **{name: None for name in BENCHMARK_COLUMNS},
-                "benchmark_version": "v0.4.0",
-                "schema_version": "benchmark-v1",
+                "benchmark_version": "v0.6.0",
+                "schema_version": "benchmark-v2",
                 "source_sha256": source_hash,
+                "sampling_manifest_sha256": "0" * 64,
+                "partition": "test",
                 "record_id": f"parse-{proposition['proposition_id']}",
                 "record_type": "parse",
                 "domain": "date_based",
@@ -971,9 +1065,12 @@ def test_benchmark_evaluation_is_staged_and_published(
     benchmark_rows.append(
         {
             **{name: None for name in BENCHMARK_COLUMNS},
-            "benchmark_version": "v0.4.0",
-            "schema_version": "benchmark-v1",
+            "benchmark_version": "v0.6.0",
+            "schema_version": "benchmark-v2",
             "source_sha256": source_hash,
+            "sampling_manifest_sha256": "0" * 64,
+            "partition": "test",
+            "pair_source": "candidate",
             "record_id": f"pair-{a_id}-{b_id}",
             "record_type": "pair",
             "domain": "date_based",
@@ -1083,8 +1180,8 @@ def test_one_changed_real_market_matches_clean_rebuild(
     tmp_path: Path,
     real_input: Path,
 ) -> None:
-    class StableResponses(_FakeResponses):
-        async def parse(self, **kwargs: object) -> _Response:
+    class StableRuntime(_FakeRuntime):
+        async def complete(self, **kwargs: object) -> _Response:
             self.calls += 1
             payload = json.loads(kwargs["input"][1]["content"])  # type: ignore[index]
             if kwargs["text_format"] is ParsedMarketBatch:
@@ -1118,7 +1215,7 @@ def test_one_changed_real_market_matches_clean_rebuild(
 
     def stable_client() -> _FakeClient:
         client = _FakeClient()
-        client.responses = StableResponses()
+        client.runtime = StableRuntime()
         return client
 
     def content_embeddings(
@@ -1311,7 +1408,7 @@ def test_pre_v050_incremental_state_is_rejected_with_clean_build_guidance(
             }
         )
     )
-    with pytest.raises(ValueError, match="clean v0.5 discover build"):
+    with pytest.raises(ValueError, match="clean v0.6 discover build"):
         discover(
             real_input,
             tmp_path / "out",
@@ -1425,13 +1522,8 @@ def test_cache_migration_and_concurrent_atomic_writes(tmp_path: Path) -> None:
         ),
         encoding="utf-8",
     )
-    assert cache.get(key) is None
-    replayed = cache.get(key, offline=True)
-    assert replayed is not None
-    assert replayed["version"] == CACHE_ENTRY_VERSION
-    assert replayed["state"] == "transient_failure"
-    assert replayed["usage_accounting"] == "legacy_unscoped"
-    assert cache.stats()["legacy_hits"] == 1
+    with pytest.raises(ValueError, match="Unsupported discovery cache version"):
+        cache.get(key)
 
     concurrent_key = "same-key"
 
@@ -1500,7 +1592,7 @@ def test_structured_output_models_require_nullable_fields() -> None:
     assert set(parsed_schema["required"]) == set(parsed_schema["properties"])
     assert {"type": "null"} in parsed_schema["properties"]["object"]["anyOf"]
 
-    classified_schema = PairClassification.model_json_schema()
+    classified_schema = AtomicPairAssessment.model_json_schema()
     assert set(classified_schema["required"]) == set(classified_schema["properties"])
 
     proposition_schema = PropositionRecord.model_json_schema()
@@ -1569,10 +1661,10 @@ def test_transient_cache_entry_replays_offline_but_recovers_online(
     class TransientError(Exception):
         status_code = 429
 
-    class RecoveringResponses(_FakeResponses):
+    class RecoveringRuntime(_FakeRuntime):
         fail_classification = True
 
-        async def parse(self, **kwargs: object) -> _Response:
+        async def complete(self, **kwargs: object) -> _Response:
             self.calls += 1
             payload = json.loads(kwargs["input"][1]["content"])  # type: ignore[index]
             if kwargs["text_format"] is ParsedMarketBatch:
@@ -1611,7 +1703,7 @@ def test_transient_cache_entry_replays_offline_but_recovers_online(
 
     monkeypatch.setattr(asyncio, "sleep", no_sleep)
     client = _FakeClient()
-    client.responses = RecoveringResponses()
+    client.runtime = RecoveringRuntime()
     out = tmp_path / "out"
     cache_dir = tmp_path / "cache"
     base = DiscoveryConfig(
@@ -1628,7 +1720,7 @@ def test_transient_cache_entry_replays_offline_but_recovers_online(
         _client=client,
         _embedder=_fake_embeddings,
     )
-    first_calls = client.responses.calls
+    first_calls = client.runtime.calls
     first_errors = _review_count(out, "classification_error")
     assert first_errors > 0
 
@@ -1639,9 +1731,9 @@ def test_transient_cache_entry_replays_offline_but_recovers_online(
         _embedder=_fake_embeddings,
     )
     assert _review_count(out, "classification_error") == first_errors
-    assert client.responses.calls == first_calls
+    assert client.runtime.calls == first_calls
 
-    client.responses.fail_classification = False
+    client.runtime.fail_classification = False
     recovered = discover(
         real_input,
         out,
@@ -1650,7 +1742,7 @@ def test_transient_cache_entry_replays_offline_but_recovers_online(
         _embedder=_fake_embeddings,
     )
     manifest = json.loads((out / "build_manifest.json").read_text())
-    assert client.responses.calls > first_calls
+    assert client.runtime.calls > first_calls
     assert _review_count(out, "classification_error") == 0
     assert manifest["cache"]["transient_retries"] > 0
     assert recovered == manifest["stats"]
@@ -1660,8 +1752,8 @@ def test_refusal_is_cached_and_routed_to_review(
     tmp_path: Path,
     real_input: Path,
 ) -> None:
-    class RefusalResponses(_FakeResponses):
-        async def parse(self, **kwargs: object) -> _Response:
+    class RefusalRuntime(_FakeRuntime):
+        async def complete(self, **kwargs: object) -> _Response:
             self.calls += 1
             payload = json.loads(kwargs["input"][1]["content"])  # type: ignore[index]
             if kwargs["text_format"] is ParsedMarketBatch:
@@ -1669,7 +1761,7 @@ def test_refusal_is_cached_and_routed_to_review(
             return _Response(None)
 
     client = _FakeClient()
-    client.responses = RefusalResponses()
+    client.runtime = RefusalRuntime()
     out = tmp_path / "out"
     discover(
         real_input,
@@ -1699,7 +1791,7 @@ def test_refusal_is_cached_and_routed_to_review(
     finally:
         db.close()
     assert review_errors > 0
-    calls = client.responses.calls
+    calls = client.runtime.calls
     discover(
         real_input,
         out,
@@ -1713,15 +1805,15 @@ def test_refusal_is_cached_and_routed_to_review(
         _client=client,
         _embedder=_fake_embeddings,
     )
-    assert client.responses.calls == calls
+    assert client.runtime.calls == calls
 
 
 def test_positive_labels_below_threshold_or_flagged_for_review_are_not_edges(
     tmp_path: Path,
     real_input: Path,
 ) -> None:
-    class ThresholdResponses(_FakeResponses):
-        async def parse(self, **kwargs: object) -> _Response:
+    class ThresholdRuntime(_FakeRuntime):
+        async def complete(self, **kwargs: object) -> _Response:
             self.calls += 1
             payload = json.loads(kwargs["input"][1]["content"])  # type: ignore[index]
             if kwargs["text_format"] is ParsedMarketBatch:
@@ -1730,7 +1822,7 @@ def test_positive_labels_below_threshold_or_flagged_for_review_are_not_edges(
                 PairClassification(
                     pair_id=item["pair_id"],
                     relation="compatible",
-                    confidence=0.94 if index == 0 else 0.99,
+                    confidence=0.94 if self.calls % 2 else 0.99,
                     supporting_fields=[
                         {
                             "proposition": "A",
@@ -1750,14 +1842,14 @@ def test_positive_labels_below_threshold_or_flagged_for_review_are_not_edges(
                         "supporting_fields": [],
                         "assumptions": [],
                     },
-                    requires_review=index != 0,
+                    requires_review=self.calls % 2 == 0,
                 )
                 for index, item in enumerate(payload)
             ]
             return _Response(PairClassificationBatch(pairs=pairs))
 
     client = _FakeClient()
-    client.responses = ThresholdResponses()
+    client.runtime = ThresholdRuntime()
     out = tmp_path / "out"
     discover(
         real_input,
@@ -1804,7 +1896,6 @@ def test_positive_labels_below_threshold_or_flagged_for_review_are_not_edges(
 
 def test_compact_input_validation_and_offline_cache_guard(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
     real_input: Path,
 ) -> None:
     bad_input = tmp_path / "bad.parquet"
@@ -1847,7 +1938,6 @@ def test_compact_input_validation_and_offline_cache_guard(
     with pytest.raises(ValueError, match="malformed eligible"):
         _load_source_markets(null_element_input, max_propositions=2)
 
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     with pytest.raises(ValueError, match="Offline discovery cache"):
         discover(
             real_input,

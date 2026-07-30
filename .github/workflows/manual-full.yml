@@ -47,7 +47,10 @@ jobs:
           test -d fixture/baselines/20000/state
           test -f fixture/expected-artifact-hashes.json
           test -f fixture/benchmark.parquet
-          test -f fixture/pricing.json
+          test -f fixture/compute-profile.json
+          test -f fixture/model-manifest.json
+          test -f fixture/model-profile.json
+          test -f fixture/calibration-report.json
           test -f fixture/fixture-manifest.json
           printf '%s  %s\n' "$EXPECTED_INPUT_SHA256" fixture/input.parquet | sha256sum --check -
       - run: python -m pip install -c constraints-dev.txt -e ".[dev,discovery]"
@@ -67,7 +70,10 @@ jobs:
             --work-dir output/release-validation \
             --expected-hashes fixture/expected-artifact-hashes.json \
             --benchmark fixture/benchmark.parquet \
-            --pricing-file fixture/pricing.json \
+            --compute-profile fixture/compute-profile.json \
+            --model-manifest fixture/model-manifest.json \
+            --model-profile fixture/model-profile.json \
+            --calibration-report fixture/calibration-report.json \
             --fixture-manifest fixture/fixture-manifest.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()

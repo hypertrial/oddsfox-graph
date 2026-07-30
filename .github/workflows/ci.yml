@@ -26,6 +26,12 @@ jobs:
       - run: python -m pip install -c constraints-dev.txt -e ".[dev]"
       - run: python -m ruff check .
       - run: python -m mypy
+      - name: Verify self-hosted-only inference surface
+        run: |
+          if rg -n -i 'openai|OPENAI_API_KEY|gpt-5' oddsfox_graph pyproject.toml constraints-dev.txt; then
+            echo "Proprietary inference reference detected"
+            exit 1
+          fi
       - run: PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest -q
       - run: python -m build
       - run: python -m pip install -c constraints-dev.txt --force-reinstall dist/*.whl

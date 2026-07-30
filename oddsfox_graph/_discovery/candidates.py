@@ -48,8 +48,21 @@ _DETERMINISTIC_RELATION_COLUMNS = {
 
 def candidate_sort_key(row: dict[str, Any]) -> tuple[object, ...]:
     similarity = row["embedding_similarity"]
+    nli_signal = max(
+        (
+            float(row.get(field) or 0.0)
+            for field in (
+                "nli_a_to_b_entailment",
+                "nli_a_to_b_contradiction",
+                "nli_b_to_a_entailment",
+                "nli_b_to_a_contradiction",
+            )
+        ),
+        default=0.0,
+    )
     return (
         -len(row["candidate_reasons"]),
+        -nli_signal,
         -float(similarity if similarity is not None else -1.0),
         str(row["proposition_a_id"]),
         str(row["proposition_b_id"]),
@@ -1014,17 +1027,32 @@ SELECT
     CASE WHEN d.rule_id IS NULL THEN NULL ELSE 'enabled' END AS rule_status,
     NULL::VARCHAR AS classification_relation,
     NULL::DOUBLE AS classification_confidence,
+    NULL::VARCHAR AS atomic_a_implies_b,
+    NULL::VARCHAR AS atomic_b_implies_a,
+    NULL::VARCHAR AS atomic_can_both_be_true,
+    NULL::VARCHAR AS atomic_must_one_be_true,
+    NULL::VARCHAR AS atomic_logically_related,
     NULL::VARCHAR AS supporting_fields,
     NULL::BOOLEAN AS a_implies_b,
     NULL::BOOLEAN AS b_implies_a,
     d.explanation,
     []::VARCHAR[] AS assumptions,
     false AS requires_review,
+    false AS unsupported_assumption,
+    NULL::DOUBLE AS nli_a_to_b_entailment,
+    NULL::DOUBLE AS nli_a_to_b_contradiction,
+    NULL::DOUBLE AS nli_a_to_b_neutral,
+    NULL::DOUBLE AS nli_b_to_a_entailment,
+    NULL::DOUBLE AS nli_b_to_a_contradiction,
+    NULL::DOUBLE AS nli_b_to_a_neutral,
+    NULL::VARCHAR AS nli_action,
     CASE WHEN d.rule_id IS NULL THEN 'pending' ELSE 'accepted' END AS status,
     CASE WHEN d.rule_id IS NULL THEN NULL ELSE 'deterministic' END
         AS discovery_method,
     NULL::VARCHAR AS model_version,
-    NULL::VARCHAR AS prompt_version
+    NULL::VARCHAR AS prompt_version,
+    NULL::VARCHAR AS inference_fingerprint,
+    NULL::VARCHAR AS model_profile_id
 FROM prioritized p
 LEFT JOIN accepted_deterministic_pairs d USING (
     proposition_a_id,

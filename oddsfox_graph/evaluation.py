@@ -22,11 +22,11 @@ from ._discovery.evaluation_metrics import (
 from ._discovery.input import load_source_markets
 from .queries import DuckDB, q
 from ._discovery.incremental import ExecutionPlan
-from ._discovery.versions import DOMAIN_TAXONOMY_VERSION
-
-
-BENCHMARK_VERSION = "v0.4.0"
-BENCHMARK_SCHEMA_VERSION = "benchmark-v1"
+from ._discovery.versions import (
+    BENCHMARK_SCHEMA_VERSION,
+    BENCHMARK_VERSION,
+    DOMAIN_TAXONOMY_VERSION,
+)
 CANONICAL_SOURCE_SHA256 = (
     "790bd1595b379472ad65ba0073105b4eb630974d04e7b44d58c8a4929f274aa2"
 )
@@ -83,6 +83,9 @@ BENCHMARK_COLUMNS = {
     "benchmark_version": "VARCHAR",
     "schema_version": "VARCHAR",
     "source_sha256": "VARCHAR",
+    "sampling_manifest_sha256": "VARCHAR",
+    "partition": "VARCHAR",
+    "pair_source": "VARCHAR",
     "record_id": "VARCHAR",
     "record_type": "VARCHAR",
     "domain": "VARCHAR",
@@ -177,8 +180,8 @@ def export_benchmark_reviews(
     out_dir: Path,
     output_dir: Path,
     *,
-    parse_count: int = 500,
-    pair_count: int = 2_000,
+    parse_count: int = 750,
+    pair_count: int = 3_000,
     seed: int = 0,
 ) -> dict[str, int]:
     if parse_count < len(DOMAINS) or pair_count < 1:
@@ -196,7 +199,7 @@ def export_benchmark_reviews(
     source_hash = _sha256(input_path)
     if source_hash != CANONICAL_SOURCE_SHA256:
         raise ValueError(
-            "v0.4 benchmark export requires the canonical supplied catalog"
+            "v0.6 benchmark export requires the canonical supplied catalog"
         )
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     if (
@@ -292,6 +295,28 @@ def export_benchmark_reviews(
         "pair_sources": dict(
             Counter(str(row["sample_source"]) for row in pairs)
         ),
+        "records": [
+            {
+                "record_id": str(row["record_id"]),
+                "record_type": str(row["record_type"]),
+                "pair_source": None,
+            }
+            for row in rows
+            if row["record_type"] == "parse"
+        ]
+        + [
+            {
+                "record_id": hashlib.sha256(
+                    (
+                        f"pair|{row['proposition_a_id']}|"
+                        f"{row['proposition_b_id']}"
+                    ).encode()
+                ).hexdigest(),
+                "record_type": "pair",
+                "pair_source": str(row["sample_source"]),
+            }
+            for row in pairs
+        ],
     }
     (output_dir / "sampling_manifest.json").write_text(
         json.dumps(sampling, indent=2, sort_keys=True) + "\n",
@@ -305,10 +330,11 @@ def compile_benchmark(
     reviewer_a_path: Path,
     reviewer_b_path: Path,
     adjudication_path: Path,
+    sampling_manifest_path: Path,
     output_path: Path,
     *,
-    min_parse_records: int = 500,
-    min_pair_records: int = 2_000,
+    min_parse_records: int = 750,
+    min_pair_records: int = 3_000,
     enforce_balance: bool = True,
 ) -> dict[str, Any]:
     input_path = input_path.resolve()
@@ -325,8 +351,18 @@ def compile_benchmark(
     source_hash = _sha256(input_path)
     if source_hash != CANONICAL_SOURCE_SHA256:
         raise ValueError(
-            "v0.4 benchmark compilation requires the canonical supplied catalog"
+            "v0.6 benchmark compilation requires the canonical supplied catalog"
         )
+    sampling, sampling_hash = _load_sampling_manifest(
+        sampling_manifest_path,
+        source_hash,
+        set(reviews_a),
+        require_all_sources=enforce_balance,
+    )
+    sampling_by_id = {
+        str(row["record_id"]): row
+        for row in sampling["records"]
+    }
     _validate_review_evidence(input_path, reviews_a, reviews_b)
     compiled: list[dict[str, Any]] = []
     for record_id in sorted(reviews_a):
@@ -380,9 +416,12 @@ def compile_benchmark(
                 final_label,
                 differences,
                 final_notes,
+                _blank_none(sampling_by_id[record_id].get("pair_source")),
+                sampling_hash,
             )
         )
 
+    _assign_benchmark_partitions(compiled)
     _validate_compiled_benchmark(
         compiled,
         min_parse_records=min_parse_records,
@@ -533,9 +572,12 @@ def evaluate_build(
     *,
     input_hash: str | None = None,
     pricing_file: Path | None = None,
+    compute_profile: Path | None = None,
     output_path: Path | None = None,
     run_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    if pricing_file is not None and compute_profile is not None:
+        raise ValueError("pricing_file and compute_profile are mutually exclusive")
     out_dir = out_dir.resolve()
     benchmark_path = benchmark_path.resolve()
     if not benchmark_path.is_file():
@@ -602,9 +644,12 @@ def evaluate_build(
     proposition_by_id = {
         str(row["proposition_id"]): row for row in propositions
     }
-    parse_rows = [row for row in benchmark if row["record_type"] == "parse"]
-    pair_rows = [row for row in benchmark if row["record_type"] == "pair"]
-    benchmark_complete = _benchmark_release_complete(parse_rows, pair_rows)
+    all_parse_rows = [row for row in benchmark if row["record_type"] == "parse"]
+    all_pair_rows = [row for row in benchmark if row["record_type"] == "pair"]
+    benchmark_complete = _benchmark_release_complete(
+        all_parse_rows,
+        all_pair_rows,
+    )
     missing_ids = sorted(
         {
             str(row[key])
@@ -617,6 +662,14 @@ def evaluate_build(
         raise ValueError(
             f"Benchmark contains {len(missing_ids)} propositions absent from build"
         )
+    parse_rows = [
+        row for row in all_parse_rows if row.get("partition") == "test"
+    ]
+    pair_rows = [
+        row for row in all_pair_rows if row.get("partition") == "test"
+    ]
+    if not parse_rows or not pair_rows:
+        raise ValueError("Evaluation requires an untouched test partition")
 
     parser = _parser_metrics(parse_rows, proposition_by_id)
     candidate_pairs = {
@@ -675,6 +728,11 @@ def evaluate_build(
     )
     provenance_failures = _provenance_failures(edges)
     pricing = _cost_metrics(out_dir, pricing_file, run_metadata=run_metadata)
+    compute = _compute_evaluation_metrics(
+        out_dir,
+        compute_profile,
+        run_metadata=run_metadata,
+    )
     execution = dict(
         (run_metadata or {}).get("stats")
         or existing_manifest.get("stats")
@@ -734,6 +792,27 @@ def evaluate_build(
         and int(validation.get("max_propositions") or 0)
         == selected_propositions
     )
+    inference_metadata = dict(
+        (run_metadata or {}).get("inference")
+        or existing_manifest.get("inference")
+        or {}
+    )
+    model_manifest_data = _read_optional_json(out_dir / "model_manifest.json")
+    model_profile_data = _read_optional_json(out_dir / "model_profile.json")
+    model_metadata = dict(
+        (run_metadata or {}).get("models")
+        or existing_manifest.get("models")
+        or {}
+    )
+    observed_models = {
+        str(value)
+        for role in ("parse", "classify")
+        for value in (model_metadata.get(role) or {}).get("observed", [])
+    }
+    requested_models = {
+        str((model_metadata.get(role) or {}).get("requested") or "")
+        for role in ("parse", "classify")
+    }
     gates = {
         "deterministic_precision": (
             deterministic_accepted_precision is not None
@@ -759,6 +838,39 @@ def evaluate_build(
             rule_execution.get("allow_unbenchmarked_rules")
         ),
         "local_m4_completion": local_m4_completion,
+        "self_hosted_runtime": (
+            inference_metadata.get("runtime") in {"llama.cpp", "vllm"}
+            and str(inference_metadata.get("origin") or "").startswith(
+                ("http://", "https://")
+            )
+        ),
+        "approved_open_license": (
+            model_manifest_data.get("license") == "Apache-2.0"
+        ),
+        "matching_model_profile": (
+            bool(inference_metadata.get("profiled"))
+            and model_profile_data.get("profile_id")
+            == inference_metadata.get("model_profile_id")
+        ),
+        "model_id_coverage": (
+            bool(observed_models)
+            and observed_models.issubset(requested_models)
+            and all(str(row.get("parser_model") or "") for row in propositions)
+        ),
+        "structured_output_validity": (
+            float(model_profile_data.get("structured_output_validity") or 0.0)
+            >= 0.999
+        ),
+        "no_proprietary_cache_lineage": (
+            inference_metadata.get("proprietary_cache_lineage") is False
+        ),
+        "runtime_conformance": (
+            inference_metadata.get("runtime") in {"llama.cpp", "vllm"}
+            and inference_metadata.get("runtime_version")
+            not in {None, "", "unreported"}
+            and int(model_manifest_data.get("context_length") or 0) > 1
+            and bool(inference_metadata.get("fingerprints"))
+        ),
     }
     failed_predictions = [
         row for row in prediction_rows if not row["correct"]
@@ -792,6 +904,9 @@ def evaluate_build(
             "hash": _sha256(benchmark_path),
             "parse_records": len(parse_rows),
             "pair_records": len(pair_rows),
+            "total_parse_records": len(all_parse_rows),
+            "total_pair_records": len(all_pair_rows),
+            "partition": "test",
         },
         "metrics": {
             "parser": parser,
@@ -808,6 +923,7 @@ def evaluate_build(
             "review_rate": review_count / max(1, len(candidates)),
             "provenance_failures": provenance_failures,
             "cost": pricing,
+            "compute": compute,
         },
         "failure_categories": dict(failure_categories.most_common()),
         "execution": execution,
@@ -824,6 +940,12 @@ def evaluate_build(
     benchmark_destination = out_dir / "benchmark.parquet"
     if benchmark_destination.resolve() != benchmark_path:
         shutil.copyfile(benchmark_path, benchmark_destination)
+    compute_destination = out_dir / "compute_profile.json"
+    if (
+        compute_profile is not None
+        and compute_destination.resolve() != compute_profile.resolve()
+    ):
+        shutil.copyfile(compute_profile.resolve(), compute_destination)
     if existing_manifest:
         manifest = dict(existing_manifest)
         artifacts = list(manifest.get("artifacts") or [])
@@ -839,6 +961,12 @@ def evaluate_build(
         artifact_hashes["benchmark.parquet"] = _sha256(
             benchmark_destination
         )
+        if compute_profile is not None:
+            if "compute_profile.json" not in artifacts:
+                artifacts.append("compute_profile.json")
+            artifact_hashes["compute_profile.json"] = _sha256(
+                compute_destination
+            )
         stats = dict(manifest.get("stats") or {})
         stats["evaluation_exit_decision"] = decision
         manifest.update(
@@ -857,6 +985,7 @@ def evaluate_build(
                     if pricing_file is not None
                     else None
                 ),
+                "compute": compute,
                 "evaluation": {
                     "path": str(destination),
                     "hash": _sha256(destination),
@@ -1121,11 +1250,16 @@ def _compiled_row(
     final_label: dict[str, Any],
     differences: list[str],
     final_notes: str,
+    pair_source: str | None,
+    sampling_manifest_hash: str,
 ) -> dict[str, Any]:
     return {
         "benchmark_version": BENCHMARK_VERSION,
         "schema_version": BENCHMARK_SCHEMA_VERSION,
         "source_sha256": source_hash,
+        "sampling_manifest_sha256": sampling_manifest_hash,
+        "partition": None,
+        "pair_source": pair_source,
         "record_id": raw_a["record_id"],
         "record_type": raw_a["record_type"],
         "domain": raw_a["domain"],
@@ -1157,6 +1291,90 @@ def _compiled_row(
     }
 
 
+def _load_sampling_manifest(
+    path: Path,
+    source_hash: str,
+    record_ids: set[str],
+    *,
+    require_all_sources: bool,
+) -> tuple[dict[str, Any], str]:
+    resolved = path.resolve()
+    try:
+        manifest = json.loads(resolved.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"Invalid sampling manifest {resolved}: {exc}") from exc
+    if not isinstance(manifest, dict):
+        raise ValueError("Sampling manifest must be a JSON object")
+    if (
+        manifest.get("benchmark_version") != BENCHMARK_VERSION
+        or manifest.get("source_sha256") != source_hash
+    ):
+        raise ValueError("Sampling manifest version or source hash does not match")
+    records = manifest.get("records")
+    if not isinstance(records, list):
+        raise ValueError("Sampling manifest must contain per-record metadata")
+    indexed: dict[str, dict[str, Any]] = {}
+    for raw in records:
+        if not isinstance(raw, dict) or not raw.get("record_id"):
+            raise ValueError("Sampling manifest contains an invalid record")
+        record_id = str(raw["record_id"])
+        if record_id in indexed:
+            raise ValueError("Sampling manifest contains duplicate record IDs")
+        indexed[record_id] = raw
+    if set(indexed) != record_ids:
+        raise ValueError("Sampling manifest record IDs do not match reviewer files")
+    pair_sources = {
+        str(row.get("pair_source") or "")
+        for row in indexed.values()
+        if row.get("record_type") == "pair"
+    }
+    required_sources = {
+        "candidate",
+        "semantic_near_miss",
+        "structured_near_miss",
+        "noncandidate",
+    }
+    if require_all_sources and pair_sources != required_sources:
+        raise ValueError("Sampling manifest does not contain every pair source")
+    return manifest, _sha256(resolved)
+
+
+def _assign_benchmark_partitions(rows: list[dict[str, Any]]) -> None:
+    strata: dict[tuple[str, ...], list[dict[str, Any]]] = defaultdict(list)
+    for row in rows:
+        if row["record_type"] == "parse":
+            stratum = ("parse", str(row["domain"]))
+        else:
+            stratum = (
+                "pair",
+                str(row["expected_relation"]),
+                str(row["pair_source"]),
+                str(bool(row["unsupported_assumption"])),
+            )
+        strata[stratum].append(row)
+    for stratum, members in sorted(strata.items()):
+        members.sort(
+            key=lambda row: hashlib.sha256(
+                (
+                    BENCHMARK_VERSION
+                    + "|"
+                    + "|".join(stratum)
+                    + "|"
+                    + str(row["record_id"])
+                ).encode()
+            ).hexdigest()
+        )
+        count = len(members)
+        development_end = round(count * 0.4)
+        calibration_end = development_end + round(count * 0.3)
+        for index, row in enumerate(members):
+            row["partition"] = (
+                "development"
+                if index < development_end
+                else ("calibration" if index < calibration_end else "test")
+            )
+
+
 def _validate_compiled_benchmark(
     rows: list[dict[str, Any]],
     *,
@@ -1183,27 +1401,64 @@ def _validate_compiled_benchmark(
     if not enforce_balance:
         return
     domain_counts = Counter(str(row["domain"]) for row in parse_rows)
-    if any(domain_counts[domain] < 100 for domain in DOMAINS):
-        raise ValueError("Benchmark requires at least 100 parses per target domain")
+    if any(domain_counts[domain] < 150 for domain in DOMAINS):
+        raise ValueError("Benchmark requires at least 150 parses per target domain")
     relation_counts = Counter(str(row["expected_relation"]) for row in pair_rows)
     positives = sum(relation_counts[relation] for relation in POSITIVE_RELATIONS)
     ratio = positives / len(pair_rows)
     if not 0.4 <= ratio <= 0.6:
         raise ValueError("Benchmark positive/negative balance must be 40–60%")
-    if any(relation_counts[relation] < 25 for relation in RELATIONS):
-        raise ValueError("Every relation requires at least 25 benchmark records")
-    if relation_counts["complement"] < 200:
-        raise ValueError("Benchmark requires at least 200 complement records")
+    if any(relation_counts[relation] < 100 for relation in RELATIONS):
+        raise ValueError("Every relation requires at least 100 benchmark records")
+    if relation_counts["complement"] < 300:
+        raise ValueError("Benchmark requires at least 300 complement records")
+    partitions = {"development", "calibration", "test"}
+    if {str(row["partition"]) for row in rows} != partitions:
+        raise ValueError("Benchmark must contain development, calibration, and test")
+    required_sources = {
+        "candidate",
+        "semantic_near_miss",
+        "structured_near_miss",
+        "noncandidate",
+    }
+    for partition in partitions:
+        partition_parse_domains = {
+            str(row["domain"])
+            for row in parse_rows
+            if row["partition"] == partition
+        }
+        if partition_parse_domains != set(DOMAINS):
+            raise ValueError(
+                f"Every parse domain must appear in the {partition} partition"
+            )
+        partition_relations = {
+            str(row["expected_relation"])
+            for row in pair_rows
+            if row["partition"] == partition
+        }
+        if partition_relations != RELATIONS:
+            raise ValueError(
+                f"Every relation must appear in the {partition} partition"
+            )
+        observed = {
+            str(row["pair_source"])
+            for row in pair_rows
+            if row["partition"] == partition
+        }
+        if observed != required_sources:
+            raise ValueError(
+                f"Every pair source must appear in the {partition} partition"
+            )
 
 
 def _benchmark_release_complete(
     parse_rows: list[dict[str, Any]],
     pair_rows: list[dict[str, Any]],
 ) -> bool:
-    if len(parse_rows) < 500 or len(pair_rows) < 2_000:
+    if len(parse_rows) < 750 or len(pair_rows) < 3_000:
         return False
     domain_counts = Counter(str(row["domain"]) for row in parse_rows)
-    if any(domain_counts[domain] < 100 for domain in DOMAINS):
+    if any(domain_counts[domain] < 150 for domain in DOMAINS):
         return False
     relation_counts = Counter(
         str(row["expected_relation"]) for row in pair_rows
@@ -1213,10 +1468,41 @@ def _benchmark_release_complete(
     )
     if not 0.4 <= positives / len(pair_rows) <= 0.6:
         return False
-    if any(relation_counts[relation] < 25 for relation in RELATIONS):
+    if any(relation_counts[relation] < 100 for relation in RELATIONS):
         return False
-    if relation_counts["complement"] < 200:
+    if relation_counts["complement"] < 300:
         return False
+    if {str(row["partition"]) for row in [*parse_rows, *pair_rows]} != {
+        "development",
+        "calibration",
+        "test",
+    }:
+        return False
+    required_sources = {
+        "candidate",
+        "semantic_near_miss",
+        "structured_near_miss",
+        "noncandidate",
+    }
+    for partition in ("development", "calibration", "test"):
+        if {
+            str(row["domain"])
+            for row in parse_rows
+            if row["partition"] == partition
+        } != set(DOMAINS):
+            return False
+        if {
+            str(row["expected_relation"])
+            for row in pair_rows
+            if row["partition"] == partition
+        } != RELATIONS:
+            return False
+        if {
+            str(row["pair_source"])
+            for row in pair_rows
+            if row["partition"] == partition
+        } != required_sources:
+            return False
     return all(
         row.get("reviewer_a_alias")
         and row.get("reviewer_b_alias")
@@ -1501,7 +1787,10 @@ def _provenance_failures(edges: list[dict[str, Any]]) -> int:
         ):
             failures += 1
         elif method == "llm" and (
-            not edge.get("model_version") or not edge.get("prompt_version")
+            not edge.get("model_version")
+            or not edge.get("prompt_version")
+            or not edge.get("inference_fingerprint")
+            or not edge.get("model_profile_id")
         ):
             failures += 1
         elif not edge.get("proposal_id") or not edge.get("solver_component_id"):
@@ -1593,6 +1882,86 @@ def _cost_metrics(
     result["pricing_hash"] = _sha256(pricing_file.resolve())
     result["pricing_version"] = pricing.get("version")
     return result
+
+
+def _compute_evaluation_metrics(
+    out_dir: Path,
+    compute_profile: Path | None,
+    *,
+    run_metadata: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    manifest = _read_optional_json(out_dir / "build_manifest.json")
+    existing = (
+        (run_metadata or {}).get("compute")
+        or manifest.get("compute")
+    )
+    if compute_profile is None:
+        return dict(existing) if isinstance(existing, dict) else None
+    profile = _read_optional_json(compute_profile.resolve())
+    hardware_rate = float(profile.get("hardware_hour_usd") or 0.0)
+    load_watts = profile.get("load_watts")
+    electricity_rate = profile.get("electricity_usd_per_kwh")
+    timings = (
+        (run_metadata or {}).get("stage_timings")
+        or manifest.get("stage_timings")
+        or {}
+    )
+    seconds = sum(
+        float(timings.get(stage, 0.0))
+        for stage in ("parse_propositions", "score_nli", "classify_pairs")
+    )
+    hours = seconds / 3600.0
+    energy = (
+        float(load_watts) * hours / 1000.0
+        if load_watts is not None
+        else None
+    )
+    electricity = (
+        energy * float(electricity_rate)
+        if energy is not None and electricity_rate is not None
+        else None
+    )
+    usage = (
+        (run_metadata or {}).get("usage")
+        or manifest.get("usage")
+        or {}
+    )
+    stats = (
+        (run_metadata or {}).get("stats")
+        or manifest.get("stats")
+        or {}
+    )
+    input_tokens = int(usage.get("input_tokens") or 0)
+    output_tokens = int(usage.get("output_tokens") or 0)
+    total_tokens = int(
+        usage.get("total_tokens")
+        or input_tokens + output_tokens
+    )
+    return {
+        "profile_hash": _sha256(compute_profile.resolve()),
+        "currency": str(profile.get("currency") or "USD"),
+        "model_stage_seconds": seconds,
+        "model_stage_hours": hours,
+        "estimated_energy_kwh": energy,
+        "hardware_cost": hours * hardware_rate,
+        "electricity_cost": electricity,
+        "total_compute_cost": hours * hardware_rate + (electricity or 0.0),
+        "peak_rss_mb": stats.get("peak_rss_mb"),
+        "current_request_input_tokens": input_tokens,
+        "current_request_output_tokens": output_tokens,
+        "current_request_tokens": total_tokens,
+        "tokens_per_second": total_tokens / seconds if seconds > 0 else None,
+    }
+
+
+def _read_optional_json(path: Path) -> dict[str, Any]:
+    if not path.is_file():
+        return {}
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return raw if isinstance(raw, dict) else {}
 
 
 def _metric_equal(left: object, right: object) -> bool:

@@ -10,7 +10,7 @@ from typing import Any
 import numpy as np
 import pytest
 
-from oddsfox_graph._discovery.contracts import PairClassification
+from oddsfox_graph._discovery.contracts import AtomicPairAssessment
 from oddsfox_graph._discovery.candidates import _top_k_indices
 from oddsfox_graph._discovery.input import load_source_markets
 from oddsfox_graph._discovery.solver import solve_proposals
@@ -178,9 +178,13 @@ def test_linear_top_k_preserves_score_and_stable_id_ties() -> None:
 def test_classifier_direction_and_supporting_field_validation() -> None:
     a = _proposition("a")
     b = _proposition("b", threshold=50.0)
-    valid = PairClassification(
+    valid = AtomicPairAssessment(
         pair_id="a|b",
-        relation="A_implies_B",
+        a_implies_b="yes",
+        b_implies_a="no",
+        can_both_be_true="yes",
+        must_one_be_true="no",
+        logically_related="yes",
         confidence=0.99,
         supporting_fields=[
             {
@@ -189,27 +193,17 @@ def test_classifier_direction_and_supporting_field_validation() -> None:
                 "value": "100.0",
             }
         ],
-        explanation="The higher threshold is narrower.",
         assumptions=[],
-        a_implies_b={
-            "supported": True,
-            "supporting_fields": [],
-            "assumptions": [],
-        },
-        b_implies_a={
-            "supported": False,
-            "supporting_fields": [],
-            "assumptions": [],
-        },
+        unsupported_assumption=False,
         requires_review=False,
     )
     assert _classification_validation_error(valid, a, b) is None
     invalid = valid.model_copy(
         update={
-            "relation": "equivalent",
+            "can_both_be_true": "no",
         }
     )
-    assert "directional entailment" in str(
+    assert "contradicts" in str(
         _classification_validation_error(invalid, a, b)
     )
     unsupported = valid.model_copy(
@@ -517,12 +511,36 @@ def test_benchmark_compile_requires_adjudication_and_preserves_reviewers(
     _write_review_csv(reviewer_b, rows_b)
     _write_review_csv(adjudication, rows_adjudication)
     output = tmp_path / "benchmark.parquet"
+    sampling = tmp_path / "sampling_manifest.json"
+    sampling.write_text(
+        json.dumps(
+            {
+                "benchmark_version": "v0.6.0",
+                "source_sha256": hashlib.sha256(
+                    REAL_INPUT.read_bytes()
+                ).hexdigest(),
+                "records": [
+                    {
+                        "record_id": row["record_id"],
+                        "record_type": row["record_type"],
+                        "pair_source": (
+                            "candidate"
+                            if row["record_type"] == "pair"
+                            else None
+                        ),
+                    }
+                    for row in rows_a
+                ],
+            }
+        )
+    )
 
     result = compile_benchmark(
         REAL_INPUT,
         reviewer_a,
         reviewer_b,
         adjudication,
+        sampling,
         output,
         min_parse_records=2,
         min_pair_records=1,

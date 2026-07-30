@@ -46,10 +46,10 @@ snapshots directly.
 6. Always enable same-market hard facts. Apply equivalence, interval-set numeric,
    time containment, tournament-stage, and single-winner rules from the
    versioned rule registry.
-7. Classify only prioritized unresolved pairs with bounded asynchronous
-   `responses.parse` calls. Directional entailment and supporting-field
-   citations must agree with the final relation, and every positive
-   classification must cite at least one nonempty supplied field.
+7. Score both NLI directions locally, then classify only prioritized unresolved
+   pairs with bounded asynchronous schema-constrained Chat Completions calls.
+   Five atomic judgments deterministically derive the relation, and every
+   positive classification must cite at least one nonempty supplied field.
 8. Apply per-relation thresholds, then solve independent proposal-connected
    components with deterministic PySAT RC2 clauses. Same-market facts are hard;
    other proposals are confidence-weighted soft facts. Rejected proposals carry
@@ -61,11 +61,10 @@ snapshots directly.
     then write `build_manifest.json` last.
 
 Parse and classification requests use content-addressed JSON cache entries
-covering task, canonical input, requested model, reasoning setting, prompt, and
-schema. Entries distinguish success, stable failure, and exhausted transient
-failure. Offline mode replays any recorded terminal outcome and fails on a true
-cache miss; online mode retries transient entries. Offline mode never needs an
-API key.
+covering task, canonical input, model/tree manifest, runtime, sampling, output
+limit, prompt, and schema. Entries distinguish success, stable failure, and
+exhausted transient failure. Offline mode replays any recorded terminal outcome
+and fails on a true cache miss; online mode retries transient entries.
 
 ## Discovery Modules
 
@@ -76,6 +75,8 @@ implementation modules live under `oddsfox_graph._discovery`:
 - `input`: schema detection, validation, selection, and normalization
 - `cache`: versioned content-addressed entries and atomic storage
 - `metrics`: monotonic timings and current/cached usage accounting
+- `inference`: endpoint policy, local wire contract, manifests, profiles, and fingerprints
+- `nli`: pinned bidirectional open NLI scoring
 - `candidates`: blockwise embeddings and bounded DuckDB-backed reason aggregation
 - `relations`: registered deterministic rule semantics
 - `solver`: componentized, deterministic RC2 consistency selection
@@ -88,10 +89,10 @@ implementation modules live under `oddsfox_graph._discovery`:
 - `versions`: independent compatibility versions for every discovery stage
 
 `oddsfox_graph.evaluation` owns benchmark export/compilation, domain taxonomy,
-parser/retrieval/relation/calibration metrics, pricing, and deterministic exit
+parser/retrieval/relation/calibration metrics, compute accounting, and deterministic exit
 recommendations.
 
-This keeps the legacy builder independent and avoids coupling OpenAI or local
+This keeps the legacy builder independent and avoids coupling inference or local
 embedding dependencies to DuckDB-only installations.
 
 ## Major Tables And Views
@@ -114,7 +115,7 @@ Incremental state is stored separately under `state/`: market/source and
 proposition/parse fingerprints, reusable embedding vectors,
 candidate-neighborhood fingerprints, structured block memberships and reason
 rows, proposal/solver-component fingerprints, and `execution_plan.parquet`.
-A baseline must be immutable, v0.5-compatible, complete, and distinct from the
+A baseline must be immutable, v0.6-compatible, complete, and distinct from the
 new output directory.
 
 ## Edge Lifecycle
@@ -138,7 +139,10 @@ ranks (`stage_rank` greater-than joins), so there is no separate transitive
 closure stage. Price-threshold candidates are not generated.
 
 Discovery adds parse-backed deterministic candidates and local embedding
-neighbors. Embeddings only retrieve candidates; they never accept edges. A
+neighbors. Embeddings only retrieve candidates; they never accept edges.
+Profile-gated local NLI may publish only calibrated equivalence or implication
+edges; it can also reject calibrated unrelated pairs, but never proposes
+complement, exclusion, or compatibility. A
 deterministic rule publishes edges only when the compiled benchmark has at
 least ten positive and ten adversarial examples for that stable rule ID;
 otherwise it is reported as experimental. Same-market hard facts are exempt.
@@ -154,12 +158,13 @@ directional classifications normalize to one `implies` orientation.
 structured near-miss, and noncandidate pairs from the top-5,000 population.
 Reviewer files are blinded. `benchmark-compile` requires two distinct reviewer
 aliases, nonempty notes, and adjudication for every disagreement; it binds the
-truth to the supplied catalog SHA-256.
+truth to the supplied catalog and sampling-manifest hashes. Stratified 40/30/30
+development, calibration, and untouched-test partitions prevent leakage.
 
 `evaluate` reports parser fields, entity sets, UTC dates, normalized
 numeric/units, candidate recall, directional relation metrics, ECE, Brier
 score, review/assumption rates, provenance, runtime, RSS, token usage, and
-pricing-snapshot cost. It emits exactly one of `READY_TO_SCALE`,
+self-hosted compute cost. It emits exactly one of `READY_TO_SCALE`,
 `NEEDS_PARSER_WORK`, `NEEDS_RETRIEVAL_WORK`, or
 `NEEDS_RELATION_MODEL_WORK`.
 

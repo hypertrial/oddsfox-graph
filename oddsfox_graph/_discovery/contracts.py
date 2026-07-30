@@ -9,6 +9,9 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 DEFAULT_EMBEDDING_REVISION = "1110a243fdf4706b3f48f1d95db1a4f5529b4d41"
+DEFAULT_NLI_MODEL = "tasksource/ModernBERT-base-nli"
+DEFAULT_NLI_REVISION = "975123f23a50424f9ca95d5382504d24d9ed9fd2"
+DEFAULT_OPEN_MODEL = "Qwen/Qwen3-4B-GGUF:Q8_0"
 DEFAULT_RELATION_THRESHOLDS = {
     "complement": 0.995,
     "equivalent": 0.99,
@@ -40,14 +43,6 @@ class SupportingField(BaseModel):
         "polarity",
     ]
     value: str = Field(min_length=1)
-
-
-class EntailmentAssessment(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    supported: bool
-    supporting_fields: list[SupportingField]
-    assumptions: list[str]
 
 
 class ParsedOutcome(BaseModel):
@@ -85,39 +80,23 @@ class ParsedMarket(BaseModel):
     propositions: list[ParsedOutcome] = Field(min_length=1)
 
 
-class ParsedMarketBatch(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    markets: list[ParsedMarket]
+AtomicJudgment = Literal["yes", "no", "unknown"]
 
 
-class PairClassification(BaseModel):
+class AtomicPairAssessment(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     pair_id: str
-    relation: Literal[
-        "equivalent",
-        "A_implies_B",
-        "B_implies_A",
-        "mutually_exclusive",
-        "complement",
-        "compatible",
-        "unrelated",
-        "uncertain",
-    ]
+    a_implies_b: AtomicJudgment
+    b_implies_a: AtomicJudgment
+    can_both_be_true: AtomicJudgment
+    must_one_be_true: AtomicJudgment
+    logically_related: AtomicJudgment
     confidence: float = Field(ge=0.0, le=1.0)
     supporting_fields: list[SupportingField]
-    explanation: str = Field(min_length=1)
     assumptions: list[str]
-    a_implies_b: EntailmentAssessment
-    b_implies_a: EntailmentAssessment
+    unsupported_assumption: bool
     requires_review: bool
-
-
-class PairClassificationBatch(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    pairs: list[PairClassification]
 
 
 class PropositionRecord(BaseModel):
@@ -167,6 +146,8 @@ class PropositionRecord(BaseModel):
     parse_status: Literal["parsed", "failed"]
     parser_model: str
     prompt_version: str
+    inference_fingerprint: str | None
+    model_profile_id: str | None
     source_format: str
 
 
@@ -203,13 +184,28 @@ class DiscoveryConfig:
     benchmark_path: Path | None = None
     incremental_from: Path | None = None
     pricing_file: Path | None = None
+    compute_profile: Path | None = None
+    model_manifest: Path | None = None
+    model_profile: Path | None = None
     require_ready: bool = False
     allow_unbenchmarked_rules: bool = False
     offline: bool = False
-    parse_model: str = "gpt-5.6-terra"
-    classify_model: str = "gpt-5.6-terra"
+    llm_base_url: str = "http://127.0.0.1:8080/v1"
+    llm_runtime: Literal["llama.cpp", "vllm"] = "llama.cpp"
+    allow_remote_inference: bool = False
+    parse_model: str = DEFAULT_OPEN_MODEL
+    classify_model: str = DEFAULT_OPEN_MODEL
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     embedding_revision: str = DEFAULT_EMBEDDING_REVISION
+    nli_model: str = DEFAULT_NLI_MODEL
+    nli_revision: str = DEFAULT_NLI_REVISION
+    sampling_seed: int = 0
+    temperature: float = 0.1
+    generation_top_p: float = 0.8
+    generation_top_k: int = 20
+    presence_penalty: float = 1.5
+    parse_max_output_tokens: int = 4096
+    classify_max_output_tokens: int = 1024
     accept_confidence: float = 0.95
     relation_thresholds: dict[str, float] = field(
         default_factory=lambda: dict(DEFAULT_RELATION_THRESHOLDS)
@@ -220,13 +216,27 @@ class DiscoveryConfig:
     max_propositions: int = 5_000
     max_candidates: int = 400_000
     max_llm_pairs: int = 5_000
-    llm_concurrency: int = 8
+    llm_concurrency: int = 2
 
     def validate(self) -> None:
+        if self.pricing_file is not None and self.compute_profile is not None:
+            raise ValueError(
+                "pricing_file and compute_profile are mutually exclusive"
+            )
         if not 0.0 <= self.accept_confidence <= 1.0:
             raise ValueError("accept_confidence must be between 0 and 1")
         if not 0.0 <= self.parse_confidence <= 1.0:
             raise ValueError("parse_confidence must be between 0 and 1")
+        if not 0.0 <= self.temperature <= 2.0:
+            raise ValueError("temperature must be between 0 and 2")
+        if not 0.0 < self.generation_top_p <= 1.0:
+            raise ValueError("generation_top_p must be greater than 0 and at most 1")
+        if self.generation_top_k < 1:
+            raise ValueError("generation_top_k must be positive")
+        if not -2.0 <= self.presence_penalty <= 2.0:
+            raise ValueError("presence_penalty must be between -2 and 2")
+        if self.sampling_seed < 0:
+            raise ValueError("sampling_seed must be non-negative")
         allowed_relations = set(DEFAULT_RELATION_THRESHOLDS)
         unknown = set(self.relation_thresholds) - allowed_relations
         if unknown:
@@ -245,6 +255,8 @@ class DiscoveryConfig:
             "max_candidates",
             "max_llm_pairs",
             "llm_concurrency",
+            "parse_max_output_tokens",
+            "classify_max_output_tokens",
         ):
             if int(getattr(self, name)) < 1:
                 raise ValueError(f"{name} must be positive")

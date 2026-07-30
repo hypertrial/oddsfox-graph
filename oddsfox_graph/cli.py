@@ -34,7 +34,18 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--cache-dir", type=Path, default=None)
     p.add_argument("--benchmark", type=Path, default=None)
     p.add_argument("--incremental-from", type=Path, default=None)
-    p.add_argument("--pricing-file", type=Path, default=None)
+    p.add_argument(
+        "--pricing-file",
+        type=Path,
+        default=None,
+        help=argparse.SUPPRESS,
+    )
+    p.add_argument("--compute-profile", type=Path, default=None)
+    p.add_argument("--llm-base-url", default="http://127.0.0.1:8080/v1")
+    p.add_argument("--llm-runtime", choices=("llama.cpp", "vllm"), default="llama.cpp")
+    p.add_argument("--model-manifest", type=Path, default=None)
+    p.add_argument("--model-profile", type=Path, default=None)
+    p.add_argument("--allow-remote-inference", action="store_true")
     p.add_argument("--require-ready", action="store_true")
     p.add_argument(
         "--allow-unbenchmarked-rules",
@@ -45,8 +56,8 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     p.add_argument("--offline", action="store_true")
-    p.add_argument("--parse-model", default="gpt-5.6-terra")
-    p.add_argument("--classify-model", default="gpt-5.6-terra")
+    p.add_argument("--parse-model", default="Qwen/Qwen3-4B-GGUF:Q8_0")
+    p.add_argument("--classify-model", default="Qwen/Qwen3-4B-GGUF:Q8_0")
     p.add_argument(
         "--embedding-model",
         default="sentence-transformers/all-MiniLM-L6-v2",
@@ -68,14 +79,21 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--max-propositions", type=int, default=5_000)
     p.add_argument("--max-candidates", type=int, default=400_000)
     p.add_argument("--max-llm-pairs", type=int, default=5_000)
-    p.add_argument("--llm-concurrency", type=int, default=8)
+    p.add_argument("--llm-concurrency", type=int, default=2)
+    p.add_argument("--sampling-seed", type=int, default=0)
+    p.add_argument("--temperature", type=float, default=0.1)
+    p.add_argument("--generation-top-p", type=float, default=0.8)
+    p.add_argument("--generation-top-k", type=int, default=20)
+    p.add_argument("--presence-penalty", type=float, default=1.5)
+    p.add_argument("--parse-max-output-tokens", type=int, default=4096)
+    p.add_argument("--classify-max-output-tokens", type=int, default=1024)
 
     p = sub.add_parser("benchmark-export")
     p.add_argument("--input", required=True, type=Path)
     p.add_argument("--out", required=True, type=Path)
     p.add_argument("--output-dir", required=True, type=Path)
-    p.add_argument("--parse-count", type=int, default=500)
-    p.add_argument("--pair-count", type=int, default=2_000)
+    p.add_argument("--parse-count", type=int, default=750)
+    p.add_argument("--pair-count", type=int, default=3_000)
     p.add_argument("--seed", type=int, default=0)
 
     p = sub.add_parser("benchmark-compile")
@@ -83,13 +101,38 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--review-a", required=True, type=Path)
     p.add_argument("--review-b", required=True, type=Path)
     p.add_argument("--adjudication", required=True, type=Path)
+    p.add_argument("--sampling-manifest", required=True, type=Path)
     p.add_argument("--output", required=True, type=Path)
 
     p = sub.add_parser("evaluate")
     p.add_argument("--out", required=True, type=Path)
     p.add_argument("--benchmark", required=True, type=Path)
     p.add_argument("--pricing-file", type=Path, default=None)
+    p.add_argument("--compute-profile", type=Path, default=None)
     p.add_argument("--output", type=Path, default=None)
+
+    p = sub.add_parser("model-manifest")
+    p.add_argument("--model-path", required=True, type=Path)
+    p.add_argument("--model-id", required=True)
+    p.add_argument("--revision", required=True)
+    p.add_argument("--license", required=True)
+    p.add_argument("--runtime", required=True, choices=("llama.cpp", "vllm"))
+    p.add_argument("--llm-base-url", required=True)
+    p.add_argument("--allow-remote-inference", action="store_true")
+    p.add_argument("--output", required=True, type=Path)
+
+    p = sub.add_parser("model-check")
+    p.add_argument("--model-manifest", required=True, type=Path)
+    p.add_argument("--llm-base-url", required=True)
+    p.add_argument("--allow-remote-inference", action="store_true")
+
+    p = sub.add_parser("model-profile")
+    p.add_argument("--input", required=True, type=Path)
+    p.add_argument("--benchmark", required=True, type=Path)
+    p.add_argument("--cache-dir", required=True, type=Path)
+    p.add_argument("--model-manifest", required=True, type=Path)
+    p.add_argument("--out", required=True, type=Path)
+    p.add_argument("--allow-remote-inference", action="store_true")
 
     p = sub.add_parser("review-export")
     p.add_argument("--out", required=True, type=Path)
@@ -156,9 +199,15 @@ def main(argv: list[str] | None = None) -> int:
                     benchmark_path=args.benchmark,
                     incremental_from=args.incremental_from,
                     pricing_file=args.pricing_file,
+                    compute_profile=args.compute_profile,
+                    model_manifest=args.model_manifest,
+                    model_profile=args.model_profile,
                     require_ready=args.require_ready,
                     allow_unbenchmarked_rules=args.allow_unbenchmarked_rules,
                     offline=args.offline,
+                    llm_base_url=args.llm_base_url,
+                    llm_runtime=args.llm_runtime,
+                    allow_remote_inference=args.allow_remote_inference,
                     parse_model=args.parse_model,
                     classify_model=args.classify_model,
                     embedding_model=args.embedding_model,
@@ -174,6 +223,13 @@ def main(argv: list[str] | None = None) -> int:
                     max_candidates=args.max_candidates,
                     max_llm_pairs=args.max_llm_pairs,
                     llm_concurrency=args.llm_concurrency,
+                    sampling_seed=args.sampling_seed,
+                    temperature=args.temperature,
+                    generation_top_p=args.generation_top_p,
+                    generation_top_k=args.generation_top_k,
+                    presence_penalty=args.presence_penalty,
+                    parse_max_output_tokens=args.parse_max_output_tokens,
+                    classify_max_output_tokens=args.classify_max_output_tokens,
                 ),
             )
             for key, value in stats.items():
@@ -211,6 +267,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.review_a,
                 args.review_b,
                 args.adjudication,
+                args.sampling_manifest,
                 args.output,
             )
             print(json.dumps(counts, indent=2, sort_keys=True))
@@ -221,11 +278,47 @@ def main(argv: list[str] | None = None) -> int:
                 args.out,
                 args.benchmark,
                 pricing_file=args.pricing_file,
+                compute_profile=args.compute_profile,
                 output_path=args.output,
             )
             print(json.dumps(result, indent=2, sort_keys=True))
             if not result["passed"]:
                 return 1
+        elif args.cmd == "model-manifest":
+            from .model_tools import create_model_manifest
+
+            result = create_model_manifest(
+                args.model_path,
+                model_id=args.model_id,
+                revision=args.revision,
+                license_id=args.license,
+                runtime=args.runtime,
+                llm_base_url=args.llm_base_url,
+                output_path=args.output,
+                allow_remote=args.allow_remote_inference,
+            )
+            print(json.dumps(result, indent=2, sort_keys=True))
+        elif args.cmd == "model-check":
+            from .model_tools import check_model
+
+            result = check_model(
+                args.model_manifest,
+                args.llm_base_url,
+                allow_remote=args.allow_remote_inference,
+            )
+            print(json.dumps(result, indent=2, sort_keys=True))
+        elif args.cmd == "model-profile":
+            from .model_tools import build_model_profile
+
+            result = build_model_profile(
+                args.input,
+                args.benchmark,
+                args.cache_dir,
+                args.model_manifest,
+                args.out,
+                allow_remote=args.allow_remote_inference,
+            )
+            print(json.dumps(result, indent=2, sort_keys=True))
         elif args.cmd == "review-score":
             from .review import score_review
 

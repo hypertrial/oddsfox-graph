@@ -47,8 +47,7 @@ class RunState:
         scope: str | None,
         task: str | None = None,
     ) -> None:
-        # Legacy v1 entries duplicated one batch total into every per-item file,
-        # so their originating usage cannot be reconstructed without guessing.
+        # Usage-free deterministic/profile entries do not contribute tokens.
         if scope is None:
             return
         if not any(int(usage.get(key, 0)) for key in _ZERO_USAGE):

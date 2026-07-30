@@ -75,6 +75,8 @@ ARTIFACT_COLUMNS = {
         "solver_version",
         "constraint_version",
         "solver_component_id",
+        "inference_fingerprint",
+        "model_profile_id",
     ],
     "conditional_edges.parquet": [
         "a_node_id",

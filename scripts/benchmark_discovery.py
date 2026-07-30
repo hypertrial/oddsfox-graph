@@ -20,10 +20,8 @@ if str(REPO_ROOT) not in sys.path:
 import numpy as np
 
 from oddsfox_graph._discovery.contracts import (
-    PairClassification,
-    PairClassificationBatch,
+    AtomicPairAssessment,
     ParsedMarket,
-    ParsedMarketBatch,
     ParsedOutcome,
 )
 from oddsfox_graph._discovery.input import load_source_markets
@@ -31,88 +29,65 @@ from oddsfox_graph.discovery import DiscoveryConfig, discover
 from oddsfox_graph.queries import DuckDB, q
 
 
-class _Usage:
-    input_tokens = 20
-    output_tokens = 10
-    total_tokens = 30
-
-
 class _Response:
     def __init__(self, parsed: object) -> None:
-        self.output_parsed = parsed
-        self.model = "benchmark-fake-model"
-        self.usage = _Usage()
+        self.parsed = parsed
+        self.observed_model = "Qwen/Qwen3-4B-GGUF:Q8_0"
+        self.usage = {
+            "input_tokens": 20,
+            "output_tokens": 10,
+            "total_tokens": 30,
+        }
 
 
-class _Responses:
-    async def parse(self, **kwargs: object) -> _Response:
-        messages = kwargs["input"]
-        payload = json.loads(messages[1]["content"])  # type: ignore[index]
-        if kwargs["text_format"] is ParsedMarketBatch:
+class _Client:
+    async def generate(self, **kwargs: object) -> _Response:
+        payload = kwargs["payload"]
+        if kwargs["response_model"] is ParsedMarket:
+            market = payload
             return _Response(
-                ParsedMarketBatch(
-                    markets=[
-                        ParsedMarket(
-                            market_id=str(market["market_id"]),
-                            propositions=[
-                                ParsedOutcome(
-                                    outcome=str(outcome["outcome"]),
-                                    subject=[str(market["question"])],
-                                    predicate="resolve",
-                                    object=None,
-                                    operator=None,
-                                    threshold=None,
-                                    unit=None,
-                                    time_start=None,
-                                    time_end=None,
-                                    competition=None,
-                                    event_scope=market.get("event_slug"),
-                                    jurisdiction=None,
-                                    polarity=(
-                                        "negative"
-                                        if str(outcome["outcome"]).casefold() == "no"
-                                        else "positive"
-                                    ),
-                                    parse_confidence=0.99,
-                                )
-                                for outcome in market["outcomes"]
-                            ],
+                ParsedMarket(
+                    market_id=str(market["market_id"]),
+                    propositions=[
+                        ParsedOutcome(
+                            outcome=str(outcome["outcome"]),
+                            subject=[str(market["question"])],
+                            predicate="resolve",
+                            object=None,
+                            operator=None,
+                            threshold=None,
+                            unit=None,
+                            time_start=None,
+                            time_end=None,
+                            competition=None,
+                            event_scope=market.get("event_slug"),
+                            jurisdiction=None,
+                            polarity=(
+                                "negative"
+                                if str(outcome["outcome"]).casefold() == "no"
+                                else "positive"
+                            ),
+                            parse_confidence=0.99,
                         )
-                        for market in payload
+                        for outcome in market["outcomes"]
                     ]
                 )
             )
         return _Response(
-            PairClassificationBatch(
-                pairs=[
-                    PairClassification(
-                        pair_id=str(pair["pair_id"]),
-                        relation="unrelated",
-                        confidence=0.99,
-                        supporting_fields=[],
-                        explanation="The supplied propositions are unrelated.",
-                        assumptions=[],
-                        a_implies_b={
-                            "supported": False,
-                            "supporting_fields": [],
-                            "assumptions": [],
-                        },
-                        b_implies_a={
-                            "supported": False,
-                            "supporting_fields": [],
-                            "assumptions": [],
-                        },
-                        requires_review=False,
-                    )
-                    for pair in payload
-                ]
+            AtomicPairAssessment(
+                pair_id=str(payload["pair_id"]),
+                a_implies_b="no",
+                b_implies_a="no",
+                can_both_be_true="yes",
+                must_one_be_true="no",
+                logically_related="no",
+                confidence=0.99,
+                supporting_fields=[],
+                assumptions=[],
+                unsupported_assumption=False,
+                requires_review=False,
             )
         )
-
-
-class _Client:
-    def __init__(self) -> None:
-        self.responses = _Responses()
 
 
 def _embeddings(texts: list[str], _: DiscoveryConfig) -> np.ndarray:

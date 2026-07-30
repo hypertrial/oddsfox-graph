@@ -4,12 +4,13 @@ import asyncio
 import hashlib
 import json
 import os
+import re
 import shutil
 import sys
 import tempfile
 from collections import defaultdict
 from collections.abc import Awaitable, Callable, Sequence
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -36,15 +37,27 @@ from ._discovery.candidates import (
 )
 from ._discovery.contracts import (
     DEFAULT_EMBEDDING_REVISION,
+    AtomicPairAssessment,
     DiscoveryConfig,
-    PairClassification,
-    PairClassificationBatch,
     ParsedMarket,
-    ParsedMarketBatch,
     ParsedOutcome,
     PropositionRecord,
     SourceMarket,
     SourceOutcome,
+)
+from ._discovery.inference import (
+    GenerationSettings,
+    LocalStructuredClient,
+    ModelManifest,
+    ModelProfile,
+    canonical_json_sha256,
+    inference_fingerprint,
+    load_compute_profile,
+    load_model_manifest,
+    load_model_profile,
+    manifest_sha256,
+    normalize_inference_base_url,
+    validate_profile_match,
 )
 from ._discovery.input import (
     datetime_or_none as _datetime_or_none,
@@ -53,6 +66,14 @@ from ._discovery.input import (
     utc_datetime as _utc_datetime,
 )
 from ._discovery.metrics import RunState, StageRecorder
+from ._discovery.nli import (
+    NLI_INFERENCE_VERSION,
+    ModernBertNliScorer,
+    NliScorer,
+    nli_inference_fingerprint,
+    score_bidirectional,
+    scores_to_columns,
+)
 from ._discovery.incremental import EXECUTION_PLAN_COLUMNS, ExecutionPlan
 from ._discovery.publication import copy_sorted_parquet as _copy_table
 from ._discovery.types import IncrementalStats
@@ -99,12 +120,10 @@ from .reports import write_reports, write_summary_report
 
 __all__ = [
     "DEFAULT_EMBEDDING_REVISION",
+    "AtomicPairAssessment",
     "DiscoveryConfig",
     "JsonCache",
-    "PairClassification",
-    "PairClassificationBatch",
     "ParsedMarket",
-    "ParsedMarketBatch",
     "ParsedOutcome",
     "PropositionRecord",
     "SourceMarket",
@@ -174,6 +193,8 @@ PROPOSITION_COLUMNS = {
     "parse_status": "VARCHAR",
     "parser_model": "VARCHAR",
     "prompt_version": "VARCHAR",
+    "inference_fingerprint": "VARCHAR",
+    "model_profile_id": "VARCHAR",
     "source_format": "VARCHAR",
 }
 
@@ -341,6 +362,8 @@ LOGIC_EDGE_COLUMNS = dict(
             "VARCHAR",
             "VARCHAR",
             "VARCHAR",
+            "VARCHAR",
+            "VARCHAR",
         ),
         strict=True,
     )
@@ -369,19 +392,255 @@ _UNIT_ALIASES = {
     "%": "percent",
 }
 
-_PARSE_PROMPT = """Extract one proposition for every supplied market outcome.
+_PARSE_PROMPT = """/no_think
+Extract one proposition for every supplied market outcome.
 Use the question, full description, outcome, and authoritative metadata only.
 Use the outcome string exactly as supplied. Normalize dates, numbers, and units.
 Use null for information that is absent or not supported by the schema; never invent it.
-For Yes/No markets, set No to negative polarity. Return every market and outcome exactly once."""
+For Yes/No markets, set No to negative polarity.
+Field semantics: subject is the entity set; predicate is the event; object is its
+target; operator/threshold/unit describe comparisons; time_start/time_end are UTC
+resolution bounds; competition, event_scope, and jurisdiction constrain identity;
+polarity says whether the outcome asserts or negates the proposition; confidence is
+your confidence that every field is supported. Return this market and every supplied
+outcome exactly once."""
 
-_CLASSIFY_PROMPT = """Classify each proposition pair using only the supplied facts.
-Allowed relations are equivalent, A_implies_B, B_implies_A, mutually_exclusive,
-complement, compatible, unrelated, and uncertain. Evaluate A implies B and B
-implies A independently before choosing the relation. Cite supporting fields
-with their supplied values and state assumptions explicitly.
-Use uncertain and requires_review=true whenever the relation depends on missing context.
-Return every pair_id exactly once."""
+_CLASSIFY_PROMPT = """/no_think
+Judge one proposition pair using only the supplied fields. Answer yes, no, or unknown
+for: A entails B; B entails A; both can be true; at least one must be true; and the
+propositions are logically related. Confidence is joint confidence in all judgments.
+Every cited supporting field must name A or B, a supplied nonempty field, and its exact
+supplied value. List every assumption. Set unsupported_assumption=true whenever an
+assumption is not established by the supplied evidence. Set requires_review=true for
+unknown, contradictory, context-dependent, or unsupported conclusions. Do not infer
+from prices or probabilities. Return the supplied pair_id exactly."""
+
+
+@dataclass(frozen=True)
+class _InferenceContext:
+    manifest: ModelManifest
+    profile: ModelProfile | None
+    fingerprints: dict[str, str]
+    client: object | None
+    owns_client: bool
+
+
+def _generation_settings(
+    config: DiscoveryConfig,
+    *,
+    role: str,
+) -> GenerationSettings:
+    return GenerationSettings(
+        seed=config.sampling_seed,
+        temperature=config.temperature,
+        top_p=config.generation_top_p,
+        top_k=config.generation_top_k,
+        presence_penalty=config.presence_penalty,
+        max_output_tokens=(
+            config.parse_max_output_tokens
+            if role == "parse"
+            else config.classify_max_output_tokens
+        ),
+    )
+
+
+def _prepare_inference_context(
+    config: DiscoveryConfig,
+    out_dir: Path,
+    injected_client: object | None,
+) -> _InferenceContext:
+    manifest_path = config.model_manifest
+    if (
+        manifest_path is None
+        and config.offline
+        and (out_dir / "model_manifest.json").is_file()
+    ):
+        manifest_path = out_dir / "model_manifest.json"
+    using_synthetic_manifest = (
+        manifest_path is None and injected_client is not None
+    )
+    if manifest_path is not None:
+        manifest = load_model_manifest(manifest_path)
+        normalized_origin = (
+            manifest.inference_origin
+            if config.offline
+            else normalize_inference_base_url(
+                config.llm_base_url,
+                allow_remote=config.allow_remote_inference,
+            )
+        )
+    elif injected_client is not None:
+        normalized_origin = normalize_inference_base_url(
+            config.llm_base_url,
+            allow_remote=config.allow_remote_inference,
+        )
+        synthetic_hash = _text_hash("injected-self-hosted-test-model")
+        synthetic_manifest_content = {
+            "model_id": config.parse_model,
+            "upstream_revision": "test-fixture",
+            "artifact_sha256": synthetic_hash,
+            "artifact_kind": "fixture",
+            "quantization": "fixture",
+            "license": "Apache-2.0",
+            "tokenizer_sha256": synthetic_hash,
+            "chat_template_sha256": synthetic_hash,
+            "runtime": config.llm_runtime,
+            "runtime_version": "test-fixture",
+            "loaded_model_identifier": config.parse_model,
+            "context_length": 8192,
+            "deployment": "in-process network-free test fixture",
+            "inference_origin": normalized_origin,
+        }
+        manifest = ModelManifest(
+            manifest_id=canonical_json_sha256(synthetic_manifest_content),
+            **synthetic_manifest_content,
+        )
+    else:
+        if config.offline:
+            raise ValueError(
+                "Offline discovery cache has no model_manifest.json; rerun "
+                "online into --out first or pass --model-manifest"
+            )
+        raise ValueError("--model-manifest is required for online discovery")
+    if not config.offline and manifest.runtime != config.llm_runtime:
+        raise ValueError(
+            "Configured LLM runtime does not match the model manifest"
+        )
+    if not config.offline and manifest.inference_origin != normalized_origin:
+        raise ValueError(
+            "Configured LLM endpoint does not match the model manifest"
+        )
+    allowed_model_ids = {manifest.model_id, manifest.loaded_model_identifier}
+    if not using_synthetic_manifest:
+        if config.parse_model not in allowed_model_ids:
+            raise ValueError("Parse model does not match the model manifest")
+        if config.classify_model not in allowed_model_ids:
+            raise ValueError("Classify model does not match the model manifest")
+
+    fingerprints = {
+        "parse": inference_fingerprint(
+            manifest,
+            role="parse",
+            requested_model=config.parse_model,
+            prompt_version=PARSE_PROMPT_VERSION,
+            prompt_hash=_text_hash(_PARSE_PROMPT),
+            schema_hash=_model_schema_hash(ParsedMarket),
+            settings=_generation_settings(config, role="parse"),
+        ),
+        "classify": inference_fingerprint(
+            manifest,
+            role="classify",
+            requested_model=config.classify_model,
+            prompt_version=CLASSIFY_PROMPT_VERSION,
+            prompt_hash=_text_hash(_CLASSIFY_PROMPT),
+            schema_hash=_model_schema_hash(AtomicPairAssessment),
+            settings=_generation_settings(config, role="classify"),
+        ),
+        "nli": nli_inference_fingerprint(
+            config.nli_model,
+            config.nli_revision,
+        ),
+    }
+    profile_path = config.model_profile
+    if (
+        profile_path is None
+        and config.offline
+        and (out_dir / "model_profile.json").is_file()
+    ):
+        profile_path = out_dir / "model_profile.json"
+    if profile_path is not None:
+        profile = load_model_profile(profile_path)
+        validate_profile_match(profile, manifest, fingerprints)
+    elif injected_client is not None and config.model_manifest is None:
+        synthetic_profile_content = {
+            "model_manifest_id": manifest.manifest_id,
+            "model_manifest_sha256": manifest_sha256(manifest),
+            "runtime": manifest.runtime,
+            "runtime_version": manifest.runtime_version,
+            "benchmark_sha256": _text_hash("test-benchmark"),
+            "calibration_partition_sha256": _text_hash("test-calibration"),
+            "parse_prompt_hash": _text_hash(_PARSE_PROMPT),
+            "parse_schema_hash": _model_schema_hash(ParsedMarket),
+            "classify_prompt_hash": _text_hash(_CLASSIFY_PROMPT),
+            "classify_schema_hash": _model_schema_hash(AtomicPairAssessment),
+            "inference_fingerprints": fingerprints,
+            "relations": {
+                relation: {
+                    "enabled": True,
+                    "threshold": 0.0,
+                    "support": 100,
+                    "precision": 1.0,
+                }
+                for relation in (
+                    "complement",
+                    "equivalent",
+                    "mutually_exclusive",
+                    "implies",
+                    "compatible",
+                )
+            },
+            "nli_actions": {},
+            "structured_output_validity": 1.0,
+            "metrics": {"fixture": True},
+        }
+        profile = ModelProfile(
+            profile_id=canonical_json_sha256(synthetic_profile_content),
+            **synthetic_profile_content,
+        )
+    else:
+        profile = None
+    if config.require_ready and profile is None:
+        raise ValueError("--require-ready requires an exact matching --model-profile")
+
+    client = injected_client
+    owns_client = False
+    if not config.offline and client is None:
+        client = LocalStructuredClient(
+            normalized_origin,
+            allow_remote=config.allow_remote_inference,
+        )
+        owns_client = True
+    if not config.offline and client is not None and hasattr(client, "preflight"):
+        preflight = _run_async(
+            _preflight_stage_client(
+                client,
+                config,
+                close_after=owns_client,
+            )
+        )
+        if isinstance(preflight, dict):
+            runtime_version = preflight.get("runtime_version")
+            if runtime_version and runtime_version != manifest.runtime_version:
+                raise ValueError(
+                    "Endpoint runtime version does not match the model manifest"
+                )
+        if owns_client:
+            client = None
+    return _InferenceContext(
+        manifest=manifest,
+        profile=profile,
+        fingerprints=fingerprints,
+        client=client,
+        owns_client=owns_client,
+    )
+
+
+async def _preflight_stage_client(
+    client: object,
+    config: DiscoveryConfig,
+    *,
+    close_after: bool,
+) -> object:
+    try:
+        return await _with_retries(
+            lambda: client.preflight(
+                expected_model=config.parse_model,
+                expected_runtime=config.llm_runtime,
+            )
+        )
+    finally:
+        if close_after:
+            await client.aclose()
 
 
 def discover(
@@ -391,6 +650,7 @@ def discover(
     config: DiscoveryConfig | None = None,
     _client: object | None = None,
     _embedder: Callable[[list[str], DiscoveryConfig], Any] | None = None,
+    _nli_scorer: NliScorer | None = None,
 ) -> dict[str, object]:
     config = config or DiscoveryConfig()
     input_path = input_path.resolve()
@@ -402,6 +662,10 @@ def discover(
 
     out_dir.parent.mkdir(parents=True, exist_ok=True)
     recorder = StageRecorder()
+    inference = recorder.run(
+        "model_preflight",
+        lambda: _prepare_inference_context(config, out_dir, _client),
+    )
 
     source_format, input_rows, markets, input_selection = recorder.run(
         "normalize_input",
@@ -419,6 +683,7 @@ def discover(
             out_dir,
             markets,
             cache,
+            inference,
         ),
     )
     baseline_neighbors = incremental_stats.pop(
@@ -469,7 +734,7 @@ def discover(
             config,
             cache,
             state,
-            _client,
+            inference,
         ),
     )
     rule_support = recorder.run(
@@ -619,17 +884,35 @@ def discover(
         ),
     )
     candidate_store.mark_classification_budget()
-    classification_candidates = candidate_store.classification_rows(
-        config.max_llm_pairs
+    nli_pool_limit = min(
+        config.max_candidates,
+        config.max_llm_pairs * 4,
     )
+    classification_candidates = candidate_store.classification_rows(
+        nli_pool_limit
+    )
+    nli_edges, nli_reviews = recorder.run(
+        "score_nli",
+        lambda: _apply_nli_scores(
+            classification_candidates,
+            propositions,
+            config,
+            cache,
+            inference,
+            _nli_scorer,
+            injected_client=_client is not None,
+        ),
+    )
+    candidate_store.update_rows(classification_candidates)
     _seed_classification_cache_from_incremental(
         cache,
         classification_candidates,
         propositions,
         config,
         incremental_stats,
+        inference,
     )
-    llm_edges, llm_reviews = recorder.run(
+    generated_edges, llm_reviews = recorder.run(
         "classify_pairs",
         lambda: _classify_candidates(
             classification_candidates,
@@ -637,9 +920,10 @@ def discover(
             config,
             cache,
             state,
-            _client,
+            inference,
         ),
     )
+    llm_edges = nli_edges + generated_edges
     candidate_store.update_rows(classification_candidates)
     logic_edges, rejected_edges, consistency_reviews, solver_stats = recorder.run(
         "solve_consistency",
@@ -690,7 +974,9 @@ def discover(
     incremental_stats["affected_only_verified"] = execution_summary[
         "affected_only_verified"
     ]
-    review_rows = _dedupe_reviews(parse_reviews + llm_reviews + consistency_reviews)
+    review_rows = _dedupe_reviews(
+        parse_reviews + nli_reviews + llm_reviews + consistency_reviews
+    )
     parse_error_rows = _parse_error_rows(propositions, parse_reviews)
 
     staging = Path(
@@ -723,6 +1009,8 @@ def discover(
                     candidate_store.structural_member_limit or 0
                 ),
                 incremental_stats=incremental_stats,
+                config=config,
+                inference=inference,
             ),
         )
         input_hash = recorder.run("hash_input", lambda: _sha256(input_path))
@@ -739,12 +1027,33 @@ def discover(
                     config.benchmark_path,
                     input_hash=input_hash,
                     pricing_file=config.pricing_file,
+                    compute_profile=config.compute_profile,
                     run_metadata={
                         "usage": state.usage_manifest(),
                         "models": {
-                            "parse": {"requested": config.parse_model},
-                            "classify": {"requested": config.classify_model},
+                            "parse": {
+                                "requested": config.parse_model,
+                                "observed": sorted(state.observed_parse_models),
+                            },
+                            "classify": {
+                                "requested": config.classify_model,
+                                "observed": sorted(state.observed_classify_models),
+                            },
                         },
+                        "inference": {
+                            "origin": inference.manifest.inference_origin,
+                            "runtime": inference.manifest.runtime,
+                            "runtime_version": inference.manifest.runtime_version,
+                            "profiled": inference.profile is not None,
+                            "model_profile_id": (
+                                inference.profile.profile_id
+                                if inference.profile
+                                else None
+                            ),
+                            "fingerprints": inference.fingerprints,
+                            "proprietary_cache_lineage": False,
+                        },
+                        "stage_timings": recorder.timings,
                         "stats": stats,
                         "validation": {
                             "offline": config.offline,
@@ -763,6 +1072,17 @@ def discover(
                 name: _sha256(out_dir / name)
                 for name in (
                     *DISCOVERY_PARQUET_ARTIFACTS,
+                    "model_manifest.json",
+                    *(
+                        ("model_profile.json",)
+                        if (out_dir / "model_profile.json").is_file()
+                        else ()
+                    ),
+                    *(
+                        ("compute_profile.json",)
+                        if (out_dir / "compute_profile.json").is_file()
+                        else ()
+                    ),
                     *(
                         ("benchmark.parquet",)
                         if (out_dir / "benchmark.parquet").is_file()
@@ -790,6 +1110,7 @@ def discover(
             state,
             recorder.timings,
             state_hashes,
+            inference,
         )
         _write_manifest_last(out_dir, manifest)
         if config.require_ready and (
@@ -810,7 +1131,7 @@ def _with_packaged_benchmark(
 ) -> DiscoveryConfig:
     if config.benchmark_path is not None:
         return config
-    packaged = Path(__file__).parent / "benchmarks" / "v0.4.0.parquet"
+    packaged = Path(__file__).parent / "benchmarks" / "v0.6.0.parquet"
     if not packaged.is_file():
         return config
     db = DuckDB()
@@ -836,6 +1157,7 @@ def _prepare_incremental(
     out_dir: Path,
     markets: Sequence[SourceMarket],
     cache: JsonCache,
+    inference: _InferenceContext,
 ) -> tuple[
     dict[str, list[float]],
     dict[str, dict[str, Any]],
@@ -880,8 +1202,8 @@ def _prepare_incremental(
         or baseline_versions.get("candidate_state") != CANDIDATE_STATE_VERSION
     ):
         raise ValueError(
-            "Incremental baseline uses incompatible pre-v0.5 discovery state; "
-            "run one clean v0.5 discover build and use that completed output "
+            "Incremental baseline uses incompatible pre-v0.6 discovery state; "
+            "run one clean v0.6 discover build and use that completed output "
             "as --incremental-from"
         )
     market_state_path = baseline / "state" / "market_state.parquet"
@@ -982,9 +1304,13 @@ def _prepare_incremental(
             SELECT proposition_a_id, proposition_b_id,
                    candidate_reasons, embedding_similarity, embedding_rank,
                    classification_relation, classification_confidence,
+                   atomic_a_implies_b, atomic_b_implies_a,
+                   atomic_can_both_be_true, atomic_must_one_be_true,
+                   atomic_logically_related,
                    supporting_fields, a_implies_b, b_implies_a,
                    explanation, assumptions, requires_review,
-                   model_version, prompt_version
+                   unsupported_assumption, model_version, prompt_version,
+                   inference_fingerprint, model_profile_id
             FROM read_parquet('{q(candidates_path)}')
             WHERE classification_relation IS NOT NULL
             ORDER BY proposition_a_id, proposition_b_id
@@ -1002,14 +1328,10 @@ def _prepare_incremental(
     changed_market_ids = set(current_hashes) - unchanged_market_ids
     removed_market_ids = set(prior_markets) - set(current_hashes)
     models = manifest.get("models") or {}
-    prompts = manifest.get("prompts") or {}
+    previous_inference = manifest.get("inference") or {}
     parse_compatible = (
-        ((models.get("parse") or {}).get("requested") == config.parse_model)
-        and ((prompts.get("parse") or {}).get("version") == PARSE_PROMPT_VERSION)
-        and (
-            (prompts.get("parse") or {}).get("schema_hash")
-            == _model_schema_hash(ParsedMarketBatch)
-        )
+        (previous_inference.get("fingerprints") or {}).get("parse")
+        == inference.fingerprints["parse"]
     )
     seeded = 0
     if parse_compatible:
@@ -1019,6 +1341,7 @@ def _prepare_incremental(
             prior_propositions,
             unchanged_market_ids,
             config,
+            inference,
         )
 
     embedding_manifest = models.get("embedding") or {}
@@ -1071,16 +1394,24 @@ def _prepare_incremental(
         and previous_limits.get("top_k") == config.top_k
         and previous_limits.get("max_candidates") == config.max_candidates
     )
-    classify_manifest = models.get("classify") or {}
-    classify_prompt = prompts.get("classify") or {}
     classification_compatible = (
-        classify_manifest.get("requested") == config.classify_model
-        and classify_prompt.get("version") == CLASSIFY_PROMPT_VERSION
-        and classify_prompt.get("schema_hash")
-        == _model_schema_hash(PairClassificationBatch)
+        (previous_inference.get("fingerprints") or {}).get("classify")
+        == inference.fingerprints["classify"]
     )
     if not classification_compatible:
         reasons.append("classifier_model_prompt_or_schema")
+    previous_profile_id = previous_inference.get("model_profile_id")
+    current_profile_id = (
+        inference.profile.profile_id if inference.profile is not None else None
+    )
+    if previous_profile_id != current_profile_id:
+        reasons.append("model_profile")
+    previous_nli = models.get("nli") or {}
+    if (
+        previous_nli.get("model") != config.nli_model
+        or previous_nli.get("revision") != config.nli_revision
+    ):
+        reasons.append("nli_model_or_revision")
     rejected_by_component: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in prior_rejected:
         rejected_by_component[str(row["solver_component_id"])].append(row)
@@ -1156,13 +1487,14 @@ def _seed_parse_cache_from_baseline(
     prior_propositions: Sequence[dict[str, Any]],
     unchanged_market_ids: set[str],
     config: DiscoveryConfig,
+    inference: _InferenceContext,
 ) -> int:
     by_market: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in prior_propositions:
         market_id = str(row["market_id"])
         if market_id in unchanged_market_ids:
             by_market[market_id].append(row)
-    schema_hash = _model_schema_hash(ParsedMarketBatch)
+    schema_hash = _model_schema_hash(ParsedMarket)
     seeded = 0
     for market in markets:
         rows = sorted(
@@ -1176,7 +1508,7 @@ def _seed_parse_cache_from_baseline(
         payload = _market_payload(market)
         key = cache.key(
             "parse",
-            config.parse_model,
+            inference.fingerprints["parse"],
             PARSE_PROMPT_VERSION,
             _text_hash(_PARSE_PROMPT),
             schema_hash,
@@ -1228,16 +1560,16 @@ def _parse_propositions(
     config: DiscoveryConfig,
     cache: JsonCache,
     state: RunState,
-    client: object | None,
+    inference: _InferenceContext,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    schema_hash = _model_schema_hash(ParsedMarketBatch)
+    schema_hash = _model_schema_hash(ParsedMarket)
     cached: dict[str, dict[str, Any]] = {}
     missing: list[tuple[SourceMarket, str, dict[str, object]]] = []
     for market in markets:
         payload = _market_payload(market)
         key = cache.key(
             "parse",
-            config.parse_model,
+            inference.fingerprints["parse"],
             PARSE_PROMPT_VERSION,
             _text_hash(_PARSE_PROMPT),
             schema_hash,
@@ -1259,17 +1591,29 @@ def _parse_propositions(
             raise ValueError(
                 f"Offline discovery cache is missing {len(missing)} proposition parse entries"
             )
-        client = client or _new_openai_client()
+        stage_client = inference.client
+        close_stage_client = False
+        if stage_client is None:
+            stage_client = LocalStructuredClient(
+                config.llm_base_url,
+                allow_remote=config.allow_remote_inference,
+            )
+            close_stage_client = True
         missing_by_market = {
             item[0].market_id: item
             for item in missing
         }
         results = _run_async(
-            _run_batched(
+            _run_inference_stage(
+                stage_client,
                 [item[2] for item in missing],
-                20,
-                config.llm_concurrency,
-                lambda batch: _openai_parse_batch(client, batch, config),
+                lambda batch: _local_parse_market(
+                    stage_client,
+                    batch[0],
+                    config,
+                ),
+                concurrency=config.llm_concurrency,
+                close_after=close_stage_client,
             )
         )
         for batch_items, result in results:
@@ -1293,8 +1637,7 @@ def _parse_propositions(
             else:
                 parsed, observed_model, usage = result
                 by_id = {
-                    market.market_id: market.model_dump(mode="json")
-                    for market in parsed.markets
+                    parsed.market_id: parsed.model_dump(mode="json")
                 }
                 state.observed_parse_models.add(observed_model)
                 state.add_usage(usage, "parse")
@@ -1376,6 +1719,8 @@ def _parse_propositions(
                 observed_model,
                 source_format,
                 error,
+                inference.fingerprints["parse"],
+                inference.profile.profile_id if inference.profile else None,
             )
             proposition["_parse_cache_state"] = entry.get("state")
             proposition["_parse_error_type"] = error_type
@@ -1386,6 +1731,21 @@ def _parse_propositions(
                 else None
             )
             propositions.append(proposition)
+            disagreements = list(proposition.pop("_authoritative_disagreements", []))
+            if disagreements:
+                reviews.append(
+                    _review_row(
+                        "parse_authoritative_disagreement",
+                        proposition["proposition_id"],
+                        None,
+                        None,
+                        float(proposition["parse_confidence"]),
+                        "; ".join(disagreements),
+                        [],
+                        observed_model,
+                        PARSE_PROMPT_VERSION,
+                    )
+                )
             if error or parsed is None:
                 reviews.append(
                     _review_row(
@@ -1433,6 +1793,10 @@ def _market_payload(market: SourceMarket) -> dict[str, object]:
             {
                 "outcome": outcome.outcome,
                 "clob_token_id": outcome.clob_token_id,
+                "authoritative_extraction": _deterministic_extract(
+                    market,
+                    outcome,
+                ),
             }
             for outcome in market.outcomes
         ],
@@ -1460,6 +1824,8 @@ def _proposition_row(
     observed_model: str,
     source_format: str,
     error: str | None,
+    inference_fingerprint_value: str,
+    model_profile_id: str | None,
 ) -> dict[str, Any]:
     original_subject = parsed.subject if parsed else []
     object_original = parsed.object if parsed else None
@@ -1467,10 +1833,25 @@ def _proposition_row(
     competition_original = parsed.competition if parsed else None
     event_scope_original = parsed.event_scope if parsed else None
     jurisdiction_original = parsed.jurisdiction if parsed else None
-    polarity = (
-        parsed.polarity
-        if parsed
-        else ("negative" if source.outcome.casefold() == "no" else "positive")
+    extracted = _deterministic_extract(market, source)
+    disagreements: list[str] = []
+    for field in ("polarity", "operator", "threshold", "unit"):
+        authoritative = extracted.get(field)
+        model_value = getattr(parsed, field, None) if parsed else None
+        if authoritative is not None and model_value is not None:
+            normalized_model = (
+                _canonical_unit(str(model_value))
+                if field == "unit"
+                else model_value
+            )
+            if normalized_model != authoritative:
+                disagreements.append(
+                    f"model {field}={model_value!r} disagrees with "
+                    f"authoritative extraction {authoritative!r}"
+                )
+    polarity = str(
+        extracted.get("polarity")
+        or (parsed.polarity if parsed else "positive")
     )
     return {
         "proposition_id": source.clob_token_id,
@@ -1497,15 +1878,22 @@ def _proposition_row(
         "predicate": _normalize_optional(parsed.predicate if parsed else None),
         "object_original": object_original,
         "object": _canonical_entity(object_original) if object_original else None,
-        "operator": parsed.operator if parsed else None,
-        "threshold": parsed.threshold if parsed else None,
+        "operator": extracted.get("operator") or (parsed.operator if parsed else None),
+        "threshold": (
+            extracted["threshold"]
+            if extracted.get("threshold") is not None
+            else (parsed.threshold if parsed else None)
+        ),
         "unit_original": unit_original,
-        "unit": _canonical_unit(unit_original) if unit_original else None,
+        "unit": (
+            extracted.get("unit")
+            or (_canonical_unit(unit_original) if unit_original else None)
+        ),
         "time_start": _utc_datetime(
-            (parsed.time_start if parsed else None) or market.time_start
+            market.time_start or (parsed.time_start if parsed else None)
         ),
         "time_end": _utc_datetime(
-            (parsed.time_end if parsed else None) or market.time_end
+            market.time_end or (parsed.time_end if parsed else None)
         ),
         "competition_original": competition_original,
         "competition": (
@@ -1530,48 +1918,84 @@ def _proposition_row(
         "parse_status": "parsed" if parsed and not error else "failed",
         "parser_model": observed_model,
         "prompt_version": PARSE_PROMPT_VERSION,
+        "inference_fingerprint": inference_fingerprint_value,
+        "model_profile_id": model_profile_id,
         "source_format": source_format,
         "_expected_tokens": len(market.outcomes),
         "_is_active": market.is_active,
         "_is_closed": market.is_closed,
         "_first_seen_ts": market.first_seen_ts or market.time_start,
         "_last_seen_ts": market.last_seen_ts or market.time_end,
+        "_authoritative_disagreements": disagreements,
     }
 
 
-async def _openai_parse_batch(
+_COMPARISON_PATTERNS = (
+    (r"\b(?:at least|no less than)\s+", "greater_than_or_equal"),
+    (r"\b(?:more than|over|above|greater than)\s+", "greater_than"),
+    (r"\b(?:at most|no more than)\s+", "less_than_or_equal"),
+    (r"\b(?:less than|under|below)\s+", "less_than"),
+    (r"\b(?:exactly|equal to)\s+", "equal"),
+)
+_NUMBER_PATTERN = re.compile(
+    r"(?P<currency>\$)?(?P<number>-?\d[\d,]*(?:\.\d+)?)"
+    r"\s*(?P<percent>%|percent|percentage)?",
+    re.IGNORECASE,
+)
+
+
+def _deterministic_extract(
+    market: SourceMarket,
+    outcome: SourceOutcome,
+) -> dict[str, object]:
+    result: dict[str, object] = {}
+    outcome_name = outcome.outcome.casefold().strip()
+    if outcome_name in {"yes", "no"}:
+        result["polarity"] = "negative" if outcome_name == "no" else "positive"
+    normalized_question = market.question.casefold()
+    operator: str | None = None
+    match_start = 0
+    for pattern, candidate in _COMPARISON_PATTERNS:
+        match = re.search(pattern, normalized_question)
+        if match:
+            operator = candidate
+            match_start = match.end()
+            break
+    if operator is None:
+        return result
+    number = _NUMBER_PATTERN.search(market.question, pos=match_start)
+    if number is None:
+        return result
+    result["operator"] = operator
+    result["threshold"] = float(number.group("number").replace(",", ""))
+    if number.group("currency"):
+        result["unit"] = "USD"
+    elif number.group("percent"):
+        result["unit"] = "percent"
+    return result
+
+
+async def _local_parse_market(
     client: object,
-    payloads: list[dict[str, object]],
+    payload: dict[str, object],
     config: DiscoveryConfig,
-) -> tuple[ParsedMarketBatch, str, dict[str, int]]:
-    response = await _with_retries(
-        lambda: client.responses.parse(
+) -> tuple[ParsedMarket, str, dict[str, int]]:
+    result = await _with_retries(
+        lambda: client.generate(
             model=config.parse_model,
-            input=[
-                {"role": "system", "content": _PARSE_PROMPT},
-                {
-                    "role": "user",
-                    "content": json.dumps(payloads, sort_keys=True, default=str),
-                },
-            ],
-            text_format=ParsedMarketBatch,
-            reasoning={"effort": "medium"},
-            store=False,
+            system_prompt=_PARSE_PROMPT,
+            payload=payload,
+            response_model=ParsedMarket,
+            settings=_generation_settings(config, role="parse"),
         )
     )
-    parsed = getattr(response, "output_parsed", None)
-    if parsed is None:
-        raise ValueError("OpenAI returned no parsed proposition output")
-    parsed_batch = ParsedMarketBatch.model_validate(parsed)
-    _validate_returned_ids(
-        [str(payload["market_id"]) for payload in payloads],
-        [market.market_id for market in parsed_batch.markets],
-        "market",
-    )
+    parsed = ParsedMarket.model_validate(result.parsed)
+    if parsed.market_id != str(payload["market_id"]):
+        raise ValueError("Structured parse returned the wrong market_id")
     return (
-        parsed_batch,
-        str(getattr(response, "model", config.parse_model)),
-        _response_usage(response),
+        parsed,
+        str(result.observed_model),
+        dict(result.usage),
     )
 
 
@@ -1858,6 +2282,7 @@ def _embed_texts(texts: list[str], config: DiscoveryConfig) -> Any:
     model = SentenceTransformer(
         config.embedding_model,
         revision=config.embedding_revision,
+        local_files_only=True,
     )
     return model.encode(
         texts,
@@ -1912,13 +2337,264 @@ def _derive_deterministic_edges(
     return edges
 
 
+def _apply_nli_scores(
+    candidates: Sequence[dict[str, Any]],
+    propositions: Sequence[dict[str, Any]],
+    config: DiscoveryConfig,
+    cache: JsonCache,
+    inference: _InferenceContext,
+    scorer: NliScorer | None,
+    *,
+    injected_client: bool,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    if not candidates:
+        return [], []
+    by_id = {
+        str(proposition["proposition_id"]): proposition
+        for proposition in propositions
+    }
+    fingerprint = inference.fingerprints["nli"]
+    missing: list[tuple[dict[str, Any], str, dict[str, object]]] = []
+    cached: dict[str, dict[str, Any]] = {}
+    for candidate in candidates:
+        a_id = str(candidate["proposition_a_id"])
+        b_id = str(candidate["proposition_b_id"])
+        payload = {
+            "pair_id": _pair_id(a_id, b_id),
+            "a": _nli_text(by_id[a_id]),
+            "b": _nli_text(by_id[b_id]),
+        }
+        key = cache.key(
+            "nli",
+            fingerprint,
+            NLI_INFERENCE_VERSION,
+            fingerprint,
+            fingerprint,
+            payload,
+        )
+        entry = cache.get(key, offline=config.offline)
+        if entry is None:
+            missing.append((candidate, key, payload))
+        else:
+            cached[str(payload["pair_id"])] = entry
+    if missing:
+        if config.offline:
+            raise ValueError(
+                f"Offline discovery cache is missing {len(missing)} NLI entries"
+            )
+        if scorer is None and injected_client:
+            parsed_rows = [
+                {
+                    "nli_a_to_b_entailment": 0.0,
+                    "nli_a_to_b_contradiction": 0.0,
+                    "nli_a_to_b_neutral": 1.0,
+                    "nli_b_to_a_entailment": 0.0,
+                    "nli_b_to_a_contradiction": 0.0,
+                    "nli_b_to_a_neutral": 1.0,
+                }
+                for _ in missing
+            ]
+        else:
+            effective_scorer = scorer or ModernBertNliScorer(
+                config.nli_model,
+                config.nli_revision,
+            )
+            directional = score_bidirectional(
+                effective_scorer,
+                [
+                    (str(payload["a"]), str(payload["b"]))
+                    for _, _, payload in missing
+                ],
+                batch_size=32,
+            )
+            parsed_rows = [
+                scores_to_columns(scores) for scores in directional
+            ]
+        for (_, key, payload), parsed in zip(missing, parsed_rows, strict=True):
+            entry = cache_entry(
+                task="nli",
+                parsed=parsed,
+                error=None,
+                observed_model=f"{config.nli_model}@{config.nli_revision}",
+                usage={},
+                usage_scope=None,
+                state="success",
+            )
+            cache.put(key, entry)
+            cached[str(payload["pair_id"])] = entry
+
+    edges: list[dict[str, Any]] = []
+    for candidate in candidates:
+        a_id = str(candidate["proposition_a_id"])
+        b_id = str(candidate["proposition_b_id"])
+        pair_id = _pair_id(a_id, b_id)
+        entry = cached.get(pair_id)
+        if entry is None or not isinstance(entry.get("parsed"), dict):
+            candidate["nli_action"] = "advisory_unavailable"
+            continue
+        columns = {
+            key: float(value)
+            for key, value in dict(entry["parsed"]).items()
+        }
+        candidate.update(columns)
+        action, relation, confidence = _profiled_nli_action(
+            columns,
+            inference.profile,
+        )
+        if (
+            relation is not None
+            and relation != "unrelated"
+            and confidence < config.threshold_for(relation)
+        ):
+            action = "advisory_below_cli_threshold"
+            relation = None
+        candidate["nli_action"] = action
+        if relation is None:
+            continue
+        candidate.update(
+            {
+                "classification_relation": relation,
+                "classification_confidence": confidence,
+                "supporting_fields": json.dumps(
+                    [
+                        {
+                            "proposition": "A",
+                            "field": "question",
+                            "value": str(by_id[a_id]["question"]),
+                        },
+                        {
+                            "proposition": "B",
+                            "field": "question",
+                            "value": str(by_id[b_id]["question"]),
+                        },
+                    ],
+                    sort_keys=True,
+                ),
+                "a_implies_b": relation in {"equivalent", "A_implies_B"},
+                "b_implies_a": relation in {"equivalent", "B_implies_A"},
+                "explanation": f"Profile-gated local NLI action {action}",
+                "assumptions": [],
+                "requires_review": False,
+                "unsupported_assumption": False,
+                "discovery_method": "llm",
+                "model_version": f"{config.nli_model}@{config.nli_revision}",
+                "prompt_version": "nli-profile-v1",
+                "inference_fingerprint": fingerprint,
+                "model_profile_id": (
+                    inference.profile.profile_id if inference.profile else None
+                ),
+            }
+        )
+        if relation == "unrelated":
+            candidate["status"] = "rejected"
+            continue
+        candidate["status"] = "accepted"
+        if relation == "A_implies_B":
+            edge_type, src, dst = "implies", a_id, b_id
+        elif relation == "B_implies_A":
+            edge_type, src, dst = "implies", b_id, a_id
+        else:
+            edge_type, src, dst = "equivalent", *sorted((a_id, b_id))
+        edges.append(
+            _logic_edge_row(
+                {
+                    "edge_type": edge_type,
+                    "src_node_id": src,
+                    "dst_node_id": dst,
+                    "edge_basis": "profile_gated_open_nli",
+                    "explanation": f"Profile-gated local NLI action {action}",
+                    "confidence": confidence,
+                },
+                by_id,
+                discovery_method="llm",
+                rule_version=None,
+                model_version=f"{config.nli_model}@{config.nli_revision}",
+                prompt_version="nli-profile-v1",
+                assumptions=[],
+                inference_fingerprint_value=fingerprint,
+                model_profile_id=(
+                    inference.profile.profile_id if inference.profile else None
+                ),
+            )
+        )
+    return edges, []
+
+
+def _nli_text(proposition: dict[str, Any]) -> str:
+    return " | ".join(
+        str(proposition.get(field) or "")
+        for field in (
+            "question",
+            "description",
+            "outcome",
+            "subject",
+            "predicate",
+            "operator",
+            "threshold",
+            "unit",
+            "time_start",
+            "time_end",
+            "event_scope",
+            "polarity",
+        )
+    )
+
+
+def _profiled_nli_action(
+    scores: dict[str, float],
+    profile: ModelProfile | None,
+) -> tuple[str, str | None, float]:
+    if profile is None:
+        return "advisory_unprofiled", None, 0.0
+    actions = profile.nli_actions
+    candidates = (
+        (
+            "equivalent",
+            "equivalent",
+            min(
+                scores["nli_a_to_b_entailment"],
+                scores["nli_b_to_a_entailment"],
+            ),
+        ),
+        (
+            "implies_a_to_b",
+            "A_implies_B",
+            min(
+                scores["nli_a_to_b_entailment"],
+                1.0 - scores["nli_b_to_a_entailment"],
+            ),
+        ),
+        (
+            "implies_b_to_a",
+            "B_implies_A",
+            min(
+                scores["nli_b_to_a_entailment"],
+                1.0 - scores["nli_a_to_b_entailment"],
+            ),
+        ),
+        (
+            "unrelated",
+            "unrelated",
+            min(
+                scores["nli_a_to_b_neutral"],
+                scores["nli_b_to_a_neutral"],
+            ),
+        ),
+    )
+    for action, relation, score in candidates:
+        gate = actions.get(action)
+        if gate is not None and gate.enabled and score >= gate.threshold:
+            return action, relation, score
+    return "advisory_below_profile_threshold", None, 0.0
+
+
 def _classify_candidates(
     candidates: Sequence[dict[str, Any]],
     propositions: Sequence[dict[str, Any]],
     config: DiscoveryConfig,
     cache: JsonCache,
     state: RunState,
-    client: object | None,
+    inference: _InferenceContext,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     by_id = {
         str(proposition["proposition_id"]): proposition
@@ -1929,6 +2605,7 @@ def _classify_candidates(
             candidate
             for candidate in candidates
             if not candidate.get("_deterministic")
+            and candidate.get("status") not in {"accepted", "rejected"}
         ),
         key=_candidate_sort_key,
     )
@@ -1945,14 +2622,14 @@ def _classify_candidates(
         if pair not in selected_ids:
             candidate["status"] = "not_classified_budget"
 
-    schema_hash = _model_schema_hash(PairClassificationBatch)
+    schema_hash = _model_schema_hash(AtomicPairAssessment)
     cached: dict[str, dict[str, Any]] = {}
     missing: list[tuple[dict[str, Any], str, dict[str, object]]] = []
     for candidate in selected:
         payload = _pair_payload(candidate, by_id)
         key = cache.key(
             "classify",
-            config.classify_model,
+            inference.fingerprints["classify"],
             CLASSIFY_PROMPT_VERSION,
             _text_hash(_CLASSIFY_PROMPT),
             schema_hash,
@@ -1975,13 +2652,25 @@ def _classify_candidates(
             raise ValueError(
                 f"Offline discovery cache is missing {len(missing)} relation classifications"
             )
-        client = client or _new_openai_client()
+        stage_client = inference.client
+        close_stage_client = False
+        if stage_client is None:
+            stage_client = LocalStructuredClient(
+                config.llm_base_url,
+                allow_remote=config.allow_remote_inference,
+            )
+            close_stage_client = True
         results = _run_async(
-            _run_batched(
+            _run_inference_stage(
+                stage_client,
                 [item[2] for item in missing],
-                20,
-                config.llm_concurrency,
-                lambda batch: _openai_classify_batch(client, batch, config),
+                lambda batch: _local_classify_pair(
+                    stage_client,
+                    batch[0],
+                    config,
+                ),
+                concurrency=config.llm_concurrency,
+                close_after=close_stage_client,
             )
         )
         missing_by_pair = {
@@ -2009,8 +2698,7 @@ def _classify_candidates(
             else:
                 parsed, observed_model, usage = result
                 by_pair = {
-                    pair.pair_id: pair.model_dump(mode="json")
-                    for pair in parsed.pairs
+                    parsed.pair_id: parsed.model_dump(mode="json")
                 }
                 state.observed_classify_models.add(observed_model)
                 state.add_usage(usage, "classify")
@@ -2050,11 +2738,11 @@ def _classify_candidates(
         entry = cached[pair_id]
         observed_model = str(entry.get("observed_model") or config.classify_model)
         state.observed_classify_models.add(observed_model)
-        classification: PairClassification | None = None
+        classification: AtomicPairAssessment | None = None
         error = cache_error(entry)
         if not error and entry.get("parsed") is not None:
             try:
-                classification = PairClassification.model_validate(entry["parsed"])
+                classification = AtomicPairAssessment.model_validate(entry["parsed"])
                 if classification.pair_id != pair_id:
                     raise ValueError("classification returned the wrong pair_id")
             except (ValueError, TypeError) as exc:
@@ -2069,6 +2757,10 @@ def _classify_candidates(
                     "discovery_method": "llm",
                     "model_version": observed_model,
                     "prompt_version": CLASSIFY_PROMPT_VERSION,
+                    "inference_fingerprint": inference.fingerprints["classify"],
+                    "model_profile_id": (
+                        inference.profile.profile_id if inference.profile else None
+                    ),
                 }
             )
             reviews.append(
@@ -2086,9 +2778,11 @@ def _classify_candidates(
             )
             continue
 
+        relation, derivation_error = _derive_atomic_relation(classification)
+        explanation = _atomic_explanation(classification, relation, derivation_error)
         candidate.update(
             {
-                "classification_relation": classification.relation,
+                "classification_relation": relation,
                 "classification_confidence": classification.confidence,
                 "supporting_fields": json.dumps(
                     [
@@ -2097,17 +2791,27 @@ def _classify_candidates(
                     ],
                     sort_keys=True,
                 ),
-                "a_implies_b": classification.a_implies_b.supported,
-                "b_implies_a": classification.b_implies_a.supported,
-                "explanation": classification.explanation,
+                "atomic_a_implies_b": classification.a_implies_b,
+                "atomic_b_implies_a": classification.b_implies_a,
+                "atomic_can_both_be_true": classification.can_both_be_true,
+                "atomic_must_one_be_true": classification.must_one_be_true,
+                "atomic_logically_related": classification.logically_related,
+                "a_implies_b": classification.a_implies_b == "yes",
+                "b_implies_a": classification.b_implies_a == "yes",
+                "explanation": explanation,
                 "assumptions": classification.assumptions,
                 "requires_review": classification.requires_review,
+                "unsupported_assumption": classification.unsupported_assumption,
                 "discovery_method": "llm",
                 "model_version": observed_model,
                 "prompt_version": CLASSIFY_PROMPT_VERSION,
+                "inference_fingerprint": inference.fingerprints["classify"],
+                "model_profile_id": (
+                    inference.profile.profile_id if inference.profile else None
+                ),
             }
         )
-        validation_error = _classification_validation_error(
+        validation_error = derivation_error or _classification_validation_error(
             classification,
             by_id[str(candidate["proposition_a_id"])],
             by_id[str(candidate["proposition_b_id"])],
@@ -2120,7 +2824,7 @@ def _classify_candidates(
                     "classification_invalid_evidence",
                     str(candidate["proposition_a_id"]),
                     str(candidate["proposition_b_id"]),
-                    classification.relation,
+                    relation,
                     classification.confidence,
                     validation_error,
                     classification.assumptions,
@@ -2129,44 +2833,80 @@ def _classify_candidates(
                 )
             )
             continue
-        accepted_label = classification.relation not in {"unrelated", "uncertain"}
+        assert relation is not None
+        accepted_label = relation not in {"unrelated", "uncertain"}
+        profile_relation = (
+            "implies"
+            if relation in {"A_implies_B", "B_implies_A"}
+            else relation
+        )
+        calibrated = (
+            inference.profile is not None
+            and profile_relation in inference.profile.relations
+            and inference.profile.relations[profile_relation].enabled
+        )
+        profile_threshold = (
+            inference.profile.relations[profile_relation].threshold
+            if calibrated and inference.profile is not None
+            else 1.0
+        )
+        effective_threshold = max(
+            config.threshold_for(relation),
+            profile_threshold,
+        )
         accepted = (
             accepted_label
             and classification.confidence
-            >= config.threshold_for(classification.relation)
+            >= effective_threshold
             and not classification.requires_review
+            and not classification.unsupported_assumption
+            and calibrated
         )
         if accepted:
             candidate["status"] = "accepted"
-            relation = _classification_relation(candidate, classification)
+            relation_row = _classification_relation(
+                candidate,
+                classification,
+                relation,
+            )
             edges.append(
                 _logic_edge_row(
-                    relation,
+                    relation_row,
                     by_id,
                     discovery_method="llm",
                     rule_version=None,
                     model_version=observed_model,
                     prompt_version=CLASSIFY_PROMPT_VERSION,
                     assumptions=classification.assumptions,
+                    inference_fingerprint_value=inference.fingerprints["classify"],
+                    model_profile_id=inference.profile.profile_id,
                 )
             )
-        elif classification.relation == "unrelated" and not classification.requires_review:
+        elif relation == "unrelated" and not classification.requires_review:
             candidate["status"] = "rejected"
         else:
             candidate["status"] = "review"
             kind = (
-                "classification_requires_review"
-                if classification.requires_review
-                else "classification_low_confidence"
+                "uncalibrated_model"
+                if accepted_label and not calibrated
+                else (
+                    "classification_unsupported_assumption"
+                    if classification.unsupported_assumption
+                    else (
+                        "classification_requires_review"
+                        if classification.requires_review
+                        else "classification_low_confidence"
+                    )
+                )
             )
             reviews.append(
                 _review_row(
                     kind,
                     str(candidate["proposition_a_id"]),
                     str(candidate["proposition_b_id"]),
-                    classification.relation,
+                    relation,
                     classification.confidence,
-                    classification.explanation,
+                    explanation,
                     classification.assumptions,
                     observed_model,
                     CLASSIFY_PROMPT_VERSION,
@@ -2176,49 +2916,19 @@ def _classify_candidates(
 
 
 def _classification_validation_error(
-    classification: PairClassification,
+    classification: AtomicPairAssessment,
     proposition_a: dict[str, Any],
     proposition_b: dict[str, Any],
 ) -> str | None:
-    expected_directions = {
-        "equivalent": (True, True),
-        "A_implies_B": (True, False),
-        "B_implies_A": (False, True),
-        "mutually_exclusive": (False, False),
-        "complement": (False, False),
-        "compatible": (False, False),
-        "unrelated": (False, False),
-        "uncertain": (False, False),
-    }
-    actual = (
-        classification.a_implies_b.supported,
-        classification.b_implies_a.supported,
-    )
-    if actual != expected_directions[classification.relation]:
-        return (
-            "directional entailment assessments disagree with the selected "
-            f"relation {classification.relation}"
-        )
-    all_support = [
-        *classification.supporting_fields,
-        *classification.a_implies_b.supporting_fields,
-        *classification.b_implies_a.supporting_fields,
-    ]
+    all_support = classification.supporting_fields
+    if classification.unsupported_assumption:
+        return "classification declares an unsupported assumption"
     if classification.assumptions and not classification.supporting_fields:
         return "classification contains assumptions without supporting-field citations"
-    for direction, assessment in (
-        ("A-to-B", classification.a_implies_b),
-        ("B-to-A", classification.b_implies_a),
-    ):
-        if assessment.assumptions and not assessment.supporting_fields:
-            return (
-                f"{direction} assessment contains assumptions without "
-                "supporting-field citations"
-            )
-    if (
-        classification.relation not in {"unrelated", "uncertain"}
-        and not all_support
-    ):
+    relation, relation_error = _derive_atomic_relation(classification)
+    if relation_error:
+        return relation_error
+    if relation not in {"unrelated", "uncertain"} and not all_support:
         return "positive classifications require supporting-field citations"
     for citation in all_support:
         proposition = (
@@ -2230,48 +2940,97 @@ def _classification_validation_error(
                 f"supporting field {citation.proposition}.{citation.field} "
                 "is empty in the supplied proposition"
             )
-        supplied = json.dumps(raw_value, sort_keys=True, default=str).casefold()
-        if citation.value.strip().casefold() not in supplied:
+        supplied_values = {
+            str(raw_value).strip().casefold(),
+            json.dumps(
+                raw_value,
+                sort_keys=True,
+                default=str,
+                separators=(",", ":"),
+            ).strip().casefold(),
+        }
+        if isinstance(raw_value, (list, tuple, set)):
+            supplied_values.update(
+                str(item).strip().casefold() for item in raw_value
+            )
+        if citation.value.strip().casefold() not in supplied_values:
             return (
                 f"supporting value for {citation.proposition}.{citation.field} "
-                "does not occur in the supplied proposition"
+                "does not exactly match the supplied proposition"
             )
     return None
 
 
-async def _openai_classify_batch(
+def _derive_atomic_relation(
+    assessment: AtomicPairAssessment,
+) -> tuple[str | None, str | None]:
+    judgments = (
+        assessment.a_implies_b,
+        assessment.b_implies_a,
+        assessment.can_both_be_true,
+        assessment.must_one_be_true,
+        assessment.logically_related,
+    )
+    if "unknown" in judgments:
+        return "uncertain", None
+    a_to_b = assessment.a_implies_b == "yes"
+    b_to_a = assessment.b_implies_a == "yes"
+    co_possible = assessment.can_both_be_true == "yes"
+    exhaustive = assessment.must_one_be_true == "yes"
+    related = assessment.logically_related == "yes"
+    if (a_to_b or b_to_a) and not co_possible:
+        return None, "entailment contradicts the claim that both cannot be true"
+    if (a_to_b or b_to_a or exhaustive or not co_possible) and not related:
+        return None, "positive logical judgments contradict logically_related=no"
+    if a_to_b and b_to_a:
+        return "equivalent", None
+    if not a_to_b and not b_to_a and not co_possible:
+        return ("complement" if exhaustive else "mutually_exclusive"), None
+    if a_to_b != b_to_a:
+        return ("A_implies_B" if a_to_b else "B_implies_A"), None
+    if not a_to_b and not b_to_a and co_possible and related:
+        return "compatible", None
+    if not a_to_b and not b_to_a and not related and not exhaustive:
+        return "unrelated", None
+    return None, "atomic judgments do not map to a consistent relation"
+
+
+def _atomic_explanation(
+    assessment: AtomicPairAssessment,
+    relation: str | None,
+    error: str | None,
+) -> str:
+    if error:
+        return error
+    return (
+        f"Atomic judgments derive {relation}: A→B={assessment.a_implies_b}, "
+        f"B→A={assessment.b_implies_a}, both_true={assessment.can_both_be_true}, "
+        f"one_required={assessment.must_one_be_true}, "
+        f"related={assessment.logically_related}."
+    )
+
+
+async def _local_classify_pair(
     client: object,
-    payloads: list[dict[str, object]],
+    payload: dict[str, object],
     config: DiscoveryConfig,
-) -> tuple[PairClassificationBatch, str, dict[str, int]]:
-    response = await _with_retries(
-        lambda: client.responses.parse(
+) -> tuple[AtomicPairAssessment, str, dict[str, int]]:
+    result = await _with_retries(
+        lambda: client.generate(
             model=config.classify_model,
-            input=[
-                {"role": "system", "content": _CLASSIFY_PROMPT},
-                {
-                    "role": "user",
-                    "content": json.dumps(payloads, sort_keys=True, default=str),
-                },
-            ],
-            text_format=PairClassificationBatch,
-            reasoning={"effort": "medium"},
-            store=False,
+            system_prompt=_CLASSIFY_PROMPT,
+            payload=payload,
+            response_model=AtomicPairAssessment,
+            settings=_generation_settings(config, role="classify"),
         )
     )
-    parsed = getattr(response, "output_parsed", None)
-    if parsed is None:
-        raise ValueError("OpenAI returned no parsed relation output")
-    parsed_batch = PairClassificationBatch.model_validate(parsed)
-    _validate_returned_ids(
-        [str(payload["pair_id"]) for payload in payloads],
-        [pair.pair_id for pair in parsed_batch.pairs],
-        "pair",
-    )
+    parsed = AtomicPairAssessment.model_validate(result.parsed)
+    if parsed.pair_id != str(payload["pair_id"]):
+        raise ValueError("Structured classification returned the wrong pair_id")
     return (
-        parsed_batch,
-        str(getattr(response, "model", config.classify_model)),
-        _response_usage(response),
+        parsed,
+        str(result.observed_model),
+        dict(result.usage),
     )
 
 
@@ -2299,23 +3058,25 @@ def _public_proposition(proposition: dict[str, Any]) -> dict[str, object]:
 
 
 def _classification_relation(
-    candidate: dict[str, Any], classification: PairClassification
+    candidate: dict[str, Any],
+    classification: AtomicPairAssessment,
+    relation: str,
 ) -> dict[str, Any]:
     a_id = str(candidate["proposition_a_id"])
     b_id = str(candidate["proposition_b_id"])
-    if classification.relation == "A_implies_B":
+    if relation == "A_implies_B":
         edge_type, src, dst = "implies", a_id, b_id
-    elif classification.relation == "B_implies_A":
+    elif relation == "B_implies_A":
         edge_type, src, dst = "implies", b_id, a_id
     else:
-        edge_type = classification.relation
+        edge_type = relation
         src, dst = sorted((a_id, b_id))
     return {
         "edge_type": edge_type,
         "src_node_id": src,
         "dst_node_id": dst,
         "edge_basis": "llm_classifier",
-        "explanation": classification.explanation,
+        "explanation": _atomic_explanation(classification, relation, None),
         "confidence": classification.confidence,
     }
 
@@ -2329,6 +3090,8 @@ def _logic_edge_row(
     model_version: str | None,
     prompt_version: str | None,
     assumptions: list[str],
+    inference_fingerprint_value: str | None = None,
+    model_profile_id: str | None = None,
 ) -> dict[str, Any]:
     src = propositions[str(relation["src_node_id"])]
     dst = propositions[str(relation["dst_node_id"])]
@@ -2369,6 +3132,10 @@ def _logic_edge_row(
         "solver_version": None,
         "constraint_version": None,
         "solver_component_id": None,
+        "inference_fingerprint": (
+            inference_fingerprint_value or src.get("inference_fingerprint")
+        ),
+        "model_profile_id": model_profile_id or src.get("model_profile_id"),
     }
 
 
@@ -2602,6 +3369,8 @@ def _proposition_fingerprint_rows(
         "parse_status",
         "parser_model",
         "prompt_version",
+        "inference_fingerprint",
+        "model_profile_id",
         "source_format",
     }
     return [
@@ -2724,6 +3493,7 @@ def _seed_classification_cache_from_incremental(
     propositions: Sequence[dict[str, Any]],
     config: DiscoveryConfig,
     incremental_stats: dict[str, Any],
+    inference: _InferenceContext,
 ) -> None:
     prior = {
         (
@@ -2742,7 +3512,7 @@ def _seed_classification_cache_from_incremental(
     by_id = {
         str(row["proposition_id"]): row for row in propositions
     }
-    schema_hash = _model_schema_hash(PairClassificationBatch)
+    schema_hash = _model_schema_hash(AtomicPairAssessment)
     prompt_hash = _text_hash(_CLASSIFY_PROMPT)
     seeded = 0
     for candidate in candidates:
@@ -2755,6 +3525,10 @@ def _seed_classification_cache_from_incremental(
             str(by_id[proposition_id]["market_id"]) not in unchanged_markets
             for proposition_id in pair
         ):
+            continue
+        if row.get("inference_fingerprint") != inference.fingerprints["classify"]:
+            continue
+        if not row.get("atomic_a_implies_b"):
             continue
         if (
             list(row.get("candidate_reasons") or [])
@@ -2785,7 +3559,7 @@ def _seed_classification_cache_from_incremental(
             continue
         key = cache.key(
             "classify",
-            config.classify_model,
+            inference.fingerprints["classify"],
             CLASSIFY_PROMPT_VERSION,
             prompt_hash,
             schema_hash,
@@ -2795,27 +3569,17 @@ def _seed_classification_cache_from_incremental(
             continue
         supporting_fields = json.loads(row.get("supporting_fields") or "[]")
         assumptions = list(row.get("assumptions") or [])
-        parsed = PairClassification(
+        parsed = AtomicPairAssessment(
             pair_id=str(payload["pair_id"]),
-            relation=str(row["classification_relation"]),
             confidence=float(row["classification_confidence"]),
             supporting_fields=supporting_fields,
-            explanation=str(row["explanation"]),
             assumptions=assumptions,
-            a_implies_b={
-                "supported": bool(row["a_implies_b"]),
-                "supporting_fields": (
-                    supporting_fields if row["a_implies_b"] else []
-                ),
-                "assumptions": assumptions if row["a_implies_b"] else [],
-            },
-            b_implies_a={
-                "supported": bool(row["b_implies_a"]),
-                "supporting_fields": (
-                    supporting_fields if row["b_implies_a"] else []
-                ),
-                "assumptions": assumptions if row["b_implies_a"] else [],
-            },
+            a_implies_b=str(row["atomic_a_implies_b"]),
+            b_implies_a=str(row["atomic_b_implies_a"]),
+            can_both_be_true=str(row["atomic_can_both_be_true"]),
+            must_one_be_true=str(row["atomic_must_one_be_true"]),
+            logically_related=str(row["atomic_logically_related"]),
+            unsupported_assumption=bool(row["unsupported_assumption"]),
             requires_review=bool(row["requires_review"]),
         )
         cache.put(
@@ -2859,6 +3623,8 @@ def _write_discovery_artifacts(
     execution_plan_rows: Sequence[dict[str, Any]],
     candidate_member_limit: int,
     incremental_stats: dict[str, Any],
+    config: DiscoveryConfig,
+    inference: _InferenceContext,
 ) -> dict[str, object]:
     db = DuckDB(directory / "oddsfox_graph.duckdb")
     try:
@@ -3189,6 +3955,20 @@ def _write_discovery_artifacts(
         }
         write_reports(db, directory, stats)
         _validate_discovery_artifacts(db, directory)
+        _write_json_atomic(
+            directory / "model_manifest.json",
+            inference.manifest.model_dump(mode="json"),
+        )
+        if inference.profile is not None:
+            _write_json_atomic(
+                directory / "model_profile.json",
+                inference.profile.model_dump(mode="json"),
+            )
+        if config.compute_profile is not None:
+            _write_json_atomic(
+                directory / "compute_profile.json",
+                load_compute_profile(config.compute_profile).model_dump(mode="json"),
+            )
         return stats
     finally:
         db.close()
@@ -3380,11 +4160,16 @@ def _discovery_manifest(
     state: RunState,
     timings: dict[str, float],
     state_hashes: dict[str, str],
+    inference: _InferenceContext,
 ) -> dict[str, object]:
+    compute = _compute_accounting(config, state, timings)
     artifact_names = [
         *DISCOVERY_PARQUET_ARTIFACTS,
         *STATE_ARTIFACTS,
         GRAPH_SNAPSHOT_ARTIFACT,
+        "model_manifest.json",
+        *(("model_profile.json",) if inference.profile is not None else ()),
+        *(("compute_profile.json",) if config.compute_profile is not None else ()),
         *(
             ("benchmark.parquet", "evaluation_report.json")
             if config.benchmark_path is not None
@@ -3413,18 +4198,45 @@ def _discovery_manifest(
                 "model": config.embedding_model,
                 "revision": config.embedding_revision,
             },
+            "nli": {
+                "model": config.nli_model,
+                "revision": config.nli_revision,
+            },
         },
         "prompts": {
             "parse": {
                 "version": PARSE_PROMPT_VERSION,
                 "hash": _text_hash(_PARSE_PROMPT),
-                "schema_hash": _model_schema_hash(ParsedMarketBatch),
+                "schema_hash": _model_schema_hash(ParsedMarket),
             },
             "classify": {
                 "version": CLASSIFY_PROMPT_VERSION,
                 "hash": _text_hash(_CLASSIFY_PROMPT),
-                "schema_hash": _model_schema_hash(PairClassificationBatch),
+                "schema_hash": _model_schema_hash(AtomicPairAssessment),
             },
+        },
+        "inference": {
+            "origin": inference.manifest.inference_origin,
+            "runtime": inference.manifest.runtime,
+            "runtime_version": inference.manifest.runtime_version,
+            "model_manifest_id": inference.manifest.manifest_id,
+            "model_manifest_hash": manifest_sha256(inference.manifest),
+            "model_profile_id": (
+                inference.profile.profile_id if inference.profile else None
+            ),
+            "profiled": inference.profile is not None,
+            "fingerprints": inference.fingerprints,
+            "sampling": {
+                "seed": config.sampling_seed,
+                "temperature": config.temperature,
+                "top_p": config.generation_top_p,
+                "top_k": config.generation_top_k,
+                "presence_penalty": config.presence_penalty,
+                "parse_max_output_tokens": config.parse_max_output_tokens,
+                "classify_max_output_tokens": config.classify_max_output_tokens,
+            },
+            "remote_inference_allowed": config.allow_remote_inference,
+            "proprietary_cache_lineage": False,
         },
         "versions": {
             "normalization": NORMALIZATION_VERSION,
@@ -3450,6 +4262,10 @@ def _discovery_manifest(
             "max_propositions": config.max_propositions,
             "max_candidates": config.max_candidates,
             "max_llm_pairs": config.max_llm_pairs,
+            "nli_candidate_pool": min(
+                config.max_candidates,
+                config.max_llm_pairs * 4,
+            ),
             "llm_concurrency": config.llm_concurrency,
             "allow_unbenchmarked_rules": config.allow_unbenchmarked_rules,
         },
@@ -3476,6 +4292,7 @@ def _discovery_manifest(
             if config.pricing_file is not None
             else None
         ),
+        "compute": compute,
         "solver": stats.get("solver"),
         "rules": stats.get("rules"),
         "cache": {
@@ -3492,6 +4309,53 @@ def _discovery_manifest(
         "stage_timings": timings,
     }
     return json.loads(json.dumps(manifest, default=str))
+
+
+def _compute_accounting(
+    config: DiscoveryConfig,
+    state: RunState,
+    timings: dict[str, float],
+) -> dict[str, object] | None:
+    if config.compute_profile is None:
+        return None
+    profile = load_compute_profile(config.compute_profile)
+    seconds = sum(
+        float(timings.get(stage, 0.0))
+        for stage in ("parse_propositions", "score_nli", "classify_pairs")
+    )
+    hours = seconds / 3600.0
+    energy_kwh = (
+        profile.load_watts * hours / 1000.0
+        if profile.load_watts is not None
+        else None
+    )
+    electricity_cost = (
+        energy_kwh * profile.electricity_usd_per_kwh
+        if energy_kwh is not None
+        and profile.electricity_usd_per_kwh is not None
+        else None
+    )
+    usage = state.usage_manifest()
+    current_input_tokens = int(usage.get("input_tokens") or 0)
+    current_output_tokens = int(usage.get("output_tokens") or 0)
+    current_tokens = int(usage.get("total_tokens") or 0)
+    return {
+        "profile_hash": _sha256(config.compute_profile.resolve()),
+        "currency": profile.currency,
+        "model_stage_seconds": seconds,
+        "model_stage_hours": hours,
+        "estimated_energy_kwh": energy_kwh,
+        "hardware_cost": hours * profile.hardware_hour_usd,
+        "electricity_cost": electricity_cost,
+        "total_compute_cost": (
+            hours * profile.hardware_hour_usd + (electricity_cost or 0.0)
+        ),
+        "peak_rss_mb": _peak_rss_mb(),
+        "current_request_input_tokens": current_input_tokens,
+        "current_request_output_tokens": current_output_tokens,
+        "current_request_tokens": current_tokens,
+        "tokens_per_second": current_tokens / seconds if seconds > 0 else None,
+    }
 
 
 def _publish_staged(staging: Path, out_dir: Path) -> None:
@@ -3511,6 +4375,13 @@ def _publish_staged(staging: Path, out_dir: Path) -> None:
     reports_out.mkdir(exist_ok=True)
     for name in REPORTS:
         os.replace(staging / "reports" / name, reports_out / name)
+    for name in ("model_manifest.json", "model_profile.json", "compute_profile.json"):
+        staged = staging / name
+        target = out_dir / name
+        if staged.exists():
+            os.replace(staged, target)
+        elif target.exists():
+            target.unlink()
     if (staging / "benchmark.parquet").exists():
         os.replace(staging / "benchmark.parquet", out_dir / "benchmark.parquet")
         os.replace(
@@ -3525,15 +4396,18 @@ def _publish_staged(staging: Path, out_dir: Path) -> None:
 
 
 def _write_manifest_last(out_dir: Path, manifest: dict[str, object]) -> None:
-    path = out_dir / "build_manifest.json"
+    _write_json_atomic(out_dir / "build_manifest.json", manifest)
+
+
+def _write_json_atomic(path: Path, value: object) -> None:
     descriptor, temporary_name = tempfile.mkstemp(
-        prefix=".build_manifest.",
+        prefix=f".{path.name}.",
         suffix=".tmp",
-        dir=out_dir,
+        dir=path.parent,
     )
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
-            json.dump(manifest, stream, indent=2, sort_keys=True, default=str)
+            json.dump(value, stream, indent=2, sort_keys=True, default=str)
             stream.write("\n")
             stream.flush()
             os.fsync(stream.fileno())
@@ -3587,7 +4461,7 @@ def _parse_error_rows(
                 "market_source_hash": proposition["market_source_hash"],
                 "parser_model": proposition["parser_model"],
                 "prompt_version": proposition["prompt_version"],
-                "schema_version": _model_schema_hash(ParsedMarketBatch),
+                "schema_version": _model_schema_hash(ParsedMarket),
                 "normalization_version": proposition["normalization_version"],
             }
         )
@@ -3630,20 +4504,6 @@ def _review_row(
     }
 
 
-def _new_openai_client() -> object:
-    if not os.environ.get("OPENAI_API_KEY"):
-        raise ValueError(
-            "OPENAI_API_KEY is required when discovery cache entries are missing"
-        )
-    try:
-        from openai import AsyncOpenAI
-    except ImportError as exc:  # pragma: no cover - dependency installation guard
-        raise ImportError(
-            'Automated discovery requires `pip install -e ".[discovery]"`.'
-        ) from exc
-    return AsyncOpenAI()
-
-
 async def _run_batched(
     payloads: list[dict[str, object]],
     batch_size: int,
@@ -3666,6 +4526,26 @@ async def _run_batched(
     return await asyncio.gather(*(run(batch) for batch in batches))
 
 
+async def _run_inference_stage(
+    client: object,
+    payloads: list[dict[str, object]],
+    call: Callable[[list[dict[str, object]]], Awaitable[Any]],
+    *,
+    concurrency: int,
+    close_after: bool,
+) -> list[tuple[list[dict[str, object]], Any]]:
+    try:
+        return await _run_batched(
+            payloads,
+            1,
+            concurrency,
+            call,
+        )
+    finally:
+        if close_after:
+            await client.aclose()
+
+
 async def _with_retries(call: Callable[[], Awaitable[Any]]) -> Any:
     last_error: Exception | None = None
     for attempt in range(3):
@@ -3681,30 +4561,19 @@ async def _with_retries(call: Callable[[], Awaitable[Any]]) -> Any:
 
 
 def _is_transient_error(exc: Exception) -> bool:
+    retryable = getattr(exc, "retryable", None)
+    if isinstance(retryable, bool):
+        return retryable
     status_code = getattr(exc, "status_code", None)
     if isinstance(status_code, int) and (
         status_code in {408, 409, 429} or status_code >= 500
     ):
         return True
-    return type(exc).__name__ in {
-        "APIConnectionError",
-        "APITimeoutError",
-        "InternalServerError",
-        "RateLimitError",
-    }
+    return isinstance(exc, (ConnectionError, TimeoutError))
 
 
 def _run_async(awaitable: Awaitable[Any]) -> Any:
     return asyncio.run(awaitable)
-
-
-def _response_usage(response: object) -> dict[str, int]:
-    usage = getattr(response, "usage", None)
-    return {
-        "input_tokens": int(getattr(usage, "input_tokens", 0) or 0),
-        "output_tokens": int(getattr(usage, "output_tokens", 0) or 0),
-        "total_tokens": int(getattr(usage, "total_tokens", 0) or 0),
-    }
 
 
 def _model_schema_hash(model: type[BaseModel]) -> str:

@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 
-CACHE_ENTRY_VERSION = 3
+CACHE_ENTRY_VERSION = 4
 CacheState = Literal["success", "stable_failure", "transient_failure"]
 
 
@@ -46,7 +46,7 @@ def cache_entry(
             "total_tokens": int(usage.get("total_tokens", 0)),
         },
         "usage_scope": usage_scope,
-        "usage_accounting": "batch_total",
+        "usage_accounting": "request_total",
     }
 
 
@@ -78,7 +78,7 @@ class JsonCache:
     @staticmethod
     def key(
         task: str,
-        model: str,
+        inference_fingerprint: str,
         prompt_version: str,
         prompt_hash: str,
         schema_hash: str,
@@ -88,8 +88,7 @@ class JsonCache:
             {
                 "task": task,
                 "cache_entry_version": CACHE_ENTRY_VERSION,
-                "model": model,
-                "reasoning_effort": "medium",
+                "inference_fingerprint": inference_fingerprint,
                 "prompt_version": prompt_version,
                 "prompt_hash": prompt_hash,
                 "schema_hash": schema_hash,
@@ -179,30 +178,11 @@ class JsonCache:
             if state not in {"success", "stable_failure", "transient_failure"}:
                 raise ValueError(f"Unsupported discovery cache state {state!r}")
             return dict(raw)
-        if raw.get("version") == 2:
-            state = raw.get("state")
-            if state not in {"success", "stable_failure", "transient_failure"}:
-                raise ValueError(f"Unsupported discovery cache state {state!r}")
-            migrated = dict(raw)
-            migrated["version"] = CACHE_ENTRY_VERSION
-            return migrated
-
-        # v1 stored both permanent and retryable failures as a plain error string.
-        # Replay them offline, but always retry them online.
-        error = raw.get("error")
-        entry = cache_entry(
-            task=str(raw.get("task") or "legacy"),
-            parsed=raw.get("parsed"),
-            error=str(error) if error else None,
-            observed_model=str(raw.get("observed_model") or ""),
-            usage=(
-                dict(raw.get("usage"))
-                if isinstance(raw.get("usage"), dict)
-                else {}
-            ),
-            usage_scope=None,
-            state="transient_failure" if error else "success",
-            error_type="LegacyCacheError" if error else None,
+        if raw.get("version") in {1, 2, 3}:
+            raise ValueError(
+                "This cache entry predates the v0.6 self-hosted inference "
+                "fingerprint and cannot be reused. Use an empty cache directory."
+            )
+        raise ValueError(
+            f"Unsupported discovery cache version {raw.get('version')!r}"
         )
-        entry["usage_accounting"] = "legacy_unscoped"
-        return entry

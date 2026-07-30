@@ -17,7 +17,7 @@ from validate_discovery_release import (
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Create a content-bound v0.5 release fixture manifest."
+        description="Create a content-bound v0.6 release fixture manifest."
     )
     parser.add_argument("--fixture-root", required=True, type=Path)
     parser.add_argument(
