@@ -26,29 +26,50 @@ snapshots directly.
 ## Discovery Pipeline
 
 1. Detect a compact market snapshot or OddsFox minutely/hourly export.
-2. Drop source rows that cannot identify propositions, then deterministically
-   select markets by `volume DESC, market_id` within `max_propositions`.
+2. Validate the full eligible catalog, select lightweight market summaries by
+   `volume DESC, market_id` within `max_propositions`, then fetch full arrays
+   only for the retained market IDs.
 3. Parse outcomes with the Pydantic structured-output contract. Normalize
    Unicode/case, exact generic aliases, units, and dates while preserving
    original values.
 4. Embed canonical proposition text locally with the pinned
    `sentence-transformers/all-MiniLM-L6-v2` revision and retain each
    proposition's stable top-k neighbors.
-5. Canonicalize unordered candidate pairs and retain all structural and
-   semantic reasons.
+5. Write structural and embedding reason rows to temporary DuckDB relations.
+   Reserve every deterministic proof, aggregate reasons relationally, and
+   materialize only the stable capped candidate set in Python.
 6. Apply same-market, equivalence, numeric threshold, time containment,
    tournament stage, and single-winner deterministic rules.
 7. Classify only prioritized unresolved pairs with bounded asynchronous
    `responses.parse` calls.
 8. Enforce confidence/review gates and global consistency. Conflicting
    deterministic proofs fail; LLM conflicts enter the review queue.
-9. Stage, validate, sort, and atomically publish artifacts. Write
+9. Bulk-bind typed rows into DuckDB, stage, validate, sort, and atomically
+   publish non-manifest artifacts. Freeze run statistics, then write
    `build_manifest.json` last.
 
 Parse and classification requests use content-addressed JSON cache entries
 covering task, canonical input, requested model, reasoning setting, prompt, and
-schema. `--offline` reads the same pipeline but fails on any cache miss and
-never needs an API key.
+schema. Entries distinguish success, stable failure, and exhausted transient
+failure. Offline mode replays any recorded terminal outcome and fails on a true
+cache miss; online mode retries transient entries. Offline mode never needs an
+API key.
+
+## Discovery Modules
+
+`oddsfox_graph.discovery` remains the public facade and orchestrator. Focused
+implementation modules live under `oddsfox_graph._discovery`:
+
+- `contracts`: Pydantic and source/configuration contracts
+- `input`: schema detection, validation, selection, and normalization
+- `cache`: versioned content-addressed entries and atomic storage
+- `metrics`: monotonic timings and current/cached usage accounting
+- `candidates`: bounded DuckDB-backed reason aggregation
+- `relations`: deterministic rule semantics
+- `bulk`: typed chunked DuckDB list-of-struct insertion
+
+This keeps the legacy builder independent and avoids coupling OpenAI or local
+embedding dependencies to DuckDB-only installations.
 
 ## Major Tables And Views
 

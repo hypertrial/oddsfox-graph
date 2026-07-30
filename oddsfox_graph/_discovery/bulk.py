@@ -1,0 +1,36 @@
+from __future__ import annotations
+
+from collections.abc import Sequence
+from typing import Any
+
+from ..queries import DuckDB
+
+
+BULK_INSERT_CHUNK_SIZE = 10_000
+
+
+def create_and_fill(
+    db: DuckDB,
+    table: str,
+    columns: dict[str, str],
+    rows: Sequence[dict[str, Any]],
+    *,
+    chunk_size: int = BULK_INSERT_CHUNK_SIZE,
+) -> None:
+    """Create a typed table and insert rows through DuckDB list-of-struct binding."""
+
+    ddl = ", ".join(f"{name} {sql_type}" for name, sql_type in columns.items())
+    db.execute(f"CREATE TABLE {table} ({ddl})")
+    if not rows:
+        return
+    if chunk_size < 1:
+        raise ValueError("chunk_size must be positive")
+    names = list(columns)
+    projection = ", ".join(f"row.{name}" for name in names)
+    sql = f"INSERT INTO {table} SELECT {projection} FROM unnest(?) AS batch(row)"
+    for start in range(0, len(rows), chunk_size):
+        chunk = [
+            {name: row.get(name) for name in names}
+            for row in rows[start : start + chunk_size]
+        ]
+        db.execute(sql, [chunk])

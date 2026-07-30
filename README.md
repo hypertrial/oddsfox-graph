@@ -2,7 +2,7 @@
 
 `oddsfox-graph` turns Polymarket market or token-odds parquet into a proposition
 graph. Each `clob_token_id` becomes a node. The offline `build` command preserves
-the WC2026 structural workflow; the v0.3.0 `discover` command adds typed parsing,
+the WC2026 structural workflow; the v0.3.1 `discover` command adds typed parsing,
 local semantic retrieval, deterministic rules, selective LLM classification,
 review tooling, and complete provenance.
 
@@ -72,6 +72,9 @@ Legacy `build` remains DuckDB-only. Live discovery also requires
 
 ```bash
 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest -q
+python -m ruff check .
+python -m build
+python -m oddsfox_graph.cli --help
 ```
 
 ## Build Artifacts
@@ -109,9 +112,10 @@ python -m oddsfox_graph.cli discover \
 before running the smoke commands.
 
 The catalog is deterministically capped by highest `volume`, then `market_id`,
-to honor `--max-propositions` (default 2,000). Unusable source markets and the
-selection counts are recorded in the manifest. Reproduce the completed run
-without an API key:
+to honor `--max-propositions` (default 2,000). Discovery first selects from
+lightweight market summaries and only materializes full arrays for retained
+markets. Unusable source markets and selection counts are recorded in the
+manifest. Reproduce the completed run without an API key:
 
 ```bash
 python -m oddsfox_graph.cli discover \
@@ -133,6 +137,25 @@ python -m oddsfox_graph.cli review-export \
 python -m oddsfox_graph.cli review-score \
   --out output/discovery-smoke \
   --labels output/discovery-smoke/review.csv
+```
+
+Cache entries explicitly distinguish successful output, stable failure, and an
+exhausted transient failure. Offline mode reproduces every recorded terminal
+outcome; a later online run retries transient failures instead of treating them
+as permanent. The manifest separates current-request token usage from
+`cached_origin` and `accounted_total` usage.
+
+The protected manual release workflow consumes a real-data fixture artifact
+containing the parquet, complete cache, expected online hashes, and finished
+labels. The equivalent local gate is:
+
+```bash
+python scripts/validate_discovery_release.py \
+  --input data/polymarket_all_markets_20260730T093857Z.parquet \
+  --cache-dir <complete-cache> \
+  --work-dir output/release-validation \
+  --expected-hashes <expected-artifact-hashes.json> \
+  --labels <completed-labels.csv>
 ```
 
 ## Inspect Results
@@ -182,6 +205,8 @@ python -m oddsfox_graph.cli benchmark-summary --out "$ODDSFOX_DATA_DIR/artifacts
 ## Development Check
 
 ```bash
-pytest -q
+PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest -q
+python -m ruff check .
+python -m build
 python -m oddsfox_graph.cli --help
 ```

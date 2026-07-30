@@ -6,35 +6,81 @@ import json
 import os
 import shutil
 import tempfile
-import time
-import unicodedata
 from collections import defaultdict
 from collections.abc import Awaitable, Callable, Sequence
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from itertools import combinations
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 try:
-    from pydantic import BaseModel, ConfigDict, Field
+    from pydantic import BaseModel
 except ImportError as exc:  # pragma: no cover - exercised by CLI installation error
     raise ImportError(
         'Automated discovery requires `pip install -e ".[discovery]"`.'
     ) from exc
 
 from ._diagnostic_stages import write_conditionals
+from ._discovery.bulk import create_and_fill as _create_and_fill
+from ._discovery.cache import JsonCache, cache_entry, cache_error
+from ._discovery.candidates import (
+    candidate_sort_key as _candidate_sort_key,
+    generate_candidates as _generate_candidates_bounded,
+)
+from ._discovery.contracts import (
+    DEFAULT_EMBEDDING_REVISION,
+    DiscoveryConfig,
+    PairClassification,
+    PairClassificationBatch,
+    ParsedMarket,
+    ParsedMarketBatch,
+    ParsedOutcome,
+    PropositionRecord,
+    SourceMarket,
+    SourceOutcome,
+)
+from ._discovery.input import (
+    datetime_or_none as _datetime_or_none,
+    load_source_markets as _load_source_markets,
+    str_or_none as _str_or_none,
+    utc_datetime as _utc_datetime,
+)
+from ._discovery.metrics import RunState, StageRecorder
+from ._discovery.relations import (
+    SEMANTIC_KEYS as _SEMANTIC_KEYS,
+    deterministic_relation as _deterministic_relation,
+    hashable as _hashable,
+    is_winner_proposition as _is_winner_proposition,
+    normalize_text as _normalize_text,
+    proposition_signature as _proposition_signature,
+    stage_rank as _stage_rank,
+)
 from . import __version__
 from .artifacts import ARTIFACT_COLUMNS, REPORTS, reports
 from .graph_snapshot import GRAPH_SNAPSHOT_ARTIFACT, write_graph_snapshot
 from .queries import DuckDB, q
-from .reports import write_reports
+from .reports import write_reports, write_summary_report
+
+
+__all__ = [
+    "DEFAULT_EMBEDDING_REVISION",
+    "DiscoveryConfig",
+    "JsonCache",
+    "PairClassification",
+    "PairClassificationBatch",
+    "ParsedMarket",
+    "ParsedMarketBatch",
+    "ParsedOutcome",
+    "PropositionRecord",
+    "SourceMarket",
+    "SourceOutcome",
+    "discover",
+    "_datetime_or_none",
+    "_load_source_markets",
+]
 
 
 PARSE_PROMPT_VERSION = "proposition-parse-v1"
 CLASSIFY_PROMPT_VERSION = "relation-classify-v1"
 RULE_VERSION = "discovery-rules-v1"
-DEFAULT_EMBEDDING_REVISION = "1110a243fdf4706b3f48f1d95db1a4f5529b4d41"
 
 DISCOVERY_PARQUET_ARTIFACTS = (
     "nodes.parquet",
@@ -169,246 +215,6 @@ LOGIC_EDGE_COLUMNS = dict(
 )
 
 
-class ParsedOutcome(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    outcome: str
-    subject: list[str] = Field(min_length=1)
-    predicate: str | None
-    object: str | None
-    operator: (
-        Literal[
-            "greater_than",
-            "greater_than_or_equal",
-            "less_than",
-            "less_than_or_equal",
-            "equal",
-        ]
-        | None
-    )
-    threshold: float | None
-    unit: str | None
-    time_start: datetime | None
-    time_end: datetime | None
-    competition: str | None
-    jurisdiction: str | None
-    polarity: Literal["positive", "negative"]
-    parse_confidence: float = Field(ge=0.0, le=1.0)
-
-
-class ParsedMarket(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    market_id: str
-    propositions: list[ParsedOutcome] = Field(min_length=1)
-
-
-class ParsedMarketBatch(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    markets: list[ParsedMarket]
-
-
-class PairClassification(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    pair_id: str
-    relation: Literal[
-        "equivalent",
-        "A_implies_B",
-        "B_implies_A",
-        "mutually_exclusive",
-        "complement",
-        "compatible",
-        "unrelated",
-        "uncertain",
-    ]
-    confidence: float = Field(ge=0.0, le=1.0)
-    explanation: str = Field(min_length=1)
-    assumptions: list[str]
-    requires_review: bool
-
-
-class PairClassificationBatch(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    pairs: list[PairClassification]
-
-
-class PropositionRecord(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    proposition_id: str
-    market_id: str
-    event_id: str | None
-    event_slug: str | None
-    clob_token_id: str
-    outcome_index: int
-    outcome: str
-    question: str
-    category: str | None
-    tags: list[str]
-    subject_original: list[str]
-    subject: list[str]
-    predicate: str | None
-    object_original: str | None
-    object: str | None
-    operator: (
-        Literal[
-            "greater_than",
-            "greater_than_or_equal",
-            "less_than",
-            "less_than_or_equal",
-            "equal",
-        ]
-        | None
-    )
-    threshold: float | None
-    unit_original: str | None
-    unit: str | None
-    time_start: datetime | None
-    time_end: datetime | None
-    competition_original: str | None
-    competition: str | None
-    jurisdiction_original: str | None
-    jurisdiction: str | None
-    polarity: Literal["positive", "negative"]
-    parse_confidence: float = Field(ge=0.0, le=1.0)
-    parse_status: Literal["parsed", "failed"]
-    parser_model: str
-    prompt_version: str
-    source_format: str
-
-
-@dataclass(frozen=True)
-class SourceOutcome:
-    outcome_index: int
-    outcome: str
-    clob_token_id: str
-
-
-@dataclass(frozen=True)
-class SourceMarket:
-    market_id: str
-    question: str
-    outcomes: tuple[SourceOutcome, ...]
-    event_id: str | None = None
-    event_slug: str | None = None
-    category: str | None = None
-    tags: tuple[str, ...] = ()
-    time_start: datetime | None = None
-    time_end: datetime | None = None
-    is_active: bool = True
-    is_closed: bool = False
-    first_seen_ts: datetime | None = None
-    last_seen_ts: datetime | None = None
-    volume: float | None = None
-
-
-@dataclass(frozen=True)
-class DiscoveryConfig:
-    cache_dir: Path | None = None
-    offline: bool = False
-    parse_model: str = "gpt-5.6-terra"
-    classify_model: str = "gpt-5.6-terra"
-    embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
-    embedding_revision: str = DEFAULT_EMBEDDING_REVISION
-    accept_confidence: float = 0.95
-    parse_confidence: float = 0.95
-    top_k: int = 20
-    max_propositions: int = 2_000
-    max_candidates: int = 40_000
-    max_llm_pairs: int = 5_000
-    llm_concurrency: int = 8
-
-    def validate(self) -> None:
-        if not 0.0 <= self.accept_confidence <= 1.0:
-            raise ValueError("accept_confidence must be between 0 and 1")
-        if not 0.0 <= self.parse_confidence <= 1.0:
-            raise ValueError("parse_confidence must be between 0 and 1")
-        for name in (
-            "top_k",
-            "max_propositions",
-            "max_candidates",
-            "max_llm_pairs",
-            "llm_concurrency",
-        ):
-            if int(getattr(self, name)) < 1:
-                raise ValueError(f"{name} must be positive")
-
-
-@dataclass
-class RunState:
-    observed_parse_models: set[str] = field(default_factory=set)
-    observed_classify_models: set[str] = field(default_factory=set)
-    usage: dict[str, int] = field(
-        default_factory=lambda: {
-            "input_tokens": 0,
-            "output_tokens": 0,
-            "total_tokens": 0,
-        }
-    )
-    def add_usage(self, usage: dict[str, int]) -> None:
-        for key in self.usage:
-            self.usage[key] += int(usage.get(key, 0))
-
-
-class JsonCache:
-    def __init__(self, directory: Path) -> None:
-        self.directory = directory
-        self.directory.mkdir(parents=True, exist_ok=True)
-        self.hits = 0
-        self.misses = 0
-        self.writes = 0
-
-    @staticmethod
-    def key(
-        task: str,
-        model: str,
-        prompt_version: str,
-        prompt_hash: str,
-        schema_hash: str,
-        payload: object,
-    ) -> str:
-        raw = json.dumps(
-            {
-                "task": task,
-                "model": model,
-                "reasoning_effort": "medium",
-                "prompt_version": prompt_version,
-                "prompt_hash": prompt_hash,
-                "schema_hash": schema_hash,
-                "payload": payload,
-            },
-            sort_keys=True,
-            separators=(",", ":"),
-            default=str,
-        )
-        return hashlib.sha256(raw.encode("utf-8")).hexdigest()
-
-    def get(self, key: str) -> dict[str, Any] | None:
-        path = self.directory / f"{key}.json"
-        if not path.exists():
-            self.misses += 1
-            return None
-        try:
-            value = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            raise ValueError(f"Invalid discovery cache entry {path}: {exc}") from exc
-        self.hits += 1
-        return value
-
-    def put(self, key: str, value: dict[str, Any]) -> None:
-        path = self.directory / f"{key}.json"
-        tmp = path.with_suffix(".tmp")
-        tmp.write_text(
-            json.dumps(value, indent=2, sort_keys=True, default=str) + "\n",
-            encoding="utf-8",
-        )
-        os.replace(tmp, path)
-        self.writes += 1
-
-
 _ENTITY_ALIASES = {
     "argentina national team": "Argentina",
     "btc": "Bitcoin",
@@ -429,20 +235,6 @@ _UNIT_ALIASES = {
     "usd": "USD",
     "us dollars": "USD",
     "%": "percent",
-}
-
-_STAGE_RANKS = {
-    "round of 32": 0,
-    "round of 16": 1,
-    "quarterfinal": 2,
-    "quarterfinals": 2,
-    "semi-final": 3,
-    "semi-finals": 3,
-    "semifinal": 3,
-    "semifinals": 3,
-    "final": 4,
-    "winner": 5,
-    "win": 5,
 }
 
 _PARSE_PROMPT = """Extract one proposition for every supplied market outcome.
@@ -473,16 +265,9 @@ def discover(
         raise ValueError(f"Input parquet does not exist: {input_path}")
 
     out_dir.parent.mkdir(parents=True, exist_ok=True)
-    started = time.time()
-    timings: dict[str, float] = {}
+    recorder = StageRecorder()
 
-    def stage(name: str, fn: Callable[[], Any]) -> Any:
-        t0 = time.time()
-        value = fn()
-        timings[name] = round(time.time() - t0, 3)
-        return value
-
-    source_format, input_rows, markets, input_selection = stage(
+    source_format, input_rows, markets, input_selection = recorder.run(
         "normalize_input",
         lambda: _load_source_markets(
             input_path,
@@ -492,7 +277,7 @@ def discover(
     cache_dir = (config.cache_dir or Path(str(out_dir) + ".cache")).resolve()
     cache = JsonCache(cache_dir)
     state = RunState()
-    propositions, parse_reviews = stage(
+    propositions, parse_reviews = recorder.run(
         "parse_propositions",
         lambda: _parse_propositions(
             markets,
@@ -503,7 +288,7 @@ def discover(
             _client,
         ),
     )
-    candidates = stage(
+    candidates = recorder.run(
         "generate_candidates",
         lambda: _generate_candidates(
             propositions,
@@ -511,11 +296,11 @@ def discover(
             _embedder or _embed_texts,
         ),
     )
-    deterministic_edges = stage(
+    deterministic_edges = recorder.run(
         "derive_deterministic_relations",
         lambda: _derive_deterministic_edges(candidates, propositions),
     )
-    llm_edges, llm_reviews = stage(
+    llm_edges, llm_reviews = recorder.run(
         "classify_pairs",
         lambda: _classify_candidates(
             candidates,
@@ -526,7 +311,7 @@ def discover(
             _client,
         ),
     )
-    logic_edges, consistency_reviews = stage(
+    logic_edges, consistency_reviews = recorder.run(
         "validate_consistency",
         lambda: _validate_logic_edges(deterministic_edges + llm_edges),
     )
@@ -536,7 +321,7 @@ def discover(
         tempfile.mkdtemp(prefix=f".{out_dir.name}.discovery-", dir=out_dir.parent)
     )
     try:
-        stats = stage(
+        stats = recorder.run(
             "publish_artifacts",
             lambda: _write_discovery_artifacts(
                 staging,
@@ -548,366 +333,36 @@ def discover(
                 source_format=source_format,
                 input_rows=input_rows,
                 input_selection=input_selection,
-                started=started,
             ),
         )
+        recorder.run("publish_files", lambda: _publish_staged(staging, out_dir))
+        input_hash, artifact_hashes = recorder.run(
+            "hash_artifacts",
+            lambda: (
+                _sha256(input_path),
+                {
+                    name: _sha256(out_dir / name)
+                    for name in DISCOVERY_PARQUET_ARTIFACTS
+                },
+            ),
+        )
+        stats["runtime_seconds"] = recorder.runtime_seconds()
+        write_summary_report(out_dir, stats)
         manifest = _discovery_manifest(
             input_path,
+            input_hash,
+            artifact_hashes,
             source_format,
             stats,
             config,
             cache,
             state,
-            timings,
-            staging,
+            recorder.timings,
         )
-        (staging / "build_manifest.json").write_text(
-            json.dumps(manifest, indent=2, sort_keys=True, default=str) + "\n",
-            encoding="utf-8",
-        )
-        stage("publish_completed_build", lambda: _publish_staged(staging, out_dir))
-        stats["runtime_seconds"] = round(time.time() - started, 3)
-        return stats
+        _write_manifest_last(out_dir, manifest)
+        return dict(manifest["stats"])
     finally:
         shutil.rmtree(staging, ignore_errors=True)
-
-
-def _load_source_markets(
-    input_path: Path,
-    *,
-    max_propositions: int | None = None,
-) -> tuple[str, int, list[SourceMarket], dict[str, object]]:
-    db = DuckDB()
-    try:
-        db.execute("SET TimeZone = 'UTC'")
-        columns = {
-            str(row["name"]).lower()
-            for row in db.rows(
-                f"SELECT name FROM parquet_schema('{q(input_path)}') "
-                "WHERE name != 'duckdb_schema'"
-            )
-        }
-        input_rows = int(
-            db.scalar(f"SELECT count(*) FROM read_parquet('{q(input_path)}')") or 0
-        )
-        if {"market_id", "question", "outcomes", "clob_token_ids"} <= columns:
-            invalid_market_rows = int(
-                db.scalar(
-                    f"""
-                    SELECT count(*)
-                    FROM read_parquet('{q(input_path)}')
-                    WHERE market_id IS NULL
-                       OR question IS NULL
-                       OR outcomes IS NULL
-                       OR clob_token_ids IS NULL
-                       OR len(outcomes) = 0
-                       OR len(outcomes) != len(clob_token_ids)
-                    """
-                )
-                or 0
-            )
-            input_propositions = int(
-                db.scalar(
-                    f"""
-                    SELECT sum(coalesce(len(outcomes), 0))
-                    FROM read_parquet('{q(input_path)}')
-                    """
-                )
-                or 0
-            )
-            markets = _load_compact_markets(
-                db,
-                input_path,
-                columns,
-                skip_invalid=max_propositions is not None,
-            )
-            source_format = "market_snapshot"
-        elif {
-            "market_id",
-            "question",
-            "outcome_label",
-            "clob_token_id",
-            "event_slug",
-        } <= columns and (
-            "odds_timestamp_epoch" in columns or "odds_hour_epoch" in columns
-        ):
-            markets = _load_odds_markets(db, input_path, columns)
-            invalid_market_rows = 0
-            input_propositions = sum(len(market.outcomes) for market in markets)
-            source_format = (
-                "minutely"
-                if "odds_timestamp_epoch" in columns
-                else "hourly"
-            )
-        else:
-            raise ValueError(
-                "Discovery input must be a compact market snapshot or a supported "
-                "OddsFox minutely/hourly export"
-            )
-    finally:
-        db.close()
-    _validate_source_markets(markets)
-    eligible_markets = len(markets)
-    eligible_propositions = sum(len(market.outcomes) for market in markets)
-    if max_propositions is not None:
-        markets = _select_source_markets(markets, max_propositions)
-    selection = {
-        "strategy": (
-            "volume_desc_then_market_id"
-            if max_propositions is not None
-            else "all_eligible_markets"
-        ),
-        "input_market_rows": input_rows if source_format == "market_snapshot" else None,
-        "input_rows": input_rows,
-        "input_propositions": input_propositions,
-        "invalid_market_rows": invalid_market_rows,
-        "eligible_markets": eligible_markets,
-        "eligible_propositions": eligible_propositions,
-        "selected_markets": len(markets),
-        "selected_propositions": sum(len(market.outcomes) for market in markets),
-        "truncated": len(markets) < eligible_markets,
-    }
-    return source_format, input_rows, markets, selection
-
-
-def _load_compact_markets(
-    db: DuckDB,
-    input_path: Path,
-    columns: set[str],
-    *,
-    skip_invalid: bool = False,
-) -> list[SourceMarket]:
-    rows = db.rows(
-        f"""
-        SELECT
-            market_id::VARCHAR AS market_id,
-            question::VARCHAR AS question,
-            outcomes,
-            clob_token_ids,
-            {_optional_sql(columns, "event_id", "VARCHAR")},
-            {_optional_sql(columns, "event_slug", "VARCHAR")},
-            {_optional_sql(columns, "category", "VARCHAR")},
-            {_optional_sql(columns, "tags", "VARCHAR[]", "[]::VARCHAR[]")},
-            {_optional_sql(columns, "volume", "DOUBLE")},
-            {_timestamp_sql(columns, ("time_start", "start_time", "start_date"), "time_start")},
-            {_timestamp_sql(columns, ("time_end", "end_time", "end_date"), "time_end")}
-        FROM read_parquet('{q(input_path)}')
-        ORDER BY market_id
-        """
-    )
-    markets = []
-    for row in rows:
-        outcomes = list(row["outcomes"] or [])
-        tokens = list(row["clob_token_ids"] or [])
-        if (
-            row["market_id"] is None
-            or row["question"] is None
-            or len(outcomes) != len(tokens)
-            or not outcomes
-        ):
-            if skip_invalid:
-                continue
-            raise ValueError(
-                f"Market {row['market_id']!r} must have non-empty equal-length "
-                "outcomes and clob_token_ids"
-            )
-        markets.append(
-            SourceMarket(
-                market_id=str(row["market_id"]),
-                question=str(row["question"]),
-                event_id=_str_or_none(row.get("event_id")),
-                event_slug=_str_or_none(row.get("event_slug")),
-                category=_str_or_none(row.get("category")),
-                tags=tuple(str(tag) for tag in (row.get("tags") or [])),
-                time_start=_datetime_or_none(row.get("time_start")),
-                time_end=_datetime_or_none(row.get("time_end")),
-                volume=(
-                    float(row["volume"])
-                    if row.get("volume") is not None
-                    else None
-                ),
-                outcomes=tuple(
-                    SourceOutcome(index, str(outcome), str(token))
-                    for index, (outcome, token) in enumerate(
-                        zip(outcomes, tokens, strict=True)
-                    )
-                ),
-            )
-        )
-    return markets
-
-
-def _select_source_markets(
-    markets: Sequence[SourceMarket],
-    max_propositions: int,
-) -> list[SourceMarket]:
-    selected: list[SourceMarket] = []
-    selected_propositions = 0
-    ordered = sorted(
-        markets,
-        key=lambda market: (
-            -(market.volume if market.volume is not None else float("-inf")),
-            market.market_id,
-        ),
-    )
-    for market in ordered:
-        next_count = selected_propositions + len(market.outcomes)
-        if next_count > max_propositions:
-            continue
-        selected.append(market)
-        selected_propositions = next_count
-        if selected_propositions == max_propositions:
-            break
-    if not selected:
-        raise ValueError(
-            "No complete market fits within max_propositions="
-            f"{max_propositions}"
-        )
-    return sorted(selected, key=lambda market: market.market_id)
-
-
-def _load_odds_markets(
-    db: DuckDB, input_path: Path, columns: set[str]
-) -> list[SourceMarket]:
-    epoch = (
-        "odds_timestamp_epoch"
-        if "odds_timestamp_epoch" in columns
-        else "odds_hour_epoch"
-    )
-    timestamp = (
-        "odds_timestamp" if "odds_timestamp" in columns else "odds_hour_utc"
-    )
-    rows = db.rows(
-        f"""
-        WITH ranked AS (
-            SELECT
-                *,
-                min({timestamp}) OVER (PARTITION BY clob_token_id) AS first_seen_ts,
-                max({timestamp}) OVER (PARTITION BY clob_token_id) AS last_seen_ts,
-                row_number() OVER (
-                    PARTITION BY clob_token_id
-                    ORDER BY {epoch} DESC
-                ) AS rn
-            FROM read_parquet('{q(input_path)}')
-        )
-        SELECT
-            market_id::VARCHAR AS market_id,
-            outcome_index::INTEGER AS outcome_index,
-            clob_token_id::VARCHAR AS clob_token_id,
-            question::VARCHAR AS question,
-            outcome_label::VARCHAR AS outcome,
-            event_slug::VARCHAR AS event_slug,
-            {_optional_sql(columns, "event_id", "VARCHAR")},
-            {_optional_sql(columns, "category", "VARCHAR")},
-            {_optional_sql(columns, "tags", "VARCHAR[]", "[]::VARCHAR[]")},
-            {_optional_sql(columns, "market_volume_usd", "DOUBLE")},
-            is_active::BOOLEAN AS is_active,
-            is_closed::BOOLEAN AS is_closed,
-            first_seen_ts,
-            last_seen_ts
-        FROM ranked
-        WHERE rn = 1
-        ORDER BY market_id, outcome_index, clob_token_id
-        """
-    )
-    grouped: dict[str, list[dict[str, object]]] = defaultdict(list)
-    for row in rows:
-        grouped[str(row["market_id"])].append(row)
-    markets = []
-    for market_id in sorted(grouped):
-        items = grouped[market_id]
-        first = items[0]
-        markets.append(
-            SourceMarket(
-                market_id=market_id,
-                question=str(first["question"]),
-                event_id=_str_or_none(first.get("event_id")),
-                event_slug=_str_or_none(first.get("event_slug")),
-                category=_str_or_none(first.get("category")),
-                tags=tuple(str(tag) for tag in (first.get("tags") or [])),
-                is_active=any(bool(item["is_active"]) for item in items),
-                is_closed=any(bool(item["is_closed"]) for item in items),
-                first_seen_ts=min(
-                    (
-                        item["first_seen_ts"]
-                        for item in items
-                        if item["first_seen_ts"] is not None
-                    ),
-                    default=None,
-                ),
-                last_seen_ts=max(
-                    (
-                        item["last_seen_ts"]
-                        for item in items
-                        if item["last_seen_ts"] is not None
-                    ),
-                    default=None,
-                ),
-                volume=max(
-                    (
-                        float(item["market_volume_usd"])
-                        for item in items
-                        if item.get("market_volume_usd") is not None
-                    ),
-                    default=None,
-                ),
-                outcomes=tuple(
-                    SourceOutcome(
-                        int(item["outcome_index"]),
-                        str(item["outcome"]),
-                        str(item["clob_token_id"]),
-                    )
-                    for item in items
-                ),
-            )
-        )
-    return markets
-
-
-def _optional_sql(
-    columns: set[str],
-    name: str,
-    sql_type: str,
-    fallback: str | None = None,
-) -> str:
-    if name in columns:
-        return f"{name} AS {name}"
-    return f"{fallback or f'NULL::{sql_type}'} AS {name}"
-
-
-def _timestamp_sql(
-    columns: set[str], candidates: Sequence[str], alias: str
-) -> str:
-    for name in candidates:
-        if name in columns:
-            return f"try_cast({name} AS TIMESTAMPTZ) AS {alias}"
-    return f"NULL::TIMESTAMPTZ AS {alias}"
-
-
-def _validate_source_markets(markets: Sequence[SourceMarket]) -> None:
-    if not markets:
-        raise ValueError("Discovery input contains no markets")
-    market_ids: set[str] = set()
-    proposition_ids: set[str] = set()
-    for market in markets:
-        if not market.market_id or not market.question:
-            raise ValueError("market_id and question must be non-empty")
-        if market.market_id in market_ids:
-            raise ValueError(f"Duplicate market_id {market.market_id!r}")
-        market_ids.add(market.market_id)
-        outcomes = [outcome.outcome for outcome in market.outcomes]
-        if len(set(outcomes)) != len(outcomes):
-            raise ValueError(f"Market {market.market_id!r} has duplicate outcomes")
-        for outcome in market.outcomes:
-            if not outcome.clob_token_id:
-                raise ValueError(
-                    f"Market {market.market_id!r} has an empty clob_token_id"
-                )
-            if outcome.clob_token_id in proposition_ids:
-                raise ValueError(
-                    f"clob_token_id {outcome.clob_token_id!r} belongs to multiple outcomes"
-                )
-            proposition_ids.add(outcome.clob_token_id)
 
 
 def _parse_propositions(
@@ -931,11 +386,15 @@ def _parse_propositions(
             schema_hash,
             payload,
         )
-        entry = cache.get(key)
+        entry = cache.get(key, offline=config.offline)
         if entry is None:
             missing.append((market, key, payload))
         else:
             cached[market.market_id] = entry
+            state.add_cached_usage(
+                dict(entry.get("usage") or {}),
+                _str_or_none(entry.get("usage_scope")),
+            )
 
     if missing:
         if config.offline:
@@ -943,6 +402,10 @@ def _parse_propositions(
                 f"Offline discovery cache is missing {len(missing)} proposition parse entries"
             )
         client = client or _new_openai_client()
+        missing_by_market = {
+            item[0].market_id: item
+            for item in missing
+        }
         results = _run_async(
             _run_batched(
                 [item[2] for item in missing],
@@ -956,8 +419,19 @@ def _parse_propositions(
             observed_model = config.parse_model
             usage: dict[str, int] = {}
             error: str | None = None
+            error_state = "stable_failure"
+            error_type: str | None = None
+            status_code: int | None = None
             if isinstance(result, Exception):
                 error = str(result)
+                error_state = (
+                    "transient_failure"
+                    if _is_transient_error(result)
+                    else "stable_failure"
+                )
+                error_type = type(result).__name__
+                raw_status = getattr(result, "status_code", None)
+                status_code = raw_status if isinstance(raw_status, int) else None
             else:
                 parsed, observed_model, usage = result
                 by_id = {
@@ -966,21 +440,29 @@ def _parse_propositions(
                 }
                 state.observed_parse_models.add(observed_model)
                 state.add_usage(usage)
+            usage_scope = cache.usage_scope("parse", batch_items)
             for payload in batch_items:
                 market_id = str(payload["market_id"])
-                source_market, key, _ = next(
-                    item for item in missing if item[0].market_id == market_id
-                )
+                source_market, key, _ = missing_by_market[market_id]
                 market_error = error
                 parsed_market = by_id.get(market_id)
                 if parsed_market is None and market_error is None:
                     market_error = "structured output omitted this market"
-                entry = {
-                    "parsed": parsed_market,
-                    "error": market_error,
-                    "observed_model": observed_model,
-                    "usage": usage,
-                }
+                entry = cache_entry(
+                    task="parse",
+                    parsed=parsed_market,
+                    error=market_error,
+                    observed_model=observed_model,
+                    usage=usage,
+                    usage_scope=usage_scope,
+                    state=(
+                        error_state
+                        if error is not None
+                        else ("success" if parsed_market is not None else "stable_failure")
+                    ),
+                    error_type=error_type,
+                    status_code=status_code,
+                )
                 cache.put(key, entry)
                 cached[source_market.market_id] = entry
 
@@ -991,7 +473,7 @@ def _parse_propositions(
         observed_model = str(entry.get("observed_model") or config.parse_model)
         state.observed_parse_models.add(observed_model)
         parsed_market: ParsedMarket | None = None
-        error = _str_or_none(entry.get("error"))
+        error = cache_error(entry)
         if not error and entry.get("parsed") is not None:
             try:
                 parsed_market = ParsedMarket.model_validate(entry["parsed"])
@@ -1196,182 +678,17 @@ def _generate_candidates(
     config: DiscoveryConfig,
     embedder: Callable[[list[str], DiscoveryConfig], Any],
 ) -> list[dict[str, Any]]:
-    if len(propositions) < 2:
-        return []
-    proposition_by_id = {
-        str(proposition["proposition_id"]): proposition
-        for proposition in propositions
-    }
-    ids = sorted(proposition_by_id)
-    index_by_id = {proposition_id: index for index, proposition_id in enumerate(ids)}
-    pairs: dict[tuple[str, str], dict[str, Any]] = {}
-
-    def add_pair(
-        first: str,
-        second: str,
-        reason: str,
-        *,
-        similarity: float | None = None,
-        rank: int | None = None,
-    ) -> None:
-        if first == second:
-            return
-        a_id, b_id = sorted((first, second))
-        row = pairs.setdefault(
-            (a_id, b_id),
-            {
-                "proposition_a_id": a_id,
-                "proposition_b_id": b_id,
-                "candidate_reasons": set(),
-                "embedding_similarity": None,
-                "embedding_rank": None,
-                "deterministic_relation": None,
-                "classification_relation": None,
-                "classification_confidence": None,
-                "explanation": None,
-                "assumptions": [],
-                "requires_review": False,
-                "status": "pending",
-                "discovery_method": None,
-                "model_version": None,
-                "prompt_version": None,
-            },
-        )
-        row["candidate_reasons"].add(reason)
-        if similarity is not None:
-            current = row["embedding_similarity"]
-            row["embedding_similarity"] = (
-                similarity if current is None else max(float(current), similarity)
-            )
-        if rank is not None:
-            current_rank = row["embedding_rank"]
-            row["embedding_rank"] = (
-                rank if current_rank is None else min(int(current_rank), rank)
-            )
-
-    grouped: dict[tuple[str, str], list[str]] = defaultdict(list)
-    for proposition_id in ids:
-        proposition = proposition_by_id[proposition_id]
-        grouped[("market", str(proposition["market_id"]))].append(proposition_id)
-        event_key = proposition.get("event_id") or proposition.get("event_slug")
-        if event_key:
-            grouped[("event", str(event_key))].append(proposition_id)
-        if proposition.get("competition"):
-            grouped[("competition", str(proposition["competition"]))].append(
-                proposition_id
-            )
-        for subject in proposition.get("subject") or []:
-            grouped[("entity", str(subject))].append(proposition_id)
-        if proposition.get("parse_status") == "parsed":
-            grouped[
-                ("signature", repr(_proposition_signature(proposition)))
-            ].append(proposition_id)
-            if proposition.get("threshold") is not None:
-                grouped[
-                    (
-                        "numeric_rule",
-                        repr(
-                            tuple(
-                                _hashable(proposition.get(key))
-                                for key in _SEMANTIC_KEYS
-                                if key != "threshold"
-                            )
-                        ),
-                    )
-                ].append(proposition_id)
-            if proposition.get("time_start") and proposition.get("time_end"):
-                grouped[
-                    (
-                        "time_rule",
-                        repr(
-                            tuple(
-                                _hashable(proposition.get(key))
-                                for key in _SEMANTIC_KEYS
-                                if key not in {"time_start", "time_end"}
-                            )
-                        ),
-                    )
-                ].append(proposition_id)
-    for (kind, _), group_ids in sorted(grouped.items()):
-        for first, second in combinations(sorted(set(group_ids)), 2):
-            add_pair(first, second, f"shared_{kind}")
-
-    texts = [_embedding_text(proposition_by_id[proposition_id]) for proposition_id in ids]
-    embeddings = embedder(texts, config)
-    try:
-        import numpy as np
-    except ImportError as exc:  # pragma: no cover - dependency installation guard
-        raise ImportError(
-            'Automated discovery requires `pip install -e ".[discovery]"`.'
-        ) from exc
-    matrix = np.asarray(embeddings, dtype=np.float32)
-    if (
-        matrix.ndim != 2
-        or matrix.shape[0] != len(ids)
-        or matrix.shape[1] == 0
-        or not np.isfinite(matrix).all()
-    ):
-        raise ValueError("Embedding model returned an invalid matrix shape")
-    norms = np.linalg.norm(matrix, axis=1, keepdims=True)
-    matrix = matrix / np.maximum(norms, 1e-12)
-    similarities = matrix @ matrix.T
-    for proposition_id in ids:
-        index = index_by_id[proposition_id]
-        scores = similarities[index].copy()
-        scores[index] = -np.inf
-        ranked = np.argsort(-scores, kind="stable")[: min(config.top_k, len(ids) - 1)]
-        for rank, other_index in enumerate(ranked, start=1):
-            add_pair(
-                proposition_id,
-                ids[int(other_index)],
-                "embedding_top_k",
-                similarity=float(scores[int(other_index)]),
-                rank=rank,
-            )
-
-    for row in pairs.values():
-        a = proposition_by_id[str(row["proposition_a_id"])]
-        b = proposition_by_id[str(row["proposition_b_id"])]
-        reasons: set[str] = row["candidate_reasons"]
-        if a.get("predicate") and a.get("predicate") == b.get("predicate"):
-            reasons.add("compatible_predicate")
-        if a.get("unit") and a.get("unit") == b.get("unit"):
-            reasons.add("compatible_unit")
-        if _times_overlap(a, b):
-            reasons.add("overlapping_dates")
-        relation = _deterministic_relation(a, b, config.parse_confidence)
-        if relation:
-            row["_deterministic"] = relation
-            row["deterministic_relation"] = str(relation["edge_type"])
-            row["status"] = "accepted"
-            row["discovery_method"] = "deterministic"
-            row["explanation"] = relation["explanation"]
-            row["assumptions"] = []
-            row["prompt_version"] = None
-            row["model_version"] = None
-
-    deterministic = sorted(
-        (row for row in pairs.values() if row.get("_deterministic")),
-        key=_candidate_sort_key,
-    )
-    if len(deterministic) > config.max_candidates:
-        raise ValueError(
-            f"Deterministic rules produced {len(deterministic)} candidates, exceeding "
-            f"max_candidates={config.max_candidates}; refusing to truncate proven relations"
-        )
-    unresolved = sorted(
-        (row for row in pairs.values() if not row.get("_deterministic")),
-        key=_candidate_sort_key,
-    )
-    kept = deterministic + unresolved[: config.max_candidates - len(deterministic)]
-    for row in kept:
-        row["candidate_reasons"] = sorted(row["candidate_reasons"])
-    return sorted(
-        kept,
-        key=lambda row: (
-            str(row["proposition_a_id"]),
-            str(row["proposition_b_id"]),
-        ),
+    return _generate_candidates_bounded(
+        propositions,
+        config,
+        embedder,
+        semantic_keys=_SEMANTIC_KEYS,
+        hashable=_hashable,
+        proposition_signature=_proposition_signature,
+        deterministic_relation=_deterministic_relation,
+        embedding_text=_embedding_text,
+        stage_rank=_stage_rank,
+        is_winner=_is_winner_proposition,
     )
 
 
@@ -1408,259 +725,6 @@ def _embedding_text(proposition: dict[str, Any]) -> str:
         proposition.get("question"),
     ]
     return " | ".join(str(part) for part in parts if part not in (None, "", []))
-
-
-def _candidate_sort_key(row: dict[str, Any]) -> tuple[object, ...]:
-    similarity = row["embedding_similarity"]
-    return (
-        -len(row["candidate_reasons"]),
-        -float(similarity if similarity is not None else -1.0),
-        str(row["proposition_a_id"]),
-        str(row["proposition_b_id"]),
-    )
-
-
-def _deterministic_relation(
-    a: dict[str, Any],
-    b: dict[str, Any],
-    parse_confidence: float,
-) -> dict[str, Any] | None:
-    a_id = str(a["proposition_id"])
-    b_id = str(b["proposition_id"])
-    same_market = a["market_id"] == b["market_id"]
-    expected_tokens = int(a["_expected_tokens"])
-    outcomes = {str(a["outcome"]).casefold(), str(b["outcome"]).casefold()}
-    if same_market and expected_tokens == 2 and outcomes == {"yes", "no"}:
-        return _rule(
-            "complement",
-            min(a_id, b_id),
-            max(a_id, b_id),
-            "same_market",
-            "Yes and No outcomes of one binary market are complements",
-            1.0,
-        )
-    if same_market:
-        return _rule(
-            "mutually_exclusive",
-            min(a_id, b_id),
-            max(a_id, b_id),
-            "same_market",
-            "Distinct outcomes of one categorical market cannot both occur",
-            1.0,
-        )
-
-    if min(float(a["parse_confidence"]), float(b["parse_confidence"])) < parse_confidence:
-        return None
-    confidence = min(float(a["parse_confidence"]), float(b["parse_confidence"]))
-
-    if _proposition_signature(a) == _proposition_signature(b):
-        return _rule(
-            "equivalent",
-            min(a_id, b_id),
-            max(a_id, b_id),
-            "normalized_equivalence",
-            "Normalized proposition fields are identical",
-            confidence,
-        )
-
-    threshold_relation = _numeric_threshold_relation(a, b)
-    if threshold_relation:
-        src, dst = threshold_relation
-        return _rule(
-            "implies",
-            str(src["proposition_id"]),
-            str(dst["proposition_id"]),
-            "numeric_threshold",
-            "A stronger numeric threshold implies the compatible weaker threshold",
-            confidence,
-        )
-
-    time_relation = _time_window_relation(a, b)
-    if time_relation:
-        src, dst = time_relation
-        return _rule(
-            "implies",
-            str(src["proposition_id"]),
-            str(dst["proposition_id"]),
-            "time_window_containment",
-            "A narrower compatible time window implies the containing window",
-            confidence,
-        )
-
-    a_stage = _stage_rank(a)
-    b_stage = _stage_rank(b)
-    if (
-        a_stage is not None
-        and b_stage is not None
-        and a_stage != b_stage
-        and _same_values(a, b, ("subject", "competition", "polarity"))
-        and a.get("polarity") == "positive"
-    ):
-        src, dst = (a, b) if a_stage > b_stage else (b, a)
-        return _rule(
-            "implies",
-            str(src["proposition_id"]),
-            str(dst["proposition_id"]),
-            "tournament_stage",
-            "Reaching a later tournament stage implies reaching an earlier stage",
-            confidence,
-        )
-
-    if (
-        _same_event(a, b)
-        and _is_winner_proposition(a)
-        and _is_winner_proposition(b)
-        and set(a.get("subject") or []) != set(b.get("subject") or [])
-        and a.get("polarity") == b.get("polarity") == "positive"
-    ):
-        return _rule(
-            "mutually_exclusive",
-            min(a_id, b_id),
-            max(a_id, b_id),
-            "single_winner",
-            "Distinct winners of one single-winner event cannot both occur",
-            confidence,
-        )
-    return None
-
-
-def _rule(
-    edge_type: str,
-    src: str,
-    dst: str,
-    basis: str,
-    explanation: str,
-    confidence: float,
-) -> dict[str, Any]:
-    return {
-        "edge_type": edge_type,
-        "src_node_id": src,
-        "dst_node_id": dst,
-        "edge_basis": basis,
-        "explanation": explanation,
-        "confidence": confidence,
-    }
-
-
-def _numeric_threshold_relation(
-    a: dict[str, Any], b: dict[str, Any]
-) -> tuple[dict[str, Any], dict[str, Any]] | None:
-    if a.get("threshold") is None or b.get("threshold") is None:
-        return None
-    if a.get("operator") != b.get("operator"):
-        return None
-    if not _same_except(a, b, {"threshold", "proposition_id", "market_id", "event_slug", "event_id"}):
-        return None
-    a_threshold = float(a["threshold"])
-    b_threshold = float(b["threshold"])
-    if a_threshold == b_threshold:
-        return None
-    if a["operator"] in {"greater_than", "greater_than_or_equal"}:
-        relation = (a, b) if a_threshold > b_threshold else (b, a)
-        return relation[::-1] if a.get("polarity") == "negative" else relation
-    if a["operator"] in {"less_than", "less_than_or_equal"}:
-        relation = (a, b) if a_threshold < b_threshold else (b, a)
-        return relation[::-1] if a.get("polarity") == "negative" else relation
-    return None
-
-
-def _time_window_relation(
-    a: dict[str, Any], b: dict[str, Any]
-) -> tuple[dict[str, Any], dict[str, Any]] | None:
-    if not all((a.get("time_start"), a.get("time_end"), b.get("time_start"), b.get("time_end"))):
-        return None
-    if not _same_except(
-        a,
-        b,
-        {
-            "time_start",
-            "time_end",
-            "proposition_id",
-            "market_id",
-            "event_slug",
-            "event_id",
-        },
-    ):
-        return None
-    a_contains_b = a["time_start"] <= b["time_start"] and a["time_end"] >= b["time_end"]
-    b_contains_a = b["time_start"] <= a["time_start"] and b["time_end"] >= a["time_end"]
-    if a_contains_b and not b_contains_a:
-        relation = (b, a)
-        return relation[::-1] if a.get("polarity") == "negative" else relation
-    if b_contains_a and not a_contains_b:
-        relation = (a, b)
-        return relation[::-1] if a.get("polarity") == "negative" else relation
-    return None
-
-
-_SEMANTIC_KEYS = (
-    "subject",
-    "predicate",
-    "object",
-    "operator",
-    "threshold",
-    "unit",
-    "time_start",
-    "time_end",
-    "competition",
-    "jurisdiction",
-    "polarity",
-)
-
-
-def _proposition_signature(proposition: dict[str, Any]) -> tuple[object, ...]:
-    return tuple(_hashable(proposition.get(key)) for key in _SEMANTIC_KEYS)
-
-
-def _same_except(
-    a: dict[str, Any], b: dict[str, Any], excluded: set[str]
-) -> bool:
-    return all(
-        _hashable(a.get(key)) == _hashable(b.get(key))
-        for key in _SEMANTIC_KEYS
-        if key not in excluded
-    )
-
-
-def _same_values(
-    a: dict[str, Any], b: dict[str, Any], keys: Sequence[str]
-) -> bool:
-    return all(_hashable(a.get(key)) == _hashable(b.get(key)) for key in keys)
-
-
-def _stage_rank(proposition: dict[str, Any]) -> int | None:
-    values = [proposition.get("object"), proposition.get("predicate")]
-    for value in values:
-        if not value:
-            continue
-        normalized = _normalize_text(str(value)).casefold()
-        if normalized in _STAGE_RANKS:
-            return _STAGE_RANKS[normalized]
-        for name, rank in _STAGE_RANKS.items():
-            if name in normalized:
-                return rank
-    return None
-
-
-def _is_winner_proposition(proposition: dict[str, Any]) -> bool:
-    predicate = _normalize_text(str(proposition.get("predicate") or "")).casefold()
-    object_ = _normalize_text(str(proposition.get("object") or "")).casefold()
-    winner_words = {"win", "winner", "winners", "winning", "wins"}
-    return bool(set(predicate.replace("-", " ").split()) & winner_words) or (
-        object_ in winner_words
-    )
-
-
-def _same_event(a: dict[str, Any], b: dict[str, Any]) -> bool:
-    a_event = a.get("event_id") or a.get("event_slug")
-    b_event = b.get("event_id") or b.get("event_slug")
-    return bool(a_event and a_event == b_event)
-
-
-def _times_overlap(a: dict[str, Any], b: dict[str, Any]) -> bool:
-    a_start, a_end = a.get("time_start"), a.get("time_end")
-    b_start, b_end = b.get("time_start"), b.get("time_end")
-    return bool(a_start and a_end and b_start and b_end and a_start <= b_end and b_start <= a_end)
 
 
 def _derive_deterministic_edges(
@@ -1736,12 +800,16 @@ def _classify_candidates(
             schema_hash,
             payload,
         )
-        entry = cache.get(key)
+        entry = cache.get(key, offline=config.offline)
         pair_id = str(payload["pair_id"])
         if entry is None:
             missing.append((candidate, key, payload))
         else:
             cached[pair_id] = entry
+            state.add_cached_usage(
+                dict(entry.get("usage") or {}),
+                _str_or_none(entry.get("usage_scope")),
+            )
 
     if missing:
         if config.offline:
@@ -1766,8 +834,19 @@ def _classify_candidates(
             observed_model = config.classify_model
             usage: dict[str, int] = {}
             error: str | None = None
+            error_state = "stable_failure"
+            error_type: str | None = None
+            status_code: int | None = None
             if isinstance(result, Exception):
                 error = str(result)
+                error_state = (
+                    "transient_failure"
+                    if _is_transient_error(result)
+                    else "stable_failure"
+                )
+                error_type = type(result).__name__
+                raw_status = getattr(result, "status_code", None)
+                status_code = raw_status if isinstance(raw_status, int) else None
             else:
                 parsed, observed_model, usage = result
                 by_pair = {
@@ -1776,6 +855,7 @@ def _classify_candidates(
                 }
                 state.observed_classify_models.add(observed_model)
                 state.add_usage(usage)
+            usage_scope = cache.usage_scope("classify", batch_items)
             for payload in batch_items:
                 pair_id = str(payload["pair_id"])
                 _, key, _ = missing_by_pair[pair_id]
@@ -1783,12 +863,21 @@ def _classify_candidates(
                 parsed_pair = by_pair.get(pair_id)
                 if parsed_pair is None and pair_error is None:
                     pair_error = "structured output omitted this pair"
-                entry = {
-                    "parsed": parsed_pair,
-                    "error": pair_error,
-                    "observed_model": observed_model,
-                    "usage": usage,
-                }
+                entry = cache_entry(
+                    task="classify",
+                    parsed=parsed_pair,
+                    error=pair_error,
+                    observed_model=observed_model,
+                    usage=usage,
+                    usage_scope=usage_scope,
+                    state=(
+                        error_state
+                        if error is not None
+                        else ("success" if parsed_pair is not None else "stable_failure")
+                    ),
+                    error_type=error_type,
+                    status_code=status_code,
+                )
                 cache.put(key, entry)
                 cached[pair_id] = entry
 
@@ -1803,7 +892,7 @@ def _classify_candidates(
         observed_model = str(entry.get("observed_model") or config.classify_model)
         state.observed_classify_models.add(observed_model)
         classification: PairClassification | None = None
-        error = _str_or_none(entry.get("error"))
+        error = cache_error(entry)
         if not error and entry.get("parsed") is not None:
             try:
                 classification = PairClassification.model_validate(entry["parsed"])
@@ -2166,7 +1255,6 @@ def _write_discovery_artifacts(
     source_format: str,
     input_rows: int,
     input_selection: dict[str, object],
-    started: float,
 ) -> dict[str, object]:
     db = DuckDB(directory / "oddsfox_graph.duckdb")
     try:
@@ -2301,31 +1389,12 @@ def _write_discovery_artifacts(
                 ),
                 default=None,
             ),
-            "runtime_seconds": round(time.time() - started, 3),
         }
         write_reports(db, directory, stats)
         _validate_discovery_artifacts(db, directory)
         return stats
     finally:
         db.close()
-
-
-def _create_and_fill(
-    db: DuckDB,
-    table: str,
-    columns: dict[str, str],
-    rows: Sequence[dict[str, Any]],
-) -> None:
-    ddl = ", ".join(f"{name} {sql_type}" for name, sql_type in columns.items())
-    db.execute(f"CREATE TABLE {table} ({ddl})")
-    if not rows:
-        return
-    names = list(columns)
-    placeholders = ", ".join("?" for _ in names)
-    db.executemany(
-        f"INSERT INTO {table} VALUES ({placeholders})",
-        [[row.get(name) for name in names] for row in rows],
-    )
 
 
 def _copy_table(
@@ -2484,27 +1553,24 @@ def _validate_discovery_artifacts(db: DuckDB, directory: Path) -> None:
 
 def _discovery_manifest(
     input_path: Path,
+    input_hash: str,
+    artifact_hashes: dict[str, str],
     source_format: str,
     stats: dict[str, object],
     config: DiscoveryConfig,
     cache: JsonCache,
     state: RunState,
     timings: dict[str, float],
-    staging: Path,
 ) -> dict[str, object]:
     artifact_names = [
         *DISCOVERY_PARQUET_ARTIFACTS,
         GRAPH_SNAPSHOT_ARTIFACT,
     ]
-    artifact_hashes = {
-        name: _sha256(staging / name)
-        for name in DISCOVERY_PARQUET_ARTIFACTS
-    }
-    return {
+    manifest = {
         "command": "discover",
         "version": __version__,
         "input": str(input_path),
-        "input_hash": _sha256(input_path),
+        "input_hash": input_hash,
         "input_format": source_format,
         "input_granularity_seconds": (
             60 if source_format == "minutely" else (3600 if source_format == "hourly" else None)
@@ -2547,17 +1613,16 @@ def _discovery_manifest(
         "cache": {
             "directory": str(cache.directory),
             "offline": config.offline,
-            "hits": cache.hits,
-            "misses": cache.misses,
-            "writes": cache.writes,
+            **cache.stats(),
         },
-        "usage": state.usage,
+        "usage": state.usage_manifest(),
         "artifacts": artifact_names,
         "artifact_hashes": artifact_hashes,
         "reports": list(reports()),
         "stats": stats,
         "stage_timings": timings,
     }
+    return json.loads(json.dumps(manifest, default=str))
 
 
 def _publish_staged(staging: Path, out_dir: Path) -> None:
@@ -2572,7 +1637,27 @@ def _publish_staged(staging: Path, out_dir: Path) -> None:
     reports_out.mkdir(exist_ok=True)
     for name in REPORTS:
         os.replace(staging / "reports" / name, reports_out / name)
-    os.replace(staging / "build_manifest.json", manifest)
+
+
+def _write_manifest_last(out_dir: Path, manifest: dict[str, object]) -> None:
+    path = out_dir / "build_manifest.json"
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=".build_manifest.",
+        suffix=".tmp",
+        dir=out_dir,
+    )
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            json.dump(manifest, stream, indent=2, sort_keys=True, default=str)
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary_name, path)
+    finally:
+        try:
+            os.unlink(temporary_name)
+        except FileNotFoundError:
+            pass
 
 
 def _dedupe_reviews(rows: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -2729,10 +1814,6 @@ def _text_hash(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-def _normalize_text(value: str) -> str:
-    return " ".join(unicodedata.normalize("NFKC", value).strip().split())
-
-
 def _normalize_optional(value: str | None) -> str | None:
     if value is None:
         return None
@@ -2748,35 +1829,3 @@ def _canonical_entity(value: str) -> str:
 def _canonical_unit(value: str) -> str:
     normalized = _normalize_text(value)
     return _UNIT_ALIASES.get(normalized.casefold(), normalized)
-
-
-def _hashable(value: object) -> object:
-    if isinstance(value, list):
-        return tuple(value)
-    return value
-
-
-def _str_or_none(value: object) -> str | None:
-    if value is None:
-        return None
-    text = str(value)
-    return text or None
-
-
-def _datetime_or_none(value: object) -> datetime | None:
-    if value is None:
-        return None
-    parsed = (
-        value
-        if isinstance(value, datetime)
-        else datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-    )
-    return _utc_datetime(parsed)
-
-
-def _utc_datetime(value: datetime | None) -> datetime | None:
-    if value is None:
-        return None
-    if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc)

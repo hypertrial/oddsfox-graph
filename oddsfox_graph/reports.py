@@ -8,7 +8,7 @@ from .queries import DuckDB
 def write_reports(db: DuckDB, out_dir: Path, stats: dict[str, object]) -> None:
     reports = out_dir / "reports"
     reports.mkdir(parents=True, exist_ok=True)
-    _write(reports / "summary.md", _summary(stats))
+    write_summary_report(out_dir, stats)
     _write(reports / "strongest_implications.md", _logic_edge_report(db, "Implications", "implies"))
     _write(
         reports / "strongest_exclusions.md",
@@ -50,6 +50,12 @@ def write_reports(db: DuckDB, out_dir: Path, stats: dict[str, object]) -> None:
             """,
         ),
     )
+
+
+def write_summary_report(out_dir: Path, stats: dict[str, object]) -> None:
+    reports = out_dir / "reports"
+    reports.mkdir(parents=True, exist_ok=True)
+    _write(reports / "summary.md", _summary(stats))
 
 
 def _logic_edge_report(db: DuckDB, title: str, edge_type: str) -> str:

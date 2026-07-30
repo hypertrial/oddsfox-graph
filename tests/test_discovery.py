@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import csv
 import json
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -12,6 +13,9 @@ import pytest
 
 from oddsfox_graph.benchmark import benchmark_summary
 from oddsfox_graph.cli import main
+from oddsfox_graph._discovery.bulk import create_and_fill
+from oddsfox_graph._discovery.cache import CACHE_ENTRY_VERSION, cache_entry
+import oddsfox_graph.discovery as discovery_module
 from oddsfox_graph.discovery import (
     CLASSIFY_PROMPT_VERSION,
     DISCOVERY_PARQUET_ARTIFACTS,
@@ -312,6 +316,20 @@ def test_discover_real_compact_input_and_offline_replay(
     assert second_manifest["artifact_hashes"] == first_hashes
     assert real_discovery["client"].responses.calls == real_discovery["calls"]
     assert second_manifest["cache"]["misses"] == 0
+    assert second_stats == second_manifest["stats"]
+    assert (
+        f"- `runtime_seconds`: {second_stats['runtime_seconds']}"
+        in (out / "reports" / "summary.md").read_text(encoding="utf-8")
+    )
+    assert "publish_files" in second_manifest["stage_timings"]
+    assert "hash_artifacts" in second_manifest["stage_timings"]
+    assert first_manifest["usage"]["total_tokens"] > 0
+    assert first_manifest["usage"]["cached_origin"]["total_tokens"] == 0
+    assert second_manifest["usage"]["total_tokens"] == 0
+    assert (
+        second_manifest["usage"]["cached_origin"]
+        == first_manifest["usage"]["accounted_total"]
+    )
 
 
 def test_discovery_auto_detects_real_data_reshaped_as_odds_export(
@@ -368,6 +386,78 @@ def test_discovery_auto_detects_real_data_reshaped_as_odds_export(
     assert sum(len(market.outcomes) for market in markets) == 2
     assert selection["input_propositions"] == 2
     assert {outcome.outcome for outcome in markets[0].outcomes} == {"Yes", "No"}
+
+
+def test_compact_selection_preserves_greedy_complete_market_semantics(
+    tmp_path: Path,
+) -> None:
+    input_path = tmp_path / "selection.parquet"
+    db = DuckDB()
+    try:
+        db.execute(
+            f"""
+            COPY (
+                SELECT *
+                FROM (
+                    VALUES
+                        ('oversized', 'Oversized?', ['A','B','C','D','E','F'], ['o1','o2','o3','o4','o5','o6'], 200.0),
+                        ('three', 'Three?', ['A','B','C'], ['t1','t2','t3'], 100.0),
+                        ('alpha', 'Alpha?', ['Yes','No'], ['a1','a2'], 90.0),
+                        ('beta', 'Beta?', ['Yes','No'], ['b1','b2'], 90.0),
+                        ('null-volume', 'Null?', ['Yes'], ['n1'], NULL)
+                ) AS source(market_id, question, outcomes, clob_token_ids, volume)
+            ) TO '{q(input_path)}' (FORMAT PARQUET)
+            """
+        )
+    finally:
+        db.close()
+
+    source_format, _, markets, selection = _load_source_markets(
+        input_path,
+        max_propositions=5,
+    )
+    assert source_format == "market_snapshot"
+    assert [market.market_id for market in markets] == ["alpha", "three"]
+    assert selection["eligible_markets"] == 5
+    assert selection["eligible_propositions"] == 14
+    assert selection["selected_propositions"] == 5
+
+
+def test_real_data_m4_max_proposition_and_candidate_envelope(
+    tmp_path: Path,
+    real_input: Path,
+) -> None:
+    out = tmp_path / "out"
+    cache = tmp_path / "cache"
+    config = DiscoveryConfig(
+        cache_dir=cache,
+        top_k=20,
+        max_propositions=2_000,
+        max_candidates=40_000,
+        max_llm_pairs=200,
+    )
+    first = discover(
+        real_input,
+        out,
+        config=config,
+        _client=_FakeClient(),
+        _embedder=_fake_embeddings,
+    )
+    first_manifest = json.loads((out / "build_manifest.json").read_text())
+    second = discover(
+        real_input,
+        out,
+        config=DiscoveryConfig(**{**config.__dict__, "offline": True}),
+        _embedder=_fake_embeddings,
+    )
+    second_manifest = json.loads((out / "build_manifest.json").read_text())
+
+    assert first["tokens"] == 2_000
+    assert first["input_selection"]["selected_markets"] == 1_000
+    assert first["candidate_edges"] <= 40_000
+    assert first["classified_pairs"] <= 200
+    assert second["logic_edges"] == first["logic_edges"]
+    assert second_manifest["artifact_hashes"] == first_manifest["artifact_hashes"]
 
 
 def test_deterministic_relation_directions_and_consistency() -> None:
@@ -455,6 +545,53 @@ def test_cache_key_changes_with_model_prompt_schema_and_payload(tmp_path: Path) 
         "parse", "model-a", "prompt-v1", "prompt-hash-a", "schema-b", {"x": 1}
     )
     assert base != cache.key(*args, {"x": 2})
+
+
+def test_cache_migration_and_concurrent_atomic_writes(tmp_path: Path) -> None:
+    cache = JsonCache(tmp_path / "cache")
+    key = "legacy"
+    (cache.directory / f"{key}.json").write_text(
+        json.dumps(
+            {
+                "parsed": None,
+                "error": "old error",
+                "observed_model": "old-model",
+                "usage": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert cache.get(key) is None
+    replayed = cache.get(key, offline=True)
+    assert replayed is not None
+    assert replayed["version"] == CACHE_ENTRY_VERSION
+    assert replayed["state"] == "transient_failure"
+    assert replayed["usage_accounting"] == "legacy_unscoped"
+    assert cache.stats()["legacy_hits"] == 1
+
+    concurrent_key = "same-key"
+
+    def write(index: int) -> None:
+        cache.put(
+            concurrent_key,
+            cache_entry(
+                task="parse",
+                parsed={"index": index},
+                error=None,
+                observed_model="fake",
+                usage={},
+                usage_scope=None,
+                state="success",
+            ),
+        )
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        list(pool.map(write, range(32)))
+    result = cache.get(concurrent_key)
+    assert result is not None
+    assert result["state"] == "success"
+    assert 0 <= result["parsed"]["index"] < 32
+    assert not list(cache.directory.glob("*.tmp"))
 
 
 def test_alias_unit_and_datetime_normalization() -> None:
@@ -559,6 +696,90 @@ def test_retries_only_transient_failures(
     assert permanent_calls == 1
 
 
+def test_transient_cache_entry_replays_offline_but_recovers_online(
+    tmp_path: Path,
+    real_input: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class TransientError(Exception):
+        status_code = 429
+
+    class RecoveringResponses(_FakeResponses):
+        fail_classification = True
+
+        async def parse(self, **kwargs: object) -> _Response:
+            self.calls += 1
+            payload = json.loads(kwargs["input"][1]["content"])  # type: ignore[index]
+            if kwargs["text_format"] is ParsedMarketBatch:
+                return _Response(_parse_markets(payload))
+            if self.fail_classification:
+                raise TransientError("rate limited")
+            return _Response(
+                PairClassificationBatch(
+                    pairs=[
+                        PairClassification(
+                            pair_id=item["pair_id"],
+                            relation="unrelated",
+                            confidence=0.99,
+                            explanation="not related",
+                            assumptions=[],
+                            requires_review=False,
+                        )
+                        for item in payload
+                    ]
+                )
+            )
+
+    async def no_sleep(_: float) -> None:
+        return None
+
+    monkeypatch.setattr(asyncio, "sleep", no_sleep)
+    client = _FakeClient()
+    client.responses = RecoveringResponses()
+    out = tmp_path / "out"
+    cache_dir = tmp_path / "cache"
+    base = DiscoveryConfig(
+        cache_dir=cache_dir,
+        top_k=1,
+        max_propositions=4,
+        max_candidates=20,
+        max_llm_pairs=10,
+    )
+    discover(
+        real_input,
+        out,
+        config=base,
+        _client=client,
+        _embedder=_fake_embeddings,
+    )
+    first_calls = client.responses.calls
+    first_errors = _review_count(out, "classification_error")
+    assert first_errors > 0
+
+    discover(
+        real_input,
+        out,
+        config=DiscoveryConfig(**{**base.__dict__, "offline": True}),
+        _embedder=_fake_embeddings,
+    )
+    assert _review_count(out, "classification_error") == first_errors
+    assert client.responses.calls == first_calls
+
+    client.responses.fail_classification = False
+    recovered = discover(
+        real_input,
+        out,
+        config=base,
+        _client=client,
+        _embedder=_fake_embeddings,
+    )
+    manifest = json.loads((out / "build_manifest.json").read_text())
+    assert client.responses.calls > first_calls
+    assert _review_count(out, "classification_error") == 0
+    assert manifest["cache"]["transient_retries"] > 0
+    assert recovered == manifest["stats"]
+
+
 def test_refusal_is_cached_and_routed_to_review(
     tmp_path: Path,
     real_input: Path,
@@ -602,6 +823,21 @@ def test_refusal_is_cached_and_routed_to_review(
     finally:
         db.close()
     assert review_errors > 0
+    calls = client.responses.calls
+    discover(
+        real_input,
+        out,
+        config=DiscoveryConfig(
+            cache_dir=tmp_path / "cache",
+            top_k=1,
+            max_propositions=4,
+            max_candidates=20,
+            max_llm_pairs=10,
+        ),
+        _client=client,
+        _embedder=_fake_embeddings,
+    )
+    assert client.responses.calls == calls
 
 
 def test_positive_labels_below_threshold_or_flagged_for_review_are_not_edges(
@@ -696,6 +932,27 @@ def test_compact_input_validation_and_offline_cache_guard(
         db.close()
     with pytest.raises(ValueError, match="equal-length"):
         _load_source_markets(bad_input)
+
+    null_element_input = tmp_path / "null-element.parquet"
+    db = DuckDB()
+    try:
+        db.execute(
+            f"""
+            COPY (
+                SELECT
+                    'bad-null' AS market_id,
+                    'Bad null market?' AS question,
+                    ['Yes', NULL]::VARCHAR[] AS outcomes,
+                    ['token-yes', 'token-no']::VARCHAR[] AS clob_token_ids
+            ) TO '{q(null_element_input)}' (FORMAT PARQUET)
+            """
+        )
+    finally:
+        db.close()
+    with pytest.raises(ValueError, match="non-empty values"):
+        _load_source_markets(null_element_input)
+    with pytest.raises(ValueError, match="malformed eligible"):
+        _load_source_markets(null_element_input, max_propositions=2)
 
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     with pytest.raises(ValueError, match="Offline discovery cache"):
@@ -796,6 +1053,158 @@ def test_time_stage_single_winner_rules_and_candidate_cap() -> None:
             ),
             _fake_embeddings,
         )
+
+
+def test_candidate_generation_caps_adversarial_shared_groups() -> None:
+    propositions = [
+        {
+            **_proposition(),
+            "proposition_id": f"p-{index:04d}",
+            "market_id": f"m-{index:04d}",
+            "predicate": f"predicate-{index}",
+            "object": f"object-{index}",
+            "parse_status": "parsed",
+        }
+        for index in range(400)
+    ]
+    candidates = _generate_candidates(
+        propositions,
+        DiscoveryConfig(
+            top_k=2,
+            max_propositions=400,
+            max_candidates=1_000,
+        ),
+        _fake_embeddings,
+    )
+    assert len(candidates) == 1_000
+    assert len(
+        {
+            (row["proposition_a_id"], row["proposition_b_id"])
+            for row in candidates
+        }
+    ) == 1_000
+    assert all(
+        row["proposition_a_id"] < row["proposition_b_id"]
+        for row in candidates
+    )
+
+
+def test_candidate_cap_preserves_reason_priority_and_stable_ids() -> None:
+    propositions = [
+        {
+            **_proposition(),
+            "proposition_id": proposition_id,
+            "market_id": f"market-{proposition_id}",
+            "object": f"object-{proposition_id}",
+            "parse_status": "parsed",
+        }
+        for proposition_id in ("a", "b", "c", "d")
+    ]
+    candidates = _generate_candidates(
+        propositions,
+        DiscoveryConfig(
+            top_k=1,
+            max_propositions=4,
+            max_candidates=3,
+        ),
+        _fake_embeddings,
+    )
+    assert [
+        (row["proposition_a_id"], row["proposition_b_id"])
+        for row in candidates
+    ] == [("a", "b"), ("a", "c"), ("a", "d")]
+    assert all(
+        row["candidate_reasons"]
+        == [
+            "compatible_predicate",
+            "compatible_unit",
+            "embedding_top_k",
+            "overlapping_dates",
+            "shared_entity",
+            "shared_event",
+        ]
+        for row in candidates
+    )
+
+
+def test_bulk_insert_preserves_discovery_value_types() -> None:
+    db = DuckDB()
+    try:
+        create_and_fill(
+            db,
+            "typed_rows",
+            {
+                "name": "VARCHAR",
+                "score": "DOUBLE",
+                "tags": "VARCHAR[]",
+                "observed_at": "TIMESTAMPTZ",
+                "enabled": "BOOLEAN",
+            },
+            [
+                {
+                    "name": "alpha",
+                    "score": None,
+                    "tags": ["x", "y"],
+                    "observed_at": datetime(2026, 7, 30, tzinfo=timezone.utc),
+                    "enabled": True,
+                },
+                {
+                    "name": "beta",
+                    "score": None,
+                    "tags": [],
+                    "observed_at": None,
+                    "enabled": False,
+                },
+            ],
+            chunk_size=1,
+        )
+        rows = db.rows("SELECT * FROM typed_rows ORDER BY name")
+    finally:
+        db.close()
+    assert rows[0]["tags"] == ["x", "y"]
+    assert rows[0]["observed_at"] == datetime(
+        2026, 7, 30, tzinfo=timezone.utc
+    )
+    assert rows[1]["score"] is None
+    assert rows[1]["tags"] == []
+
+
+def test_manifest_failure_removes_completion_marker(
+    tmp_path: Path,
+    real_input: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    out = tmp_path / "out"
+    config = DiscoveryConfig(
+        cache_dir=tmp_path / "cache",
+        top_k=1,
+        max_propositions=2,
+        max_candidates=10,
+        max_llm_pairs=1,
+    )
+    discover(
+        real_input,
+        out,
+        config=config,
+        _client=_FakeClient(),
+        _embedder=_fake_embeddings,
+    )
+    assert (out / "build_manifest.json").is_file()
+
+    def fail_manifest(*_: object) -> None:
+        raise OSError("simulated manifest failure")
+
+    monkeypatch.setattr(discovery_module, "_write_manifest_last", fail_manifest)
+    with pytest.raises(OSError, match="simulated"):
+        discover(
+            real_input,
+            out,
+            config=config,
+            _client=_FakeClient(),
+            _embedder=_fake_embeddings,
+        )
+    assert not (out / "build_manifest.json").exists()
+    assert (out / "propositions.parquet").is_file()
 
 
 def test_review_export_and_score_quality_gates(
@@ -915,3 +1324,21 @@ def _edge(
         "explanation": "test evidence",
         "assumptions": [],
     }
+
+
+def _review_count(out: Path, kind: str) -> int:
+    db = DuckDB()
+    try:
+        return int(
+            db.scalar(
+                f"""
+                SELECT count(*)
+                FROM read_parquet('{q(out / "review_queue.parquet")}')
+                WHERE review_kind = ?
+                """,
+                [kind],
+            )
+            or 0
+        )
+    finally:
+        db.close()

@@ -26,7 +26,7 @@ minutely/hourly export.
 | `--input` | yes | Source parquet path |
 | `--out` | yes | Atomically published output directory |
 | `--cache-dir` | no | Content-addressed request cache; defaults beside `--out` |
-| `--offline` | no | Require complete cache coverage and never use an API key |
+| `--offline` | no | Require a terminal cache entry for every task, replay cached failures, and never use an API key |
 | `--parse-model` | no | Structured parser model (default `gpt-5.6-terra`) |
 | `--classify-model` | no | Pair classifier model (default `gpt-5.6-terra`) |
 | `--embedding-model` | no | Local sentence-transformer model |

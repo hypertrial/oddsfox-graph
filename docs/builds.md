@@ -1,7 +1,8 @@
 # Builds
 
-v0.3.0 preserves the offline structural builder and adds automated logical
-discovery.
+v0.3.1 preserves the offline structural builder and hardens automated logical
+discovery cache recovery, publication metrics, bounded candidate generation,
+and real-data release validation.
 
 ## Legacy Command
 
@@ -28,8 +29,9 @@ python -m oddsfox_graph.cli discover \
 ```
 
 Compact inputs require `market_id`, `question`, and equal-length nonempty
-`outcomes` / `clob_token_ids` arrays. Optional fields include `event_id`,
-`event_slug`, `category`, `tags`, `volume`, `start_time`, and `end_time`.
+`outcomes` / `clob_token_ids` arrays whose elements are also nonempty. Optional
+fields include `event_id`, `event_slug`, `category`, `tags`, `volume`,
+`start_time`, and `end_time`.
 OddsFox minutely/hourly exports are deduplicated to one proposition per distinct
 token.
 
@@ -40,8 +42,10 @@ input, eligible, invalid, and selected counts in `stats.input_selection`.
 Live requests use OpenAI Responses structured parsing with `store=False`,
 bounded concurrency, transient retries, and a content-addressed JSON cache.
 The cache key includes task, canonical input, model, reasoning setting, prompt,
-and schema hashes. `--offline` requires complete parse and classification cache
-coverage; it never reads `OPENAI_API_KEY`.
+and schema hashes. Versioned entries record `success`, `stable_failure`, or
+`transient_failure`. Online runs retry cached transient failures. `--offline`
+requires an entry for every parse/classification task, replays recorded terminal
+failures to the review queue, and never reads `OPENAI_API_KEY`.
 
 ## Manifest
 
@@ -59,8 +63,8 @@ Successful builds write `build_manifest.json` last. Fields:
 | `models` | Requested/observed parse and classify models plus embedding revision |
 | `prompts` | Parse/classify prompt versions and hashes |
 | `limits` | Confidence, retrieval, proposition, candidate, LLM, and concurrency limits |
-| `cache` | Directory, mode, hit, miss, and write counts |
-| `usage` | Returned input, output, and total token usage |
+| `cache` | Directory, mode, state-specific hits, misses, transient retries, and writes |
+| `usage` | Current-request tokens plus `cached_origin` and `accounted_total` |
 | `artifacts` | Published parquet/json artifact names |
 | `artifact_hashes` | SHA-256 hashes of deterministic logical parquet artifacts |
 | `reports` | Markdown report paths under `reports/` |
@@ -80,9 +84,35 @@ It is cleared on rebuild and is not a published contract artifact.
 ## Publication And Reproducibility
 
 Discovery writes into a temporary staging directory, validates schemas, counts,
-edge invariants, and deterministic ordering, then publishes. The manifest is
-the last completion marker. A cache-complete offline rerun must reproduce every
-logical parquet hash; only manifest cache and timing metadata may differ.
+edge invariants, and deterministic ordering, then atomically publishes all
+non-manifest files. It records `publish_files`, freezes JSON-safe statistics,
+records input and logical artifact hashes in `hash_artifacts`, freezes JSON-safe
+statistics, and writes the manifest as the last completion marker. A failure
+after artifact publication but before the manifest leaves no false completion
+marker. Returned statistics exactly match `manifest.stats`.
+
+A cache-complete offline rerun must reproduce every logical parquet hash.
+Current-run usage is zero offline; originating request usage remains available
+under `usage.cached_origin` and the combined accounting under
+`usage.accounted_total`. Legacy v1 entries remain readable, but their duplicated
+per-item batch usage is deliberately excluded rather than reported as an
+inflated total; `cache.legacy_hits` exposes those reads.
+
+## Release Validation
+
+Ordinary CI uses lightweight fakes and performs no OpenAI request or embedding
+download. The protected manual workflow requires a
+`discovery-release-fixture` artifact containing:
+
+- `input.parquet`
+- `cache/`
+- `expected-artifact-hashes.json` keyed by `500` and `2000`
+- `labels.csv`
+
+Missing inputs fail the workflow. It verifies the input hash, runs 500- and
+2,000-proposition offline discovery, compares online/offline artifact hashes,
+enforces human-review thresholds, builds the wheel, and uploads the complete
+validation record.
 
 `oddsfox_graph.duckdb` is an implementation scratch file. Consumers should use
 the published parquet, reports, snapshot, and manifest.

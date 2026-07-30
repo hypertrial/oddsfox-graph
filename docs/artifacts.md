@@ -121,7 +121,8 @@ Columns: `review_id`, `proposition_a_id`, `proposition_b_id`, `review_kind`,
 
 The queue includes parse failures, low-confidence parses/classifications,
 explicit review requests, refusals, malformed or exhausted requests, and LLM
-consistency conflicts.
+consistency conflicts. Exhausted transient failures remain reproducible
+offline, but a later online run retries them.
 
 ### `evaluation.json`
 
