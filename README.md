@@ -2,9 +2,10 @@
 
 `oddsfox-graph` turns Polymarket market or token-odds parquet into a proposition
 graph. Each `clob_token_id` becomes a node. The offline `build` command preserves
-the WC2026 structural workflow; the v0.3.1 `discover` command adds typed parsing,
-local semantic retrieval, deterministic rules, selective LLM classification,
-review tooling, and complete provenance.
+the WC2026 structural workflow; the v0.4.0 `discover` command adds typed parsing,
+blockwise local semantic retrieval, benchmark-gated rules, selective LLM
+classification, RC2 consistency solving, incremental execution, review tooling,
+and complete provenance.
 
 This is a Python/DuckDB tool for offline structural analysis. It does not score
 prices, solve coherence LPs, or produce trading signals.
@@ -112,10 +113,11 @@ python -m oddsfox_graph.cli discover \
 before running the smoke commands.
 
 The catalog is deterministically capped by highest `volume`, then `market_id`,
-to honor `--max-propositions` (default 2,000). Discovery first selects from
+to honor `--max-propositions` (default 5,000). Discovery first selects from
 lightweight market summaries and only materializes full arrays for retained
 markets. Unusable source markets and selection counts are recorded in the
-manifest. Reproduce the completed run without an API key:
+manifest. The default candidate ceiling is 400,000 while classification remains
+bounded at 5,000 pairs. Reproduce the completed run without an API key:
 
 ```bash
 python -m oddsfox_graph.cli discover \
@@ -126,8 +128,9 @@ python -m oddsfox_graph.cli discover \
 ```
 
 Discovery additionally publishes `propositions.parquet`,
-`relation_candidates.parquet`, and `review_queue.parquet`. Export and score a
-human review:
+`relation_candidates.parquet`, `rejected_edges.parquet`,
+`parse_errors.parquet`, and `review_queue.parquet`, with reusable implementation
+state under `state/`. Export and score a legacy v0.3 human review:
 
 ```bash
 python -m oddsfox_graph.cli review-export \
@@ -145,17 +148,49 @@ outcome; a later online run retries transient failures instead of treating them
 as permanent. The manifest separates current-request token usage from
 `cached_origin` and `accounted_total` usage.
 
-The protected manual release workflow consumes a real-data fixture artifact
-containing the parquet, complete cache, expected online hashes, and finished
-labels. The equivalent local gate is:
+For v0.4, export two blinded reviewer files, compile only completed independent
+reviews and adjudicated disagreements, then evaluate:
+
+```bash
+python -m oddsfox_graph.cli benchmark-export \
+  --input data/polymarket_all_markets_20260730T093857Z.parquet \
+  --out output/discovery-smoke \
+  --output-dir output/benchmark-review
+
+python -m oddsfox_graph.cli benchmark-compile \
+  --input data/polymarket_all_markets_20260730T093857Z.parquet \
+  --review-a output/benchmark-review/reviewer-a.csv \
+  --review-b output/benchmark-review/reviewer-b.csv \
+  --adjudication output/benchmark-review/adjudication.csv \
+  --output oddsfox_graph/benchmarks/v0.4.0.parquet
+
+python -m oddsfox_graph.cli evaluate \
+  --out output/discovery-smoke \
+  --benchmark oddsfox_graph/benchmarks/v0.4.0.parquet \
+  --pricing-file pricing.json
+```
+
+Benchmark labels and notes must be genuine; the tool never fabricates them.
+The supplied catalog must have SHA-256
+`790bd1595b379472ad65ba0073105b4eb630974d04e7b44d58c8a4929f274aa2`.
+Rule publication is benchmark-gated, and `--require-ready` fails unless every
+release criterion passes. Use `--incremental-from` with a distinct,
+manifest-complete output to reuse unchanged work; results must be logically
+identical to a clean build.
+
+The protected manual release workflow consumes the real parquet, complete
+cache, immutable 5,000/20,000 baselines, expected online hashes, a compiled
+benchmark, and a pricing snapshot. The equivalent local gate is:
 
 ```bash
 python scripts/validate_discovery_release.py \
   --input data/polymarket_all_markets_20260730T093857Z.parquet \
   --cache-dir <complete-cache> \
+  --baseline-dir <completed-online-baselines> \
   --work-dir output/release-validation \
   --expected-hashes <expected-artifact-hashes.json> \
-  --labels <completed-labels.csv>
+  --benchmark <compiled-benchmark.parquet> \
+  --pricing-file <pricing.json>
 ```
 
 ## Inspect Results

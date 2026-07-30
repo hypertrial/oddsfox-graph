@@ -52,7 +52,8 @@ Grain: one accepted structural/semantic edge.
 Columns: `src_node_id`, `dst_node_id`, `edge_type`, `edge_basis`, `confidence`,
 `market_id_src`, `market_id_dst`, `event_slug_src`, `event_slug_dst`,
 `evidence`, `discovery_method`, `rule_version`, `model_version`,
-`prompt_version`, `explanation`, `assumptions`.
+`prompt_version`, `explanation`, `assumptions`, `rule_id`, `proposal_id`,
+`solver_version`, `constraint_version`, `solver_component_id`.
 
 Accepted `edge_basis` values:
 
@@ -87,10 +88,12 @@ Discovery only. Grain: one row per outcome, with
 `proposition_id = clob_token_id`.
 
 Columns: `proposition_id`, `market_id`, `event_id`, `event_slug`,
-`clob_token_id`, `outcome_index`, `outcome`, `question`, `category`, `tags`,
+`clob_token_id`, `outcome_index`, `outcome`, `question`, `description`,
+`market_source_hash`, `normalization_version`, `category`, `tags`,
 `subject_original`, `subject`, `predicate`, `object_original`, `object`,
 `operator`, `threshold`, `unit_original`, `unit`, `time_start`, `time_end`,
-`competition_original`, `competition`, `jurisdiction_original`,
+`competition_original`, `competition`, `event_scope_original`, `event_scope`,
+`jurisdiction_original`,
 `jurisdiction`, `polarity`, `parse_confidence`, `parse_status`, `parser_model`,
 `prompt_version`, `source_format`.
 
@@ -103,7 +106,9 @@ Discovery only. Grain: one canonical unordered proposition pair.
 
 Columns: `proposition_a_id`, `proposition_b_id`, `candidate_reasons`,
 `embedding_similarity`, `embedding_rank`, `deterministic_relation`,
-`classification_relation`, `classification_confidence`, `explanation`,
+`rule_id`, `rule_status`, `classification_relation`,
+`classification_confidence`, `supporting_fields`, `a_implies_b`,
+`b_implies_a`, `explanation`,
 `assumptions`, `requires_review`, `status`, `discovery_method`,
 `model_version`, `prompt_version`.
 
@@ -123,6 +128,44 @@ The queue includes parse failures, low-confidence parses/classifications,
 explicit review requests, refusals, malformed or exhausted requests, and LLM
 consistency conflicts. Exhausted transient failures remain reproducible
 offline, but a later online run retries them.
+
+### `rejected_edges.parquet`
+
+Discovery only. Grain: one rejected positive proposal. Columns include
+`proposal_id`, `src_node_id`, `dst_node_id`, `edge_type`, `edge_basis`,
+`confidence`, `discovery_method`, `rule_id`, `rule_version`, `model_version`,
+`prompt_version`, `rejection_reason`, `conflicting_proposal_ids`,
+`conflicting_constraint_ids`, and `solver_component_id`.
+
+### `parse_errors.parquet`
+
+Discovery only. Grain: one parse failure or low-confidence result. It records
+`error_id`, proposition and market ids, `error_kind`, `error_message`,
+cache state, error type/status, structured `response_json`, source question and
+description, `parse_confidence`, `market_source_hash`, `parser_model`,
+`prompt_version`, `schema_version`, and `normalization_version`.
+
+### `benchmark.parquet`
+
+Present for evaluated discovery builds. It retains the source hash, typed parse
+or pair truth, domain, reviewer aliases/labels/notes, disagreement fields,
+adjudicated notes, and unsupported-assumption judgments.
+
+### `evaluation_report.json`
+
+Reports parsing, retrieval, deterministic/LLM/combined relation accuracy,
+calibration, review rate, cost/runtime, failure categories, release gates, and
+the exit decision.
+
+### `state/`
+
+Incremental state includes `market_state.parquet`,
+`proposition_fingerprints.parquet`, `proposition_embeddings.parquet`,
+`semantic_neighbors.parquet`, `candidate_components.parquet`, and
+`solver_components.parquet`. These retain source/parse fingerprints, normalized
+vectors, directed top-k neighborhoods, candidate-neighborhood fingerprints, and
+solver proposal decisions. State hashes are recorded separately from logical
+artifact hashes.
 
 ### `evaluation.json`
 

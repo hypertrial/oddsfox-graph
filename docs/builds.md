@@ -1,8 +1,8 @@
 # Builds
 
-v0.3.1 preserves the offline structural builder and hardens automated logical
-discovery cache recovery, publication metrics, bounded candidate generation,
-and real-data release validation.
+v0.4.0 preserves the offline structural builder and turns automated logical
+discovery into a benchmark-driven, component-incremental pipeline with
+blockwise retrieval and RC2 consistency solving.
 
 ## Legacy Command
 
@@ -30,8 +30,8 @@ python -m oddsfox_graph.cli discover \
 
 Compact inputs require `market_id`, `question`, and equal-length nonempty
 `outcomes` / `clob_token_ids` arrays whose elements are also nonempty. Optional
-fields include `event_id`, `event_slug`, `category`, `tags`, `volume`,
-`start_time`, and `end_time`.
+fields include `description`, `event_id`, `event_slug`, `category`, `tags`,
+`volume`, `start_time`, and `end_time`.
 OddsFox minutely/hourly exports are deduplicated to one proposition per distinct
 token.
 
@@ -44,8 +44,27 @@ bounded concurrency, transient retries, and a content-addressed JSON cache.
 The cache key includes task, canonical input, model, reasoning setting, prompt,
 and schema hashes. Versioned entries record `success`, `stable_failure`, or
 `transient_failure`. Online runs retry cached transient failures. `--offline`
-requires an entry for every parse/classification task, replays recorded terminal
+requires complete cache or reusable state coverage, replays recorded terminal
 failures to the review queue, and never reads `OPENAI_API_KEY`.
+
+Local cosine retrieval processes normalized embeddings in deterministic blocks
+instead of allocating a full similarity matrix. Deterministic and classified
+proposals are solved in independent RC2 components. Same-market facts are hard
+clauses; other proposals are weighted soft clauses. Rejected positive proposals
+retain the selected conflicts and named constraints that exclude them.
+
+`--incremental-from` requires a distinct, manifest-complete baseline. Source,
+parser, normalization, embedding, rule, classifier, threshold, and solver
+versions drive stage-specific reuse. State is an implementation detail under
+`state/`; the public logical artifacts must match a clean run byte-for-byte in
+their canonical content. An unchanged candidate population is copied from the
+baseline; partial changes recompute candidate neighborhoods while reusing
+unchanged normalized vectors and classifications only when the complete typed
+pair evidence remains identical. Solver
+proposal components are reused independently by fingerprint. For changed or
+added propositions, semantic retrieval scores changed-to-all; an unchanged
+proposition is rescored globally only when a changed or removed node occupied
+its prior top-k.
 
 ## Manifest
 
@@ -62,11 +81,18 @@ Successful builds write `build_manifest.json` last. Fields:
 | `taxonomy` | Object with `name`, `path`, and `hash` |
 | `models` | Requested/observed parse and classify models plus embedding revision |
 | `prompts` | Parse/classify prompt versions and hashes |
-| `limits` | Confidence, retrieval, proposition, candidate, LLM, and concurrency limits |
+| `versions` | Independent normalization, taxonomy, retrieval, rules, cache, solver, and state versions |
+| `benchmark` | Compiled benchmark path/hash/source binding and rule-gate status |
+| `pricing` | Pricing snapshot path/hash used for reproducible cost estimates |
+| `solver` | Solver/encoding versions, objectives, components, clauses, and proposals |
+| `rules` | Registry version and enabled/experimental rule evidence |
+| `limits` | Per-relation confidence, retrieval block size, proposition, candidate, LLM, and concurrency limits |
 | `cache` | Directory, mode, state-specific hits, misses, transient retries, and writes |
-| `usage` | Current-request tokens plus `cached_origin` and `accounted_total` |
+| `usage` | Current-request, cached-origin, accounted-total, and per-task token usage |
 | `artifacts` | Published parquet/json artifact names |
 | `artifact_hashes` | SHA-256 hashes of deterministic logical parquet artifacts |
+| `state_hashes` | SHA-256 hashes of implementation-only incremental state |
+| `incremental` | Baseline, changed/removed/reused units, and invalidation reasons |
 | `reports` | Markdown report paths under `reports/` |
 | `stats` | Row counts and runtime |
 | `stage_timings` | Per-stage seconds |
@@ -85,9 +111,9 @@ It is cleared on rebuild and is not a published contract artifact.
 
 Discovery writes into a temporary staging directory, validates schemas, counts,
 edge invariants, and deterministic ordering, then atomically publishes all
-non-manifest files. It records `publish_files`, freezes JSON-safe statistics,
-records input and logical artifact hashes in `hash_artifacts`, freezes JSON-safe
-statistics, and writes the manifest as the last completion marker. A failure
+non-manifest files and state. It records input, logical-artifact, state,
+benchmark, pricing, and component hashes, then writes the manifest as the last
+completion marker. A failure
 after artifact publication but before the manifest leaves no false completion
 marker. Returned statistics exactly match `manifest.stats`.
 
@@ -106,13 +132,17 @@ download. The protected manual workflow requires a
 
 - `input.parquet`
 - `cache/`
-- `expected-artifact-hashes.json` keyed by `500` and `2000`
-- `labels.csv`
+- `baselines/5000/` and `baselines/20000/`, including `state/`
+- `expected-artifact-hashes.json` keyed by `5000` and `20000`
+- `benchmark.parquet`
+- `pricing.json`
 
-Missing inputs fail the workflow. It verifies the input hash, runs 500- and
-2,000-proposition offline discovery, compares online/offline artifact hashes,
-enforces human-review thresholds, builds the wheel, and uploads the complete
-validation record.
+Missing inputs fail the workflow. It verifies the input hash, runs 5,000- and
+20,000-proposition incremental/offline discovery, compares online/offline and
+clean/incremental logical hashes, requires `READY_TO_SCALE`, builds the wheel,
+and uploads the complete validation record. Genuine human labels, notes,
+adjudication, complete caches, model access, and the M4 runs remain external
+release prerequisites.
 
 `oddsfox_graph.duckdb` is an implementation scratch file. Consumers should use
 the published parquet, reports, snapshot, and manifest.

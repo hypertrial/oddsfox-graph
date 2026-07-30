@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from collections import defaultdict
 from collections.abc import Sequence
 from datetime import datetime, timezone
@@ -152,6 +154,7 @@ def _load_compact_markets(
         SELECT
             market_id::VARCHAR AS market_id,
             question::VARCHAR AS question,
+            {_optional_sql(columns, "description", "VARCHAR", "''::VARCHAR")},
             outcomes,
             clob_token_ids,
             {_optional_sql(columns, "event_id", "VARCHAR")},
@@ -185,10 +188,40 @@ def _load_compact_markets(
                 f"Market {row['market_id']!r} must have equal-length outcomes "
                 "and clob_token_ids containing only non-empty values"
             )
+        market_id = str(row["market_id"])
+        question = str(row["question"])
+        description = str(row.get("description") or "")
+        source_outcomes = tuple(
+            SourceOutcome(index, str(outcome), str(token))
+            for index, (outcome, token) in enumerate(
+                zip(outcomes, tokens, strict=True)
+            )
+        )
+        source_fields = {
+            "market_id": market_id,
+            "question": question,
+            "description": description,
+            "event_id": str_or_none(row.get("event_id")),
+            "event_slug": str_or_none(row.get("event_slug")),
+            "category": str_or_none(row.get("category")),
+            "tags": [str(tag) for tag in (row.get("tags") or [])],
+            "time_start": datetime_or_none(row.get("time_start")),
+            "time_end": datetime_or_none(row.get("time_end")),
+            "outcomes": [
+                {
+                    "outcome_index": item.outcome_index,
+                    "outcome": item.outcome,
+                    "clob_token_id": item.clob_token_id,
+                }
+                for item in source_outcomes
+            ],
+        }
         markets.append(
             SourceMarket(
-                market_id=str(row["market_id"]),
-                question=str(row["question"]),
+                market_id=market_id,
+                question=question,
+                description=description,
+                source_hash=source_market_hash(source_fields),
                 event_id=str_or_none(row.get("event_id")),
                 event_slug=str_or_none(row.get("event_slug")),
                 category=str_or_none(row.get("category")),
@@ -200,12 +233,7 @@ def _load_compact_markets(
                     if row.get("volume") is not None
                     else None
                 ),
-                outcomes=tuple(
-                    SourceOutcome(index, str(outcome), str(token))
-                    for index, (outcome, token) in enumerate(
-                        zip(outcomes, tokens, strict=True)
-                    )
-                ),
+                outcomes=source_outcomes,
             )
         )
     return markets
@@ -408,6 +436,7 @@ def _load_odds_markets(
             outcome_index::INTEGER AS outcome_index,
             clob_token_id::VARCHAR AS clob_token_id,
             question::VARCHAR AS question,
+            {_optional_sql(columns, "description", "VARCHAR", "''::VARCHAR")},
             outcome_label::VARCHAR AS outcome,
             event_slug::VARCHAR AS event_slug,
             {_optional_sql(columns, "event_id", "VARCHAR")},
@@ -430,10 +459,39 @@ def _load_odds_markets(
     for market_id in sorted(grouped):
         items = grouped[market_id]
         first = items[0]
+        source_outcomes = tuple(
+            SourceOutcome(
+                int(item["outcome_index"]),
+                str(item["outcome"]),
+                str(item["clob_token_id"]),
+            )
+            for item in items
+        )
+        source_fields = {
+            "market_id": market_id,
+            "question": str(first["question"]),
+            "description": str(first.get("description") or ""),
+            "event_id": str_or_none(first.get("event_id")),
+            "event_slug": str_or_none(first.get("event_slug")),
+            "category": str_or_none(first.get("category")),
+            "tags": [str(tag) for tag in (first.get("tags") or [])],
+            "time_start": None,
+            "time_end": None,
+            "outcomes": [
+                {
+                    "outcome_index": item.outcome_index,
+                    "outcome": item.outcome,
+                    "clob_token_id": item.clob_token_id,
+                }
+                for item in source_outcomes
+            ],
+        }
         markets.append(
             SourceMarket(
                 market_id=market_id,
                 question=str(first["question"]),
+                description=str(first.get("description") or ""),
+                source_hash=source_market_hash(source_fields),
                 event_id=str_or_none(first.get("event_id")),
                 event_slug=str_or_none(first.get("event_slug")),
                 category=str_or_none(first.get("category")),
@@ -464,14 +522,7 @@ def _load_odds_markets(
                     ),
                     default=None,
                 ),
-                outcomes=tuple(
-                    SourceOutcome(
-                        int(item["outcome_index"]),
-                        str(item["outcome"]),
-                        str(item["clob_token_id"]),
-                    )
-                    for item in items
-                ),
+                outcomes=source_outcomes,
             )
         )
     return markets
@@ -523,6 +574,16 @@ def _validate_source_markets(markets: Sequence[SourceMarket]) -> None:
                     f"clob_token_id {outcome.clob_token_id!r} belongs to multiple outcomes"
                 )
             proposition_ids.add(outcome.clob_token_id)
+
+
+def source_market_hash(fields: object) -> str:
+    raw = json.dumps(
+        fields,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    )
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 def str_or_none(value: object) -> str | None:

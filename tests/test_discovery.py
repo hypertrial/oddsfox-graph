@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import csv
+import hashlib
 import json
+import shutil
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
@@ -39,6 +41,11 @@ from oddsfox_graph.discovery import (
     _validate_returned_ids,
     _with_retries,
     discover,
+)
+from oddsfox_graph.evaluation import (
+    BENCHMARK_COLUMNS,
+    evaluate_build,
+    export_benchmark_reviews,
 )
 from oddsfox_graph.queries import DuckDB, q
 from oddsfox_graph.review import REVIEW_FIELDS, export_review, score_review
@@ -80,12 +87,23 @@ class _FakeResponses:
                     pair_id=item["pair_id"],
                     relation="uncertain" if index == 0 else "unrelated",
                     confidence=0.5 if index == 0 else 0.99,
+                    supporting_fields=[],
                     explanation=(
                         "needs human context"
                         if index == 0
                         else "the propositions are unrelated"
                     ),
                     assumptions=[],
+                    a_implies_b={
+                        "supported": False,
+                        "supporting_fields": [],
+                        "assumptions": [],
+                    },
+                    b_implies_a={
+                        "supported": False,
+                        "supporting_fields": [],
+                        "assumptions": [],
+                    },
                     requires_review=index == 0,
                 )
             )
@@ -116,6 +134,7 @@ def _parse_markets(payload: list[dict[str, Any]]) -> ParsedMarketBatch:
                     time_start="2026-01-01T00:00:00Z",
                     time_end="2026-12-31T00:00:00Z",
                     competition=None,
+                    event_scope=None,
                     jurisdiction=None,
                     polarity="negative" if outcome == "No" else "positive",
                     parse_confidence=0.99,
@@ -132,6 +151,7 @@ def _parse_markets(payload: list[dict[str, Any]]) -> ParsedMarketBatch:
                     time_start=None,
                     time_end=None,
                     competition=None,
+                    event_scope=None,
                     jurisdiction=None,
                     polarity="negative" if outcome.casefold() == "no" else "positive",
                     parse_confidence=0.99,
@@ -296,6 +316,17 @@ def test_discover_real_compact_input_and_offline_replay(
             FROM read_parquet('{q(out / "relation_candidates.parquet")}')
             """
         )[0]
+        solver_state_totals = db.rows(
+            f"""
+            SELECT
+                sum(hard_clause_count)::BIGINT AS hard_clauses,
+                sum(soft_clause_count)::BIGINT AS soft_clauses,
+                sum(objective_cost)::BIGINT AS objective_cost
+            FROM read_parquet(
+                '{q(out / "state" / "solver_components.parquet")}'
+            )
+            """
+        )[0]
     finally:
         db.close()
 
@@ -317,6 +348,13 @@ def test_discover_real_compact_input_and_offline_replay(
     assert real_discovery["client"].responses.calls == real_discovery["calls"]
     assert second_manifest["cache"]["misses"] == 0
     assert second_stats == second_manifest["stats"]
+    assert second_manifest["solver"] == second_stats["solver"]
+    assert second_manifest["rules"] == second_stats["rules"]
+    assert solver_state_totals == {
+        "hard_clauses": second_stats["solver"]["hard_clauses"],
+        "soft_clauses": second_stats["solver"]["soft_clauses"],
+        "objective_cost": second_stats["solver"]["objective_cost"],
+    }
     assert (
         f"- `runtime_seconds`: {second_stats['runtime_seconds']}"
         in (out / "reports" / "summary.md").read_text(encoding="utf-8")
@@ -458,6 +496,602 @@ def test_real_data_m4_max_proposition_and_candidate_envelope(
     assert first["classified_pairs"] <= 200
     assert second["logic_edges"] == first["logic_edges"]
     assert second_manifest["artifact_hashes"] == first_manifest["artifact_hashes"]
+
+
+def test_benchmark_export_is_balanced_blinded_and_uses_documented_files(
+    tmp_path: Path,
+    real_input: Path,
+) -> None:
+    out = tmp_path / "discovery-5000"
+    discover(
+        real_input,
+        out,
+        config=DiscoveryConfig(
+            cache_dir=tmp_path / "cache",
+            top_k=20,
+            max_propositions=5_000,
+            max_candidates=400_000,
+            max_llm_pairs=10,
+        ),
+        _client=_FakeClient(),
+        _embedder=_fake_embeddings,
+    )
+    review_dir = tmp_path / "benchmark-review"
+    counts = export_benchmark_reviews(
+        real_input,
+        out,
+        review_dir,
+        seed=20260730,
+    )
+
+    assert counts == {"parse_records": 500, "pair_records": 2_000}
+    assert {
+        path.name for path in review_dir.glob("*.csv")
+    } == {
+        "reviewer-a.csv",
+        "reviewer-b.csv",
+        "adjudication.csv",
+    }
+    sampling = json.loads(
+        (review_dir / "sampling_manifest.json").read_text()
+    )
+    assert sampling["domains"] == {
+        "cryptocurrency": 100,
+        "date_based": 100,
+        "economic_indicators": 100,
+        "elections": 100,
+        "sports": 100,
+    }
+    assert set(sampling["pair_sources"]) == {
+        "candidate",
+        "noncandidate",
+        "semantic_near_miss",
+        "structured_near_miss",
+    }
+    assert sampling["pair_sources"]["candidate"] >= 200
+    with (review_dir / "reviewer-a.csv").open(
+        newline="",
+        encoding="utf-8",
+    ) as stream:
+        rows = list(csv.DictReader(stream))
+    assert len(rows) == 2_500
+    assert all(row["reviewer_alias"] == "reviewer-a" for row in rows)
+    assert all(not row["reviewer_notes"] for row in rows)
+    assert all(not row["expected_relation"] for row in rows)
+
+
+def test_incremental_baseline_reuses_parses_and_embedding_vectors(
+    tmp_path: Path,
+    real_input: Path,
+    real_discovery: dict[str, Any],
+) -> None:
+    baseline = real_discovery["out"]
+    out = tmp_path / "incremental"
+
+    def unexpected_embeddings(
+        _: list[str],
+        __: DiscoveryConfig,
+    ) -> np.ndarray:
+        raise AssertionError("unchanged embedding vectors must be reused")
+
+    stats = discover(
+        real_input,
+        out,
+        config=DiscoveryConfig(
+            cache_dir=tmp_path / "new-cache",
+            incremental_from=baseline,
+            top_k=5,
+            max_propositions=500,
+            max_candidates=10_000,
+            max_llm_pairs=100,
+        ),
+        _client=_FakeClient(),
+        _embedder=unexpected_embeddings,
+    )
+    manifest = json.loads((out / "build_manifest.json").read_text())
+
+    assert stats["incremental"]["markets_reused"] == 250
+    assert stats["incremental"]["markets_changed"] == 0
+    assert stats["incremental"]["baseline_parse_entries_seeded"] == 250
+    assert stats["incremental"]["baseline_classification_entries_seeded"] == 100
+    assert stats["incremental"]["embedding_vectors_reused"] == 500
+    assert stats["incremental"]["embedding_vectors_recomputed"] == 0
+    assert stats["incremental"]["candidate_components_reused"] == 500
+    assert stats["incremental"]["candidate_components_recomputed"] == 0
+    assert stats["incremental"]["candidate_generation_reused"] is True
+    assert stats["solver"]["components_reused"] > 0
+    assert stats["solver"]["components_recomputed"] == 0
+    assert (
+        manifest["artifact_hashes"]
+        == real_discovery["second_manifest"]["artifact_hashes"]
+    )
+
+
+def test_threshold_only_incremental_reuses_candidates_and_classifications(
+    tmp_path: Path,
+    real_input: Path,
+    real_discovery: dict[str, Any],
+) -> None:
+    client = _FakeClient()
+    thresholds = dict(DiscoveryConfig().relation_thresholds)
+    thresholds["compatible"] = 0.97
+
+    stats = discover(
+        real_input,
+        tmp_path / "threshold-only",
+        config=DiscoveryConfig(
+            cache_dir=tmp_path / "threshold-cache",
+            incremental_from=real_discovery["out"],
+            relation_thresholds=thresholds,
+            top_k=5,
+            max_propositions=500,
+            max_candidates=10_000,
+            max_llm_pairs=100,
+        ),
+        _client=client,
+        _embedder=lambda *_: (_ for _ in ()).throw(
+            AssertionError("threshold-only changes must reuse candidates")
+        ),
+    )
+
+    assert client.responses.calls == 0
+    assert stats["incremental"]["candidate_generation_reused"] is True
+    assert stats["incremental"]["baseline_classification_entries_seeded"] == 100
+    assert "relation_thresholds" in stats["incremental"]["invalidation_reasons"]
+    assert stats["solver"]["components_recomputed"] == 0
+
+
+def test_classifier_change_invalidates_only_classification_cache(
+    tmp_path: Path,
+    real_input: Path,
+    real_discovery: dict[str, Any],
+) -> None:
+    client = _FakeClient()
+
+    stats = discover(
+        real_input,
+        tmp_path / "classifier-change",
+        config=DiscoveryConfig(
+            cache_dir=tmp_path / "classifier-change-cache",
+            incremental_from=real_discovery["out"],
+            classify_model="replacement-classifier",
+            top_k=5,
+            max_propositions=500,
+            max_candidates=10_000,
+            max_llm_pairs=100,
+        ),
+        _client=client,
+        _embedder=lambda *_: (_ for _ in ()).throw(
+            AssertionError("classifier changes must reuse candidates")
+        ),
+    )
+
+    assert stats["incremental"]["candidate_generation_reused"] is True
+    assert stats["incremental"]["baseline_parse_entries_seeded"] == 250
+    assert stats["incremental"]["baseline_classification_entries_seeded"] == 0
+    assert "classifier_model_prompt_or_schema" in stats["incremental"][
+        "invalidation_reasons"
+    ]
+    assert client.responses.calls == 5
+
+
+def test_normalization_change_does_not_reuse_stale_classifications(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    real_input: Path,
+    real_discovery: dict[str, Any],
+) -> None:
+    client = _FakeClient()
+    monkeypatch.setattr(
+        discovery_module,
+        "NORMALIZATION_VERSION",
+        "normalization-review-regression",
+    )
+
+    stats = discover(
+        real_input,
+        tmp_path / "normalization-change",
+        config=DiscoveryConfig(
+            cache_dir=tmp_path / "normalization-change-cache",
+            incremental_from=real_discovery["out"],
+            top_k=5,
+            max_propositions=500,
+            max_candidates=10_000,
+            max_llm_pairs=100,
+        ),
+        _client=client,
+        _embedder=lambda *_: (_ for _ in ()).throw(
+            AssertionError("unchanged embedding vectors must be reused")
+        ),
+    )
+
+    assert stats["incremental"]["baseline_parse_entries_seeded"] == 250
+    assert stats["incremental"]["baseline_classification_entries_seeded"] == 0
+    assert "normalization_version" in stats["incremental"][
+        "invalidation_reasons"
+    ]
+    assert client.responses.calls == 5
+
+
+def test_benchmark_evaluation_is_staged_and_published(
+    tmp_path: Path,
+    real_input: Path,
+    real_discovery: dict[str, Any],
+) -> None:
+    db = DuckDB()
+    try:
+        propositions = db.rows(
+            f"""
+            SELECT *
+            FROM read_parquet('{q(real_discovery["out"] / "propositions.parquet")}')
+            QUALIFY count(*) OVER (PARTITION BY market_id) = 2
+            ORDER BY market_id, outcome_index
+            LIMIT 2
+            """
+        )
+    finally:
+        db.close()
+    assert len(propositions) == 2
+    source_hash = discovery_module._sha256(real_input)
+    benchmark_rows = []
+    for proposition in propositions:
+        truth = {
+            "expected_subjects": list(proposition["subject"] or []),
+            "expected_predicate": proposition["predicate"],
+            "expected_object": proposition["object"],
+            "expected_operator": proposition["operator"],
+            "expected_threshold": proposition["threshold"],
+            "expected_unit": proposition["unit"],
+            "expected_time_start": proposition["time_start"],
+            "expected_time_end": proposition["time_end"],
+            "expected_competition": proposition["competition"],
+            "expected_event_scope": proposition["event_scope"],
+            "expected_jurisdiction": proposition["jurisdiction"],
+            "expected_polarity": proposition["polarity"],
+        }
+        benchmark_rows.append(
+            {
+                **{name: None for name in BENCHMARK_COLUMNS},
+                "benchmark_version": "v0.4.0",
+                "schema_version": "benchmark-v1",
+                "source_sha256": source_hash,
+                "record_id": f"parse-{proposition['proposition_id']}",
+                "record_type": "parse",
+                "domain": "date_based",
+                "proposition_a_id": proposition["proposition_id"],
+                **truth,
+                "reviewer_a_alias": "reviewer-a",
+                "reviewer_a_label": json.dumps(truth, default=str, sort_keys=True),
+                "reviewer_a_notes": "Test fixture truth copied from typed parse.",
+                "reviewer_b_alias": "reviewer-b",
+                "reviewer_b_label": json.dumps(truth, default=str, sort_keys=True),
+                "reviewer_b_notes": "Test fixture truth copied from typed parse.",
+                "disagreement": False,
+                "disagreement_fields": [],
+                "final_notes": "Reviewers agreed.",
+            }
+        )
+    a_id, b_id = sorted(str(row["proposition_id"]) for row in propositions)
+    benchmark_rows.append(
+        {
+            **{name: None for name in BENCHMARK_COLUMNS},
+            "benchmark_version": "v0.4.0",
+            "schema_version": "benchmark-v1",
+            "source_sha256": source_hash,
+            "record_id": f"pair-{a_id}-{b_id}",
+            "record_type": "pair",
+            "domain": "date_based",
+            "proposition_a_id": a_id,
+            "proposition_b_id": b_id,
+            "expected_relation": "complement",
+            "unsupported_assumption": False,
+            "reviewer_a_alias": "reviewer-a",
+            "reviewer_a_label": '{"expected_relation":"complement"}',
+            "reviewer_a_notes": "Same-market Yes/No outcomes.",
+            "reviewer_b_alias": "reviewer-b",
+            "reviewer_b_label": '{"expected_relation":"complement"}',
+            "reviewer_b_notes": "Same-market Yes/No outcomes.",
+            "disagreement": False,
+            "disagreement_fields": [],
+            "final_notes": "Reviewers agreed.",
+        }
+    )
+    benchmark = tmp_path / "benchmark.parquet"
+    db = DuckDB()
+    try:
+        create_and_fill(db, "benchmark_v", BENCHMARK_COLUMNS, benchmark_rows)
+        db.execute(
+            f"""
+            COPY (
+                SELECT *
+                FROM benchmark_v
+                ORDER BY record_type, record_id
+            ) TO '{q(benchmark)}' (FORMAT PARQUET)
+            """
+        )
+    finally:
+        db.close()
+
+    out = tmp_path / "evaluated"
+    stats = discover(
+        real_input,
+        out,
+        config=DiscoveryConfig(
+            cache_dir=tmp_path / "evaluation-cache",
+            incremental_from=real_discovery["out"],
+            benchmark_path=benchmark,
+            top_k=5,
+            max_propositions=500,
+            max_candidates=10_000,
+            max_llm_pairs=100,
+        ),
+        _client=_FakeClient(),
+        _embedder=lambda *_: (_ for _ in ()).throw(
+            AssertionError("evaluation should reuse unchanged candidates")
+        ),
+    )
+    manifest = json.loads((out / "build_manifest.json").read_text())
+    report = json.loads((out / "evaluation_report.json").read_text())
+
+    assert stats["evaluation_exit_decision"] == "NEEDS_RELATION_MODEL_WORK"
+    assert report["exit_decision"] == "NEEDS_RELATION_MODEL_WORK"
+    assert report["benchmark"]["source_sha256"] == source_hash
+    assert (out / "benchmark.parquet").is_file()
+    assert "benchmark.parquet" in manifest["artifact_hashes"]
+    assert manifest["artifacts"][-2:] == [
+        "benchmark.parquet",
+        "evaluation_report.json",
+    ]
+    gated_out = tmp_path / "evaluated-gated"
+    with pytest.raises(RuntimeError, match="READY_TO_SCALE"):
+        discover(
+            real_input,
+            gated_out,
+            config=DiscoveryConfig(
+                cache_dir=tmp_path / "evaluation-gated-cache",
+                incremental_from=real_discovery["out"],
+                benchmark_path=benchmark,
+                require_ready=True,
+                top_k=5,
+                max_propositions=500,
+                max_candidates=10_000,
+                max_llm_pairs=100,
+            ),
+            _client=_FakeClient(),
+            _embedder=lambda *_: (_ for _ in ()).throw(
+                AssertionError("evaluation should reuse unchanged candidates")
+            ),
+        )
+    assert (gated_out / "build_manifest.json").is_file()
+    assert (gated_out / "evaluation_report.json").is_file()
+
+    standalone = tmp_path / "standalone-evaluation"
+    shutil.copytree(real_discovery["out"], standalone)
+    standalone_result = evaluate_build(standalone, benchmark)
+    standalone_manifest = json.loads(
+        (standalone / "build_manifest.json").read_text()
+    )
+    assert standalone_result["exit_decision"] == "NEEDS_RELATION_MODEL_WORK"
+    assert standalone_manifest["stats"]["evaluation_exit_decision"] == (
+        "NEEDS_RELATION_MODEL_WORK"
+    )
+    assert {
+        "benchmark.parquet",
+        "evaluation_report.json",
+    } <= set(standalone_manifest["artifacts"])
+    assert standalone_manifest["artifact_hashes"]["benchmark.parquet"]
+    assert standalone_manifest["evaluation"]["hash"]
+
+
+def test_one_changed_real_market_matches_clean_rebuild(
+    tmp_path: Path,
+    real_input: Path,
+) -> None:
+    class StableResponses(_FakeResponses):
+        async def parse(self, **kwargs: object) -> _Response:
+            self.calls += 1
+            payload = json.loads(kwargs["input"][1]["content"])  # type: ignore[index]
+            if kwargs["text_format"] is ParsedMarketBatch:
+                return _Response(_parse_markets(payload))
+            return _Response(
+                PairClassificationBatch(
+                    pairs=[
+                        PairClassification(
+                            pair_id=item["pair_id"],
+                            relation="unrelated",
+                            confidence=0.99,
+                            supporting_fields=[],
+                            explanation="The propositions are unrelated.",
+                            assumptions=[],
+                            a_implies_b={
+                                "supported": False,
+                                "supporting_fields": [],
+                                "assumptions": [],
+                            },
+                            b_implies_a={
+                                "supported": False,
+                                "supporting_fields": [],
+                                "assumptions": [],
+                            },
+                            requires_review=False,
+                        )
+                        for item in payload
+                    ]
+                )
+            )
+
+    def stable_client() -> _FakeClient:
+        client = _FakeClient()
+        client.responses = StableResponses()
+        return client
+
+    def content_embeddings(
+        texts: list[str],
+        _: DiscoveryConfig,
+    ) -> np.ndarray:
+        return np.asarray(
+            [
+                [
+                    int.from_bytes(
+                        hashlib.sha256(text.encode()).digest()[offset : offset + 4],
+                        "big",
+                    )
+                    / 2**32
+                    for offset in (0, 4, 8, 12)
+                ]
+                for text in texts
+            ],
+            dtype=np.float32,
+        )
+
+    config_kwargs = {
+        "top_k": 3,
+        "max_propositions": 100,
+        "max_candidates": 2_000,
+        "max_llm_pairs": 20,
+    }
+    baseline = tmp_path / "baseline"
+    discover(
+        real_input,
+        baseline,
+        config=DiscoveryConfig(
+            cache_dir=tmp_path / "baseline-cache",
+            **config_kwargs,
+        ),
+        _client=stable_client(),
+        _embedder=content_embeddings,
+    )
+    db = DuckDB()
+    try:
+        changed_market = str(
+            db.scalar(
+                f"""
+                SELECT market_id
+                FROM read_parquet('{q(baseline / "propositions.parquet")}')
+                ORDER BY market_id
+                LIMIT 1
+                """
+            )
+        )
+        escaped_market = changed_market.replace("'", "''")
+        changed_input = tmp_path / "changed.parquet"
+        db.execute(
+            f"""
+            COPY (
+                SELECT * REPLACE (
+                    CASE
+                        WHEN CAST(market_id AS VARCHAR) = '{escaped_market}'
+                            THEN coalesce(description, '')
+                                 || ' Incremental validation change.'
+                        ELSE description
+                    END AS description
+                )
+                FROM read_parquet('{q(real_input)}')
+            ) TO '{q(changed_input)}' (FORMAT PARQUET)
+            """
+        )
+    finally:
+        db.close()
+
+    incremental = tmp_path / "incremental-changed"
+    incremental_stats = discover(
+        changed_input,
+        incremental,
+        config=DiscoveryConfig(
+            cache_dir=tmp_path / "incremental-cache",
+            incremental_from=baseline,
+            **config_kwargs,
+        ),
+        _client=stable_client(),
+        _embedder=content_embeddings,
+    )
+    clean = tmp_path / "clean-changed"
+    discover(
+        changed_input,
+        clean,
+        config=DiscoveryConfig(
+            cache_dir=tmp_path / "clean-cache",
+            **config_kwargs,
+        ),
+        _client=stable_client(),
+        _embedder=content_embeddings,
+    )
+    incremental_manifest = json.loads(
+        (incremental / "build_manifest.json").read_text()
+    )
+    clean_manifest = json.loads((clean / "build_manifest.json").read_text())
+
+    assert incremental_stats["incremental"]["markets_changed"] == 1
+    assert incremental_stats["incremental"]["markets_reused"] == 49
+    assert (
+        incremental_stats["incremental"]["embedding_vectors_recomputed"] == 2
+    )
+    assert incremental_stats["incremental"]["candidate_generation_reused"] is False
+    assert incremental_stats["incremental"]["semantic_neighborhoods_reused"] > 0
+    assert incremental_stats["incremental"][
+        "semantic_neighborhoods_recomputed"
+    ] < 100
+    assert incremental_stats["incremental"]["candidate_components_reused"] > 0
+    assert incremental_stats["solver"]["components_reused"] > 0
+    assert (
+        incremental_manifest["artifact_hashes"]
+        == clean_manifest["artifact_hashes"]
+    )
+
+    removed_input = tmp_path / "removed.parquet"
+    db = DuckDB()
+    try:
+        db.execute(
+            f"""
+            COPY (
+                SELECT *
+                FROM read_parquet('{q(real_input)}')
+                WHERE CAST(market_id AS VARCHAR) != '{escaped_market}'
+            ) TO '{q(removed_input)}' (FORMAT PARQUET)
+            """
+        )
+    finally:
+        db.close()
+    removed_incremental = tmp_path / "incremental-removed"
+    removed_stats = discover(
+        removed_input,
+        removed_incremental,
+        config=DiscoveryConfig(
+            cache_dir=tmp_path / "removed-incremental-cache",
+            incremental_from=baseline,
+            **config_kwargs,
+        ),
+        _client=stable_client(),
+        _embedder=content_embeddings,
+    )
+    removed_clean = tmp_path / "clean-removed"
+    discover(
+        removed_input,
+        removed_clean,
+        config=DiscoveryConfig(
+            cache_dir=tmp_path / "removed-clean-cache",
+            **config_kwargs,
+        ),
+        _client=stable_client(),
+        _embedder=content_embeddings,
+    )
+    removed_incremental_manifest = json.loads(
+        (removed_incremental / "build_manifest.json").read_text()
+    )
+    removed_clean_manifest = json.loads(
+        (removed_clean / "build_manifest.json").read_text()
+    )
+
+    assert removed_stats["incremental"]["markets_removed"] == 1
+    assert removed_stats["incremental"]["markets_changed"] == 1
+    assert removed_stats["incremental"]["markets_reused"] == 49
+    assert removed_stats["incremental"]["semantic_neighborhoods_reused"] > 0
+    assert removed_stats["incremental"]["candidate_components_reused"] > 0
+    assert removed_stats["solver"]["components_reused"] > 0
+    assert (
+        removed_incremental_manifest["artifact_hashes"]
+        == removed_clean_manifest["artifact_hashes"]
+    )
 
 
 def test_deterministic_relation_directions_and_consistency() -> None:
@@ -656,6 +1290,7 @@ def test_structured_output_models_require_nullable_fields() -> None:
             time_start=None,
             time_end=None,
             competition=None,
+            event_scope=None,
             jurisdiction=None,
             polarity="positive",
             parse_confidence=0.99,
@@ -721,8 +1356,19 @@ def test_transient_cache_entry_replays_offline_but_recovers_online(
                             pair_id=item["pair_id"],
                             relation="unrelated",
                             confidence=0.99,
+                            supporting_fields=[],
                             explanation="not related",
                             assumptions=[],
+                            a_implies_b={
+                                "supported": False,
+                                "supporting_fields": [],
+                                "assumptions": [],
+                            },
+                            b_implies_a={
+                                "supported": False,
+                                "supporting_fields": [],
+                                "assumptions": [],
+                            },
                             requires_review=False,
                         )
                         for item in payload
@@ -855,8 +1501,25 @@ def test_positive_labels_below_threshold_or_flagged_for_review_are_not_edges(
                     pair_id=item["pair_id"],
                     relation="compatible",
                     confidence=0.94 if index == 0 else 0.99,
+                    supporting_fields=[
+                        {
+                            "proposition": "A",
+                            "field": "question",
+                            "value": item["proposition_A"]["question"],
+                        }
+                    ],
                     explanation="positive relation requires review",
                     assumptions=[],
+                    a_implies_b={
+                        "supported": False,
+                        "supporting_fields": [],
+                        "assumptions": [],
+                    },
+                    b_implies_a={
+                        "supported": False,
+                        "supporting_fields": [],
+                        "assumptions": [],
+                    },
                     requires_review=index != 0,
                 )
                 for index, item in enumerate(payload)
@@ -1019,6 +1682,7 @@ def test_time_stage_single_winner_rules_and_candidate_cap() -> None:
         "predicate": "win",
         "object": "winner",
         "event_id": "election",
+        "event_scope": "single_winner",
     }
     bob = {
         **alice,
@@ -1028,6 +1692,14 @@ def test_time_stage_single_winner_rules_and_candidate_cap() -> None:
     }
     winner_relation = _deterministic_relation(alice, bob, 0.95)
     assert winner_relation and winner_relation["edge_type"] == "mutually_exclusive"
+    assert (
+        _deterministic_relation(
+            {**alice, "event_scope": "multi_winner"},
+            {**bob, "event_scope": "multi_winner"},
+            0.95,
+        )
+        is None
+    )
     assert not _is_winner_proposition(
         {**alice, "predicate": "wind speed", "object": None}
     )

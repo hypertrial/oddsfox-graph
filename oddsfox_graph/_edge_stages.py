@@ -173,7 +173,27 @@ def accept_logic_edges(db: DuckDB, out_dir: Path) -> None:
                 WHEN c.candidate_source = 'same_market' THEN 'same market n-ary outcomes are mutually exclusive'
                 ELSE 'structural candidate'
             END AS explanation,
-            []::VARCHAR[] AS assumptions
+            []::VARCHAR[] AS assumptions,
+            CASE
+                WHEN c.candidate_source = 'same_market' AND c.candidate_type = 'complement'
+                    THEN 'same_market.binary_complement.v1'
+                WHEN c.candidate_source = 'same_market'
+                    THEN 'same_market.categorical_exclusion.v1'
+                WHEN c.candidate_source = 'exact_duplicate_same_event'
+                    THEN 'equivalence.exact_duplicate.v1'
+                WHEN c.candidate_source = 'semantic_single_winner'
+                    THEN 'event.single_winner.v1'
+                WHEN c.candidate_source = 'semantic_stage_progression'
+                    THEN 'tournament.stage_progression.v1'
+                ELSE 'structural.unknown.v1'
+            END AS rule_id,
+            sha256(
+                c.src_node_id || '|' || c.dst_node_id || '|' ||
+                c.candidate_type || '|' || c.candidate_source
+            ) AS proposal_id,
+            NULL::VARCHAR AS solver_version,
+            NULL::VARCHAR AS constraint_version,
+            NULL::VARCHAR AS solver_component_id
         FROM candidate_edges_v c
         WHERE c.candidate_source IN (
             'same_market',

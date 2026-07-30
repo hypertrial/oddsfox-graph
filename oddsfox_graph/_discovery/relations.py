@@ -15,9 +15,41 @@ SEMANTIC_KEYS = (
     "time_start",
     "time_end",
     "competition",
+    "event_scope",
     "jurisdiction",
     "polarity",
 )
+
+RULE_REGISTRY = {
+    "same_market.binary_complement.v1": {
+        "version": "1",
+        "basis": "same_market",
+    },
+    "same_market.categorical_exclusion.v1": {
+        "version": "1",
+        "basis": "same_market",
+    },
+    "equivalence.normalized_fields.v1": {
+        "version": "1",
+        "basis": "normalized_equivalence",
+    },
+    "threshold.interval_containment.v2": {
+        "version": "2",
+        "basis": "numeric_threshold",
+    },
+    "time.interval_containment.v1": {
+        "version": "1",
+        "basis": "time_window_containment",
+    },
+    "tournament.stage_progression.v1": {
+        "version": "1",
+        "basis": "tournament_stage",
+    },
+    "event.single_winner.v1": {
+        "version": "1",
+        "basis": "single_winner",
+    },
+}
 
 _STAGE_RANKS = {
     "round of 32": 0,
@@ -52,6 +84,7 @@ def deterministic_relation(
             "same_market",
             "Yes and No outcomes of one binary market are complements",
             1.0,
+            "same_market.binary_complement.v1",
         )
     if same_market:
         return _rule(
@@ -61,13 +94,17 @@ def deterministic_relation(
             "same_market",
             "Distinct outcomes of one categorical market cannot both occur",
             1.0,
+            "same_market.categorical_exclusion.v1",
         )
 
     if min(float(a["parse_confidence"]), float(b["parse_confidence"])) < parse_confidence:
         return None
     confidence = min(float(a["parse_confidence"]), float(b["parse_confidence"]))
 
-    if proposition_signature(a) == proposition_signature(b):
+    if (
+        proposition_signature(a) == proposition_signature(b)
+        and _same_authoritative_scope(a, b)
+    ):
         return _rule(
             "equivalent",
             min(a_id, b_id),
@@ -75,18 +112,32 @@ def deterministic_relation(
             "normalized_equivalence",
             "Normalized proposition fields are identical",
             confidence,
+            "equivalence.normalized_fields.v1",
         )
 
     threshold_relation = _numeric_threshold_relation(a, b)
     if threshold_relation:
-        src, dst = threshold_relation
+        relation_type, src, dst = threshold_relation
         return _rule(
-            "implies",
-            str(src["proposition_id"]),
-            str(dst["proposition_id"]),
+            relation_type,
+            (
+                min(str(src["proposition_id"]), str(dst["proposition_id"]))
+                if relation_type == "equivalent"
+                else str(src["proposition_id"])
+            ),
+            (
+                max(str(src["proposition_id"]), str(dst["proposition_id"]))
+                if relation_type == "equivalent"
+                else str(dst["proposition_id"])
+            ),
             "numeric_threshold",
-            "A stronger numeric threshold implies the compatible weaker threshold",
+            (
+                "Normalized numeric predicates describe the same interval"
+                if relation_type == "equivalent"
+                else "A narrower numeric interval implies the containing interval"
+            ),
             confidence,
+            "threshold.interval_containment.v2",
         )
 
     time_relation = _time_window_relation(a, b)
@@ -99,6 +150,7 @@ def deterministic_relation(
             "time_window_containment",
             "A narrower compatible time window implies the containing window",
             confidence,
+            "time.interval_containment.v1",
         )
 
     a_stage = stage_rank(a)
@@ -108,6 +160,7 @@ def deterministic_relation(
         and b_stage is not None
         and a_stage != b_stage
         and _same_values(a, b, ("subject", "competition", "polarity"))
+        and _same_authoritative_scope(a, b)
         and a.get("polarity") == "positive"
     ):
         src, dst = (a, b) if a_stage > b_stage else (b, a)
@@ -118,6 +171,7 @@ def deterministic_relation(
             "tournament_stage",
             "Reaching a later tournament stage implies reaching an earlier stage",
             confidence,
+            "tournament.stage_progression.v1",
         )
 
     if (
@@ -134,6 +188,7 @@ def deterministic_relation(
             "single_winner",
             "Distinct winners of one single-winner event cannot both occur",
             confidence,
+            "event.single_winner.v1",
         )
     return None
 
@@ -145,6 +200,7 @@ def _rule(
     basis: str,
     explanation: str,
     confidence: float,
+    rule_id: str,
 ) -> dict[str, Any]:
     return {
         "edge_type": edge_type,
@@ -153,30 +209,101 @@ def _rule(
         "edge_basis": basis,
         "explanation": explanation,
         "confidence": confidence,
+        "rule_id": rule_id,
     }
 
 
 def _numeric_threshold_relation(
     a: dict[str, Any],
     b: dict[str, Any],
-) -> tuple[dict[str, Any], dict[str, Any]] | None:
+) -> tuple[str, dict[str, Any], dict[str, Any]] | None:
     if a.get("threshold") is None or b.get("threshold") is None:
         return None
-    if a.get("operator") != b.get("operator"):
+    if a.get("operator") not in {
+        "greater_than",
+        "greater_than_or_equal",
+        "less_than",
+        "less_than_or_equal",
+    } or b.get("operator") not in {
+        "greater_than",
+        "greater_than_or_equal",
+        "less_than",
+        "less_than_or_equal",
+    }:
         return None
-    if not _same_except(a, b, {"threshold"}):
+    if not _same_except(a, b, {"operator", "threshold", "polarity"}):
         return None
-    a_threshold = float(a["threshold"])
-    b_threshold = float(b["threshold"])
-    if a_threshold == b_threshold:
+    if a.get("polarity") != b.get("polarity"):
         return None
-    if a["operator"] in {"greater_than", "greater_than_or_equal"}:
-        relation = (a, b) if a_threshold > b_threshold else (b, a)
-        return relation[::-1] if a.get("polarity") == "negative" else relation
-    if a["operator"] in {"less_than", "less_than_or_equal"}:
-        relation = (a, b) if a_threshold < b_threshold else (b, a)
-        return relation[::-1] if a.get("polarity") == "negative" else relation
+    if not _same_authoritative_scope(a, b):
+        return None
+    a_interval = _numeric_interval(a)
+    b_interval = _numeric_interval(b)
+    a_subset_b = _interval_subset(a_interval, b_interval)
+    b_subset_a = _interval_subset(b_interval, a_interval)
+    if a_subset_b and b_subset_a:
+        return "equivalent", a, b
+    if a_subset_b:
+        return "implies", a, b
+    if b_subset_a:
+        return "implies", b, a
     return None
+
+
+def _numeric_interval(
+    proposition: dict[str, Any],
+) -> tuple[tuple[float | None, bool], tuple[float | None, bool]]:
+    operator = str(proposition["operator"])
+    if proposition.get("polarity") == "negative":
+        operator = {
+            "greater_than": "less_than_or_equal",
+            "greater_than_or_equal": "less_than",
+            "less_than": "greater_than_or_equal",
+            "less_than_or_equal": "greater_than",
+        }[operator]
+    threshold = float(proposition["threshold"])
+    if operator == "greater_than":
+        return (threshold, False), (None, False)
+    if operator == "greater_than_or_equal":
+        return (threshold, True), (None, False)
+    if operator == "less_than":
+        return (None, False), (threshold, False)
+    return (None, False), (threshold, True)
+
+
+def _interval_subset(
+    inner: tuple[tuple[float | None, bool], tuple[float | None, bool]],
+    outer: tuple[tuple[float | None, bool], tuple[float | None, bool]],
+) -> bool:
+    (inner_low, inner_low_inclusive), (inner_high, inner_high_inclusive) = inner
+    (outer_low, outer_low_inclusive), (outer_high, outer_high_inclusive) = outer
+    lower_ok = (
+        outer_low is None
+        or (
+            inner_low is not None
+            and (
+                inner_low > outer_low
+                or (
+                    inner_low == outer_low
+                    and (outer_low_inclusive or not inner_low_inclusive)
+                )
+            )
+        )
+    )
+    upper_ok = (
+        outer_high is None
+        or (
+            inner_high is not None
+            and (
+                inner_high < outer_high
+                or (
+                    inner_high == outer_high
+                    and (outer_high_inclusive or not inner_high_inclusive)
+                )
+            )
+        )
+    )
+    return lower_ok and upper_ok
 
 
 def _time_window_relation(
@@ -193,6 +320,8 @@ def _time_window_relation(
     ):
         return None
     if not _same_except(a, b, {"time_start", "time_end"}):
+        return None
+    if not _same_authoritative_scope(a, b):
         return None
     a_contains_b = (
         a["time_start"] <= b["time_start"]
@@ -253,15 +382,45 @@ def is_winner_proposition(proposition: dict[str, Any]) -> bool:
     predicate = normalize_text(str(proposition.get("predicate") or "")).casefold()
     object_ = normalize_text(str(proposition.get("object") or "")).casefold()
     winner_words = {"win", "winner", "winners", "winning", "wins"}
-    return bool(set(predicate.replace("-", " ").split()) & winner_words) or (
+    winner_language = bool(
+        set(predicate.replace("-", " ").split()) & winner_words
+    ) or (
         object_ in winner_words
     )
+    scope = normalize_text(
+        str(proposition.get("event_scope") or "")
+    ).casefold().replace("_", " ")
+    single_winner_scope = scope in {
+        "one winner",
+        "single winner",
+        "winner takes all",
+    }
+    return winner_language and single_winner_scope
 
 
 def same_event(a: dict[str, Any], b: dict[str, Any]) -> bool:
-    a_event = a.get("event_id") or a.get("event_slug")
-    b_event = b.get("event_id") or b.get("event_slug")
-    return bool(a_event and a_event == b_event)
+    a_event_id = a.get("event_id")
+    b_event_id = b.get("event_id")
+    if a_event_id and b_event_id and a_event_id == b_event_id:
+        return True
+    a_event_slug = a.get("event_slug")
+    b_event_slug = b.get("event_slug")
+    return bool(
+        a_event_slug
+        and b_event_slug
+        and a_event_slug == b_event_slug
+    )
+
+
+def _same_authoritative_scope(
+    a: dict[str, Any],
+    b: dict[str, Any],
+) -> bool:
+    if same_event(a, b):
+        return True
+    a_scope = normalize_text(str(a.get("event_scope") or "")).casefold()
+    b_scope = normalize_text(str(b.get("event_scope") or "")).casefold()
+    return bool(a_scope and a_scope == b_scope)
 
 
 def times_overlap(a: dict[str, Any], b: dict[str, Any]) -> bool:

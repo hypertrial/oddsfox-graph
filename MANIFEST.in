@@ -1,1 +1,2 @@
 include scripts/validate_discovery_release.py
+recursive-include oddsfox_graph/benchmarks *

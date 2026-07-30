@@ -70,6 +70,11 @@ ARTIFACT_COLUMNS = {
         "prompt_version",
         "explanation",
         "assumptions",
+        "rule_id",
+        "proposal_id",
+        "solver_version",
+        "constraint_version",
+        "solver_component_id",
     ],
     "conditional_edges.parquet": [
         "a_node_id",

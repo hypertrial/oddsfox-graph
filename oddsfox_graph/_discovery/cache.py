@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 
-CACHE_ENTRY_VERSION = 2
+CACHE_ENTRY_VERSION = 3
 CacheState = Literal["success", "stable_failure", "transient_failure"]
 
 
@@ -87,6 +87,7 @@ class JsonCache:
         raw = json.dumps(
             {
                 "task": task,
+                "cache_entry_version": CACHE_ENTRY_VERSION,
                 "model": model,
                 "reasoning_effort": "medium",
                 "prompt_version": prompt_version,
@@ -178,6 +179,13 @@ class JsonCache:
             if state not in {"success", "stable_failure", "transient_failure"}:
                 raise ValueError(f"Unsupported discovery cache state {state!r}")
             return dict(raw)
+        if raw.get("version") == 2:
+            state = raw.get("state")
+            if state not in {"success", "stable_failure", "transient_failure"}:
+                raise ValueError(f"Unsupported discovery cache state {state!r}")
+            migrated = dict(raw)
+            migrated["version"] = CACHE_ENTRY_VERSION
+            return migrated
 
         # v1 stored both permanent and retryable failures as a plain error string.
         # Replay them offline, but always retry them online.

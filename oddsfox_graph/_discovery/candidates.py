@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Callable, Sequence
 from typing import Any
 
@@ -15,6 +16,7 @@ _MEMBERSHIP_COLUMNS = {
 
 _DETERMINISTIC_MEMBERSHIP_COLUMNS = {
     **_MEMBERSHIP_COLUMNS,
+    "operator": "VARCHAR",
     "numeric_value": "DOUBLE",
     "time_start": "TIMESTAMPTZ",
     "time_end": "TIMESTAMPTZ",
@@ -68,11 +70,13 @@ def generate_candidates(
     embedding_text: Callable[[dict[str, Any]], str],
     stage_rank: Callable[[dict[str, Any]], int | None],
     is_winner: Callable[[dict[str, Any]], bool],
+    baseline_embeddings: dict[str, list[float]] | None = None,
+    baseline_neighbors: Sequence[dict[str, Any]] | None = None,
+    embedding_state_sink: list[dict[str, Any]] | None = None,
+    neighbor_state_sink: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Generate capped candidates without materializing structural all-pairs in Python."""
 
-    if len(propositions) < 2:
-        return []
     proposition_by_id = {
         str(proposition["proposition_id"]): proposition
         for proposition in propositions
@@ -104,6 +108,7 @@ def generate_candidates(
                 "kind": kind,
                 "group_key": repr(key),
                 "proposition_id": proposition_id,
+                "operator": proposition.get("operator"),
                 "numeric_value": numeric_value,
                 "time_start": proposition.get("time_start"),
                 "time_end": proposition.get("time_end"),
@@ -144,7 +149,7 @@ def generate_candidates(
                 numeric_key = tuple(
                     hashable(proposition.get(key))
                     for key in semantic_keys
-                    if key != "threshold"
+                    if key not in {"operator", "threshold"}
                 )
                 add_structural("numeric_rule", numeric_key, proposition_id)
             if proposition.get("time_start") and proposition.get("time_end"):
@@ -176,7 +181,7 @@ def generate_candidates(
                 numeric_key = tuple(
                     hashable(proposition.get(key))
                     for key in semantic_keys
-                    if key != "threshold"
+                    if key not in {"operator", "threshold"}
                 )
                 add_deterministic(
                     "numeric",
@@ -204,6 +209,9 @@ def generate_candidates(
                     (
                         hashable(proposition.get("subject")),
                         hashable(proposition.get("competition")),
+                        hashable(
+                            event_key or proposition.get("event_scope")
+                        ),
                         proposition.get("polarity"),
                     ),
                     proposition_id,
@@ -228,6 +236,10 @@ def generate_candidates(
         config,
         embedder,
         embedding_text,
+        baseline_embeddings=baseline_embeddings,
+        baseline_neighbors=baseline_neighbors,
+        embedding_state_sink=embedding_state_sink,
+        neighbor_state_sink=neighbor_state_sink,
     )
     feature_rows = [
         {
@@ -263,16 +275,6 @@ def generate_candidates(
         )
         create_and_fill(db, "proposition_features", _FEATURE_COLUMNS, feature_rows)
         db.execute(_DETERMINISTIC_PAIR_SQL)
-        deterministic_pair_count = int(
-            db.scalar("SELECT count(*) FROM deterministic_pairs") or 0
-        )
-        if deterministic_pair_count > int(config.max_candidates):
-            raise ValueError(
-                f"Deterministic rules produced {deterministic_pair_count} candidates, "
-                f"exceeding max_candidates={config.max_candidates}; refusing to "
-                "truncate proven relations"
-            )
-
         deterministic_relations: dict[tuple[str, str], dict[str, Any]] = {}
         for pair in db.rows(
             """
@@ -288,12 +290,15 @@ def generate_candidates(
                 proposition_by_id[b_id],
                 float(config.parse_confidence),
             )
-            if relation is None:
-                raise RuntimeError(
-                    "Deterministic candidate generation disagrees with relation "
-                    f"evaluation for {(a_id, b_id)}"
-                )
-            deterministic_relations[(a_id, b_id)] = relation
+            if relation is not None:
+                deterministic_relations[(a_id, b_id)] = relation
+        deterministic_pair_count = len(deterministic_relations)
+        if deterministic_pair_count > int(config.max_candidates):
+            raise ValueError(
+                f"Deterministic rules produced {deterministic_pair_count} candidates, "
+                f"exceeding max_candidates={config.max_candidates}; refusing to "
+                "truncate proven relations"
+            )
 
         create_and_fill(
             db,
@@ -326,8 +331,13 @@ def generate_candidates(
             "embedding_similarity": raw["embedding_similarity"],
             "embedding_rank": raw["embedding_rank"],
             "deterministic_relation": None,
+            "rule_id": None,
+            "rule_status": None,
             "classification_relation": None,
             "classification_confidence": None,
+            "supporting_fields": None,
+            "a_implies_b": None,
+            "b_implies_a": None,
             "explanation": None,
             "assumptions": [],
             "requires_review": False,
@@ -339,6 +349,8 @@ def generate_candidates(
         if relation is not None:
             row["_deterministic"] = relation
             row["deterministic_relation"] = str(relation["edge_type"])
+            row["rule_id"] = relation.get("rule_id")
+            row["rule_status"] = "enabled"
             row["status"] = "accepted"
             row["discovery_method"] = "deterministic"
             row["explanation"] = relation["explanation"]
@@ -352,6 +364,11 @@ def _embedding_reason_rows(
     config: Any,
     embedder: Callable[[list[str], Any], Any],
     embedding_text: Callable[[dict[str, Any]], str],
+    *,
+    baseline_embeddings: dict[str, list[float]] | None = None,
+    baseline_neighbors: Sequence[dict[str, Any]] | None = None,
+    embedding_state_sink: list[dict[str, Any]] | None = None,
+    neighbor_state_sink: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     try:
         import numpy as np
@@ -361,7 +378,32 @@ def _embedding_reason_rows(
         ) from exc
 
     texts = [embedding_text(proposition_by_id[proposition_id]) for proposition_id in ids]
-    matrix = np.asarray(embedder(texts, config), dtype=np.float32)
+    text_hashes = [
+        hashlib.sha256(text.encode("utf-8")).hexdigest() for text in texts
+    ]
+    baseline_embeddings = baseline_embeddings or {}
+    vectors: list[Any | None] = [
+        baseline_embeddings.get(text_hash) for text_hash in text_hashes
+    ]
+    missing_indices = [
+        index for index, vector in enumerate(vectors) if vector is None
+    ]
+    if missing_indices:
+        encoded = np.asarray(
+            embedder([texts[index] for index in missing_indices], config),
+            dtype=np.float32,
+        )
+        if (
+            encoded.ndim != 2
+            or encoded.shape[0] != len(missing_indices)
+            or encoded.shape[1] == 0
+        ):
+            raise ValueError("Embedding model returned an invalid matrix shape")
+        encoded_norms = np.linalg.norm(encoded, axis=1, keepdims=True)
+        encoded = encoded / np.maximum(encoded_norms, 1e-12)
+        for encoded_index, proposition_index in enumerate(missing_indices):
+            vectors[proposition_index] = encoded[encoded_index]
+    matrix = np.asarray(vectors, dtype=np.float32)
     if (
         matrix.ndim != 2
         or matrix.shape[0] != len(ids)
@@ -369,27 +411,157 @@ def _embedding_reason_rows(
         or not np.isfinite(matrix).all()
     ):
         raise ValueError("Embedding model returned an invalid matrix shape")
-    norms = np.linalg.norm(matrix, axis=1, keepdims=True)
-    matrix = matrix / np.maximum(norms, 1e-12)
-    similarities = matrix @ matrix.T
+    if embedding_state_sink is not None:
+        missing_index_set = set(missing_indices)
+        embedding_state_sink.extend(
+            {
+                "proposition_id": proposition_id,
+                "text_hash": text_hash,
+                "embedding_model": str(config.embedding_model),
+                "embedding_revision": str(config.embedding_revision),
+                "embedding": matrix[index].astype(float).tolist(),
+                "reused": index not in missing_index_set,
+            }
+            for index, (proposition_id, text_hash) in enumerate(
+                zip(ids, text_hashes, strict=True)
+            )
+        )
     rows = []
-    for index, proposition_id in enumerate(ids):
-        scores = similarities[index].copy()
-        scores[index] = -np.inf
-        ranked = np.argsort(-scores, kind="stable")[
-            : min(int(config.top_k), len(ids) - 1)
-        ]
-        for rank, other_index in enumerate(ranked, start=1):
-            other_id = ids[int(other_index)]
+    block_size = int(getattr(config, "embedding_block_size", 512))
+    neighbor_count = min(int(config.top_k), len(ids) - 1)
+    baseline_by_source: dict[str, list[dict[str, Any]]] = {}
+    for row in baseline_neighbors or []:
+        baseline_by_source.setdefault(
+            str(row["proposition_id"]),
+            [],
+        ).append(row)
+    can_reuse_neighbors = bool(baseline_by_source)
+    id_to_index = {
+        proposition_id: index for index, proposition_id in enumerate(ids)
+    }
+    changed_ids = {
+        ids[index] for index in missing_indices
+    } | (set(ids) - set(baseline_by_source))
+
+    def emit(
+        proposition_id: str,
+        ranked_neighbors: Sequence[tuple[str, float]],
+    ) -> None:
+        for rank, (other_id, similarity) in enumerate(
+            ranked_neighbors,
+            start=1,
+        ):
             a_id, b_id = sorted((proposition_id, other_id))
             rows.append(
                 {
                     "proposition_a_id": a_id,
                     "proposition_b_id": b_id,
-                    "embedding_similarity": float(scores[int(other_index)]),
+                    "embedding_similarity": similarity,
                     "embedding_rank": rank,
                 }
             )
+            if neighbor_state_sink is not None:
+                neighbor_state_sink.append(
+                    {
+                        "proposition_id": proposition_id,
+                        "neighbor_id": other_id,
+                        "similarity": similarity,
+                        "neighbor_rank": rank,
+                        "proposition_text_hash": text_hashes[
+                            id_to_index[proposition_id]
+                        ],
+                        "neighbor_text_hash": text_hashes[
+                            id_to_index[other_id]
+                        ],
+                        "embedding_model": str(config.embedding_model),
+                        "embedding_revision": str(config.embedding_revision),
+                    }
+                )
+
+    if can_reuse_neighbors:
+        for proposition_id in ids:
+            index = id_to_index[proposition_id]
+            prior = sorted(
+                baseline_by_source.get(proposition_id, []),
+                key=lambda row: int(row["neighbor_rank"]),
+            )
+            prior_valid = (
+                len(prior) == neighbor_count
+                and all(
+                    str(row["neighbor_id"]) in id_to_index
+                    and str(row["proposition_text_hash"])
+                    == text_hashes[index]
+                    and str(row["neighbor_text_hash"])
+                    == text_hashes[
+                        id_to_index[str(row["neighbor_id"])]
+                    ]
+                    for row in prior
+                )
+            )
+            must_recompute_full = (
+                proposition_id in changed_ids
+                or not prior_valid
+                or any(
+                    str(row["neighbor_id"]) in changed_ids for row in prior
+                )
+            )
+            if must_recompute_full:
+                scores = np.round(matrix[index] @ matrix.T, decimals=6)
+                scores[index] = -np.inf
+                ranked_indices = np.argsort(
+                    -scores,
+                    kind="stable",
+                )[:neighbor_count]
+                ranked_neighbors = [
+                    (ids[int(other_index)], float(scores[int(other_index)]))
+                    for other_index in ranked_indices
+                ]
+            else:
+                options = {
+                    str(row["neighbor_id"]): float(row["similarity"])
+                    for row in prior
+                }
+                for changed_id in changed_ids:
+                    if changed_id == proposition_id:
+                        continue
+                    options[changed_id] = float(
+                        np.round(
+                            matrix[index] @ matrix[id_to_index[changed_id]],
+                            decimals=6,
+                        )
+                    )
+                ranked_neighbors = sorted(
+                    options.items(),
+                    key=lambda item: (-item[1], item[0]),
+                )[:neighbor_count]
+            emit(proposition_id, ranked_neighbors)
+    else:
+        for block_start in range(0, len(ids), block_size):
+            block_end = min(block_start + block_size, len(ids))
+            similarities = np.round(
+                matrix[block_start:block_end] @ matrix.T,
+                decimals=6,
+            )
+            for block_offset, index in enumerate(
+                range(block_start, block_end)
+            ):
+                proposition_id = ids[index]
+                scores = similarities[block_offset]
+                scores[index] = -np.inf
+                ranked = np.argsort(
+                    -scores,
+                    kind="stable",
+                )[:neighbor_count]
+                emit(
+                    proposition_id,
+                    [
+                        (
+                            ids[int(other_index)],
+                            float(scores[int(other_index)]),
+                        )
+                        for other_index in ranked
+                    ],
+                )
     return rows
 
 
@@ -406,7 +578,10 @@ JOIN deterministic_memberships b
 WHERE a.kind IN ('market', 'signature')
    OR (
         a.kind = 'numeric'
-        AND a.numeric_value != b.numeric_value
+        AND (
+            a.numeric_value != b.numeric_value
+            OR a.operator != b.operator
+        )
    )
    OR (
         a.kind = 'time'

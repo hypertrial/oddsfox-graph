@@ -28,15 +28,24 @@ class RunState:
     cached_origin_usage: dict[str, int] = field(
         default_factory=lambda: dict(_ZERO_USAGE)
     )
+    current_usage_by_task: dict[str, dict[str, int]] = field(default_factory=dict)
+    cached_usage_by_task: dict[str, dict[str, int]] = field(default_factory=dict)
     _cached_usage_scopes: set[str] = field(default_factory=set)
 
-    def add_usage(self, usage: dict[str, int]) -> None:
+    def add_usage(self, usage: dict[str, int], task: str | None = None) -> None:
         _add_usage(self.current_usage, usage)
+        if task:
+            target = self.current_usage_by_task.setdefault(
+                task,
+                dict(_ZERO_USAGE),
+            )
+            _add_usage(target, usage)
 
     def add_cached_usage(
         self,
         usage: dict[str, int],
         scope: str | None,
+        task: str | None = None,
     ) -> None:
         # Legacy v1 entries duplicated one batch total into every per-item file,
         # so their originating usage cannot be reconstructed without guessing.
@@ -48,16 +57,36 @@ class RunState:
             return
         self._cached_usage_scopes.add(scope)
         _add_usage(self.cached_origin_usage, usage)
+        if task:
+            target = self.cached_usage_by_task.setdefault(
+                task,
+                dict(_ZERO_USAGE),
+            )
+            _add_usage(target, usage)
 
     def usage_manifest(self) -> dict[str, object]:
         accounted = {
             key: self.current_usage[key] + self.cached_origin_usage[key]
             for key in _ZERO_USAGE
         }
+        tasks = {}
+        for task in sorted(
+            set(self.current_usage_by_task) | set(self.cached_usage_by_task)
+        ):
+            current = self.current_usage_by_task.get(task, _ZERO_USAGE)
+            cached = self.cached_usage_by_task.get(task, _ZERO_USAGE)
+            tasks[task] = {
+                "current_request": dict(current),
+                "cached_origin": dict(cached),
+                "accounted_total": {
+                    key: current[key] + cached[key] for key in _ZERO_USAGE
+                },
+            }
         return {
             **self.current_usage,
             "cached_origin": dict(self.cached_origin_usage),
             "accounted_total": accounted,
+            "tasks": tasks,
         }
 
 

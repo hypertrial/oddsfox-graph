@@ -1,9 +1,15 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
+
+
+CANONICAL_SOURCE_SHA256 = (
+    "790bd1595b379472ad65ba0073105b4eb630974d04e7b44d58c8a4929f274aa2"
+)
 
 
 def main() -> int:
@@ -12,14 +18,21 @@ def main() -> int:
     )
     parser.add_argument("--input", required=True, type=Path)
     parser.add_argument("--cache-dir", required=True, type=Path)
+    parser.add_argument("--baseline-dir", required=True, type=Path)
     parser.add_argument("--work-dir", required=True, type=Path)
     parser.add_argument("--expected-hashes", required=True, type=Path)
-    parser.add_argument("--labels", required=True, type=Path)
-    parser.add_argument("--propositions", default="500,2000")
+    parser.add_argument("--benchmark", required=True, type=Path)
+    parser.add_argument("--pricing-file", required=True, type=Path)
+    parser.add_argument("--propositions", default="5000,20000")
     args = parser.parse_args()
+    digest = hashlib.sha256()
+    with args.input.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    if digest.hexdigest() != CANONICAL_SOURCE_SHA256:
+        raise ValueError("Release validation requires the canonical supplied catalog")
 
     from oddsfox_graph.discovery import DiscoveryConfig, discover
-    from oddsfox_graph.review import score_review
 
     expected = json.loads(args.expected_hashes.read_text(encoding="utf-8"))
     limits = [int(value) for value in args.propositions.split(",") if value]
@@ -34,6 +47,10 @@ def main() -> int:
             out,
             config=DiscoveryConfig(
                 cache_dir=args.cache_dir,
+                benchmark_path=args.benchmark,
+                incremental_from=args.baseline_dir / str(limit),
+                pricing_file=args.pricing_file,
+                require_ready=True,
                 offline=True,
                 max_propositions=limit,
             ),
@@ -58,10 +75,11 @@ def main() -> int:
         }
 
     largest = max(limits)
-    evaluation = score_review(args.work_dir / str(largest), args.labels)
-    if not evaluation["passed"]:
-        raise RuntimeError("Human review thresholds failed")
-    results["evaluation"] = evaluation
+    results["evaluation"] = json.loads(
+        (
+            args.work_dir / str(largest) / "evaluation_report.json"
+        ).read_text(encoding="utf-8")
+    )
     args.work_dir.mkdir(parents=True, exist_ok=True)
     (args.work_dir / "release-validation.json").write_text(
         json.dumps(results, indent=2, sort_keys=True) + "\n",

@@ -32,6 +32,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--input", required=True, type=Path)
     p.add_argument("--out", required=True, type=Path)
     p.add_argument("--cache-dir", type=Path, default=None)
+    p.add_argument("--benchmark", type=Path, default=None)
+    p.add_argument("--incremental-from", type=Path, default=None)
+    p.add_argument("--pricing-file", type=Path, default=None)
+    p.add_argument("--require-ready", action="store_true")
     p.add_argument("--offline", action="store_true")
     p.add_argument("--parse-model", default="gpt-5.6-terra")
     p.add_argument("--classify-model", default="gpt-5.6-terra")
@@ -44,12 +48,40 @@ def build_parser() -> argparse.ArgumentParser:
         default="1110a243fdf4706b3f48f1d95db1a4f5529b4d41",
     )
     p.add_argument("--accept-confidence", type=float, default=0.95)
+    p.add_argument(
+        "--relation-threshold",
+        action="append",
+        default=[],
+        metavar="RELATION=VALUE",
+    )
     p.add_argument("--parse-confidence", type=float, default=0.95)
     p.add_argument("--top-k", type=int, default=20)
-    p.add_argument("--max-propositions", type=int, default=2_000)
-    p.add_argument("--max-candidates", type=int, default=40_000)
+    p.add_argument("--embedding-block-size", type=int, default=512)
+    p.add_argument("--max-propositions", type=int, default=5_000)
+    p.add_argument("--max-candidates", type=int, default=400_000)
     p.add_argument("--max-llm-pairs", type=int, default=5_000)
     p.add_argument("--llm-concurrency", type=int, default=8)
+
+    p = sub.add_parser("benchmark-export")
+    p.add_argument("--input", required=True, type=Path)
+    p.add_argument("--out", required=True, type=Path)
+    p.add_argument("--output-dir", required=True, type=Path)
+    p.add_argument("--parse-count", type=int, default=500)
+    p.add_argument("--pair-count", type=int, default=2_000)
+    p.add_argument("--seed", type=int, default=0)
+
+    p = sub.add_parser("benchmark-compile")
+    p.add_argument("--input", required=True, type=Path)
+    p.add_argument("--review-a", required=True, type=Path)
+    p.add_argument("--review-b", required=True, type=Path)
+    p.add_argument("--adjudication", required=True, type=Path)
+    p.add_argument("--output", required=True, type=Path)
+
+    p = sub.add_parser("evaluate")
+    p.add_argument("--out", required=True, type=Path)
+    p.add_argument("--benchmark", required=True, type=Path)
+    p.add_argument("--pricing-file", type=Path, default=None)
+    p.add_argument("--output", type=Path, default=None)
 
     p = sub.add_parser("review-export")
     p.add_argument("--out", required=True, type=Path)
@@ -113,14 +145,22 @@ def main(argv: list[str] | None = None) -> int:
                 args.out,
                 config=DiscoveryConfig(
                     cache_dir=args.cache_dir,
+                    benchmark_path=args.benchmark,
+                    incremental_from=args.incremental_from,
+                    pricing_file=args.pricing_file,
+                    require_ready=args.require_ready,
                     offline=args.offline,
                     parse_model=args.parse_model,
                     classify_model=args.classify_model,
                     embedding_model=args.embedding_model,
                     embedding_revision=args.embedding_revision,
                     accept_confidence=args.accept_confidence,
+                    relation_thresholds=_relation_thresholds(
+                        args.relation_threshold
+                    ),
                     parse_confidence=args.parse_confidence,
                     top_k=args.top_k,
+                    embedding_block_size=args.embedding_block_size,
                     max_propositions=args.max_propositions,
                     max_candidates=args.max_candidates,
                     max_llm_pairs=args.max_llm_pairs,
@@ -141,6 +181,42 @@ def main(argv: list[str] | None = None) -> int:
             )
             for key, value in counts.items():
                 print(f"{key}: {value}")
+        elif args.cmd == "benchmark-export":
+            from .evaluation import export_benchmark_reviews
+
+            counts = export_benchmark_reviews(
+                args.input,
+                args.out,
+                args.output_dir,
+                parse_count=args.parse_count,
+                pair_count=args.pair_count,
+                seed=args.seed,
+            )
+            for key, value in counts.items():
+                print(f"{key}: {value}")
+        elif args.cmd == "benchmark-compile":
+            from .evaluation import compile_benchmark
+
+            counts = compile_benchmark(
+                args.input,
+                args.review_a,
+                args.review_b,
+                args.adjudication,
+                args.output,
+            )
+            print(json.dumps(counts, indent=2, sort_keys=True))
+        elif args.cmd == "evaluate":
+            from .evaluation import evaluate_build
+
+            result = evaluate_build(
+                args.out,
+                args.benchmark,
+                pricing_file=args.pricing_file,
+                output_path=args.output,
+            )
+            print(json.dumps(result, indent=2, sort_keys=True))
+            if not result["passed"]:
+                return 1
         elif args.cmd == "review-score":
             from .review import score_review
 
@@ -211,6 +287,25 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 1
     return 0
+
+
+def _relation_thresholds(values: list[str]) -> dict[str, float]:
+    from ._discovery.contracts import DEFAULT_RELATION_THRESHOLDS
+
+    thresholds = dict(DEFAULT_RELATION_THRESHOLDS)
+    for value in values:
+        relation, separator, raw_threshold = value.partition("=")
+        if not separator or not relation or not raw_threshold:
+            raise ValueError(
+                "--relation-threshold must use RELATION=VALUE syntax"
+            )
+        try:
+            thresholds[relation] = float(raw_threshold)
+        except ValueError as exc:
+            raise ValueError(
+                f"Invalid relation threshold {value!r}"
+            ) from exc
+    return thresholds
 
 
 def _resolve_required(out_dir: Path, text: str) -> str:

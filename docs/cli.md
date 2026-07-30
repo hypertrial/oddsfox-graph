@@ -26,18 +26,46 @@ minutely/hourly export.
 | `--input` | yes | Source parquet path |
 | `--out` | yes | Atomically published output directory |
 | `--cache-dir` | no | Content-addressed request cache; defaults beside `--out` |
+| `--benchmark` | no | Reviewed v0.4 benchmark; enables rule gates and evaluation |
+| `--incremental-from` | no | Distinct, manifest-complete discovery baseline |
+| `--pricing-file` | no | Versioned per-model token pricing JSON |
+| `--require-ready` | no | Exit nonzero unless evaluation returns `READY_TO_SCALE` |
 | `--offline` | no | Require a terminal cache entry for every task, replay cached failures, and never use an API key |
 | `--parse-model` | no | Structured parser model (default `gpt-5.6-terra`) |
 | `--classify-model` | no | Pair classifier model (default `gpt-5.6-terra`) |
 | `--embedding-model` | no | Local sentence-transformer model |
 | `--embedding-revision` | no | Pinned model revision |
 | `--accept-confidence` | no | Minimum accepted classifier confidence (default 0.95) |
+| `--relation-threshold` | no | Repeatable `RELATION=VALUE` acceptance override |
 | `--parse-confidence` | no | Minimum confidence for parse-backed rules (default 0.95) |
 | `--top-k` | no | Semantic neighbors retained per proposition (default 20) |
-| `--max-propositions` | no | Maximum selected propositions (default 2,000) |
-| `--max-candidates` | no | Maximum canonical candidates (default 40,000) |
+| `--embedding-block-size` | no | Exact cosine block size (default 512) |
+| `--max-propositions` | no | Maximum selected propositions (default 5,000) |
+| `--max-candidates` | no | Maximum canonical candidates (default 400,000) |
 | `--max-llm-pairs` | no | Maximum classified unresolved pairs (default 5,000) |
 | `--llm-concurrency` | no | Maximum concurrent Responses calls (default 8) |
+
+Default relation thresholds are 0.995 for complement, 0.99 for equivalence and
+mutual exclusion, and 0.98 for implication and compatibility.
+
+## `benchmark-export`
+
+Create deterministic, blinded reviewer templates and a sampling manifest.
+Required flags are `--input`, `--out`, and `--output-dir`; optional flags are
+`--parse-count`, `--pair-count`, and `--seed`.
+
+## `benchmark-compile`
+
+Compile two independent completed reviews plus adjudication into typed,
+source-hash-bound `benchmark.parquet`. Required flags are `--input`,
+`--review-a`, `--review-b`, `--adjudication`, and `--output`.
+
+## `evaluate`
+
+Evaluate a build against a compiled benchmark and write
+`evaluation_report.json`. Required flags are `--out` and `--benchmark`;
+`--pricing-file` and `--output` are optional. The command exits nonzero unless
+the decision is `READY_TO_SCALE`.
 
 ## `review-export`
 

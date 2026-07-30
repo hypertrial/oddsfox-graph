@@ -2,8 +2,8 @@
 
 `oddsfox-graph` has two publication paths. The legacy `build` path is a
 sequential DuckDB build using the WC2026 taxonomy. The `discover` path uses
-Python for typed parsing, retrieval, rules, classification, and consistency,
-then DuckDB for deterministic artifact publication.
+Python for typed parsing, retrieval, rules, classification, and component
+consistency solving, then DuckDB for deterministic artifact publication.
 
 The legacy source parquet can be minutely or hourly. Both formats normalize
 into `input_prices`. Price columns remain in the input schema for pipeline
@@ -29,24 +29,32 @@ snapshots directly.
 2. Validate the full eligible catalog, select lightweight market summaries by
    `volume DESC, market_id` within `max_propositions`, then fetch full arrays
    only for the retained market IDs.
-3. Parse outcomes with the Pydantic structured-output contract. Normalize
+3. Parse outcomes and full market descriptions with the Pydantic
+   structured-output contract. Normalize
    Unicode/case, exact generic aliases, units, and dates while preserving
    original values.
 4. Embed canonical proposition text locally with the pinned
-   `sentence-transformers/all-MiniLM-L6-v2` revision and retain each
-   proposition's stable top-k neighbors.
+   `sentence-transformers/all-MiniLM-L6-v2` revision. Compute exact cosine
+   similarity in deterministic blocks and retain each proposition's stable
+   top-k neighbors; vectors are cached by normalized-text hash.
 5. Write structural and embedding reason rows to temporary DuckDB relations.
    Reserve every deterministic proof, aggregate reasons relationally, and
    materialize only the stable capped candidate set in Python.
-6. Apply same-market, equivalence, numeric threshold, time containment,
-   tournament stage, and single-winner deterministic rules.
+6. Apply benchmark-enabled same-market, equivalence, interval-set numeric,
+   time containment, tournament-stage, and single-winner rules from the
+   versioned rule registry.
 7. Classify only prioritized unresolved pairs with bounded asynchronous
-   `responses.parse` calls.
-8. Enforce confidence/review gates and global consistency. Conflicting
-   deterministic proofs fail; LLM conflicts enter the review queue.
-9. Bulk-bind typed rows into DuckDB, stage, validate, sort, and atomically
-   publish non-manifest artifacts. Freeze run statistics, then write
-   `build_manifest.json` last.
+   `responses.parse` calls. Directional entailment and supporting-field
+   citations must agree with the final relation, and every positive
+   classification must cite at least one nonempty supplied field.
+8. Apply per-relation thresholds, then solve independent proposal-connected
+   components with deterministic PySAT RC2 clauses. Same-market facts are hard;
+   other proposals are confidence-weighted soft facts. Rejected proposals carry
+   conflict explanations.
+9. Evaluate against a source-hash-bound human benchmark when supplied.
+10. Bulk-bind typed rows into DuckDB, stage, validate, sort, and atomically
+    publish non-manifest artifacts and incremental state. Freeze run statistics,
+    then write `build_manifest.json` last.
 
 Parse and classification requests use content-addressed JSON cache entries
 covering task, canonical input, requested model, reasoning setting, prompt, and
@@ -64,9 +72,14 @@ implementation modules live under `oddsfox_graph._discovery`:
 - `input`: schema detection, validation, selection, and normalization
 - `cache`: versioned content-addressed entries and atomic storage
 - `metrics`: monotonic timings and current/cached usage accounting
-- `candidates`: bounded DuckDB-backed reason aggregation
-- `relations`: deterministic rule semantics
+- `candidates`: blockwise embeddings and bounded DuckDB-backed reason aggregation
+- `relations`: registered deterministic rule semantics
+- `solver`: componentized, deterministic RC2 consistency selection
 - `bulk`: typed chunked DuckDB list-of-struct insertion
+
+`oddsfox_graph.evaluation` owns benchmark export/compilation, domain taxonomy,
+parser/retrieval/relation/calibration metrics, pricing, and deterministic exit
+recommendations.
 
 This keeps the legacy builder independent and avoids coupling OpenAI or local
 embedding dependencies to DuckDB-only installations.
@@ -84,6 +97,14 @@ embedding dependencies to DuckDB-only installations.
 - `propositions_v`: parsed and canonical outcome propositions.
 - `relation_candidates_v`: canonical candidate pairs and disposition.
 - `review_queue_v`: parse, classification, and consistency exceptions.
+- `rejected_edges_v`: rejected positive proposals and solver conflicts.
+- `parse_errors_v`: typed parser failures and low-confidence outcomes.
+
+Incremental state is stored separately under `state/`: market/source and
+proposition/parse fingerprints, reusable embedding vectors,
+candidate-neighborhood fingerprints, and proposal/solver-component
+fingerprints. A baseline must be immutable, complete, and distinct from the new
+output directory.
 
 ## Edge Lifecycle
 
@@ -106,10 +127,28 @@ ranks (`stage_rank` greater-than joins), so there is no separate transitive
 closure stage. Price-threshold candidates are not generated.
 
 Discovery adds parse-backed deterministic candidates and local embedding
-neighbors. Embeddings only retrieve candidates; they never accept edges.
+neighbors. Embeddings only retrieve candidates; they never accept edges. A
+deterministic rule publishes edges only when the compiled benchmark has at
+least ten positive and ten adversarial examples for that stable rule ID;
+otherwise it is reported as experimental.
 Symmetric relations are stored once in stable ID order. `equivalent` behaves
 bidirectionally internally, `complement` is stronger than exclusion, and
 directional classifications normalize to one `implies` orientation.
+
+## Benchmark And Release Decision
+
+`benchmark-export` samples parse records and candidate, semantic near-miss,
+structured near-miss, and noncandidate pairs from the top-5,000 population.
+Reviewer files are blinded. `benchmark-compile` requires two distinct reviewer
+aliases, nonempty notes, and adjudication for every disagreement; it binds the
+truth to the supplied catalog SHA-256.
+
+`evaluate` reports parser fields, entity sets, UTC dates, normalized
+numeric/units, candidate recall, directional relation metrics, ECE, Brier
+score, review/assumption rates, provenance, runtime, RSS, token usage, and
+pricing-snapshot cost. It emits exactly one of `READY_TO_SCALE`,
+`NEEDS_PARSER_WORK`, `NEEDS_RETRIEVAL_WORK`, or
+`NEEDS_RELATION_MODEL_WORK`.
 
 ## Conditionals
 

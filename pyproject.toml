@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "oddsfox-graph"
-version = "0.3.1"
+version = "0.4.0"
 description = "Build and discover structural logic graph artifacts from Polymarket data."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -25,6 +25,7 @@ discovery = [
   "numpy>=1.26",
   "openai>=2",
   "pydantic>=2",
+  "python-sat==1.9.dev7",
   "sentence-transformers>=5",
 ]
 dev = [
@@ -32,6 +33,7 @@ dev = [
   "numpy>=1.26",
   "openai>=2",
   "pydantic>=2",
+  "python-sat==1.9.dev7",
   "pytest>=8",
   "ruff>=0.11",
 ]
@@ -43,7 +45,7 @@ oddsfox-graph = "oddsfox_graph.cli:main"
 include = ["oddsfox_graph*"]
 
 [tool.setuptools.package-data]
-oddsfox_graph = ["taxonomies/*.json"]
+oddsfox_graph = ["benchmarks/*.md", "benchmarks/*.parquet", "taxonomies/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

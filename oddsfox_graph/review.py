@@ -5,7 +5,6 @@ import hashlib
 import heapq
 import json
 from collections import defaultdict
-from itertools import combinations
 from pathlib import Path
 
 from .queries import DuckDB, q
@@ -298,12 +297,52 @@ def _near_miss_pairs(
     *,
     seed: int,
 ) -> list[dict[str, object]]:
-    # ponytail: O(n²) is bounded by discover's 2,000-proposition smoke-test limit.
     heap: list[tuple[int, str, str]] = []
     by_id = {str(row["proposition_id"]): row for row in propositions}
     ids = sorted(by_id)
-    for a_id, b_id in combinations(ids, 2):
-        if (a_id, b_id) in candidates:
+    if len(ids) < 2:
+        return []
+    groups: dict[tuple[str, str], list[str]] = defaultdict(list)
+    for proposition_id in ids:
+        row = by_id[proposition_id]
+        groups[
+            (
+                str(row.get("category") or ""),
+                str(row.get("competition") or ""),
+            )
+        ].append(proposition_id)
+    pair_budget = max(10_000, limit * 200)
+    seen: set[tuple[str, str]] = set()
+    pair_stream: list[tuple[str, str]] = []
+    for key in sorted(groups):
+        group = groups[key]
+        for index, a_id in enumerate(group):
+            for b_id in group[index + 1 : index + 65]:
+                pair_stream.append((a_id, b_id))
+                if len(pair_stream) >= pair_budget:
+                    break
+            if len(pair_stream) >= pair_budget:
+                break
+        if len(pair_stream) >= pair_budget:
+            break
+    step = max(1, len(ids) // 2 - 1)
+    for index, a_id in enumerate(ids):
+        for offset in range(1, min(65, len(ids))):
+            b_id = ids[(index + offset * step) % len(ids)]
+            if a_id == b_id:
+                continue
+            pair_stream.append(tuple(sorted((a_id, b_id))))
+            if len(pair_stream) >= pair_budget:
+                break
+        if len(pair_stream) >= pair_budget:
+            break
+    for a_id, b_id in pair_stream:
+        pair = tuple(sorted((a_id, b_id)))
+        if pair in seen:
+            continue
+        seen.add(pair)
+        a_id, b_id = pair
+        if pair in candidates:
             continue
         a, b = by_id[a_id], by_id[b_id]
         related_metadata = bool(

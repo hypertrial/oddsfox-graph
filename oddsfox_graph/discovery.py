@@ -5,9 +5,11 @@ import hashlib
 import json
 import os
 import shutil
+import sys
 import tempfile
 from collections import defaultdict
 from collections.abc import Awaitable, Callable, Sequence
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -20,7 +22,12 @@ except ImportError as exc:  # pragma: no cover - exercised by CLI installation e
 
 from ._diagnostic_stages import write_conditionals
 from ._discovery.bulk import create_and_fill as _create_and_fill
-from ._discovery.cache import JsonCache, cache_entry, cache_error
+from ._discovery.cache import (
+    CACHE_ENTRY_VERSION,
+    JsonCache,
+    cache_entry,
+    cache_error,
+)
 from ._discovery.candidates import (
     candidate_sort_key as _candidate_sort_key,
     generate_candidates as _generate_candidates_bounded,
@@ -45,6 +52,7 @@ from ._discovery.input import (
 )
 from ._discovery.metrics import RunState, StageRecorder
 from ._discovery.relations import (
+    RULE_REGISTRY,
     SEMANTIC_KEYS as _SEMANTIC_KEYS,
     deterministic_relation as _deterministic_relation,
     hashable as _hashable,
@@ -52,6 +60,12 @@ from ._discovery.relations import (
     normalize_text as _normalize_text,
     proposition_signature as _proposition_signature,
     stage_rank as _stage_rank,
+)
+from ._discovery.solver import (
+    CONSTRAINT_VERSION,
+    SOLVER_VERSION,
+    proposal_set_hash,
+    solve_proposals,
 )
 from . import __version__
 from .artifacts import ARTIFACT_COLUMNS, REPORTS, reports
@@ -78,9 +92,13 @@ __all__ = [
 ]
 
 
-PARSE_PROMPT_VERSION = "proposition-parse-v1"
-CLASSIFY_PROMPT_VERSION = "relation-classify-v1"
-RULE_VERSION = "discovery-rules-v1"
+PARSE_PROMPT_VERSION = "proposition-parse-v2"
+CLASSIFY_PROMPT_VERSION = "relation-classify-v2"
+RULE_VERSION = "discovery-rules-v2"
+NORMALIZATION_VERSION = "normalization-v2"
+DOMAIN_TAXONOMY_VERSION = "domains-v1"
+RETRIEVAL_VERSION = "blockwise-cosine-v2"
+CANDIDATE_STATE_VERSION = "candidate-components-v1"
 
 DISCOVERY_PARQUET_ARTIFACTS = (
     "nodes.parquet",
@@ -90,6 +108,16 @@ DISCOVERY_PARQUET_ARTIFACTS = (
     "logic_edges.parquet",
     "conditional_edges.parquet",
     "review_queue.parquet",
+    "rejected_edges.parquet",
+    "parse_errors.parquet",
+)
+STATE_ARTIFACTS = (
+    "state/market_state.parquet",
+    "state/proposition_fingerprints.parquet",
+    "state/proposition_embeddings.parquet",
+    "state/semantic_neighbors.parquet",
+    "state/candidate_components.parquet",
+    "state/solver_components.parquet",
 )
 
 PROPOSITION_COLUMNS = {
@@ -101,6 +129,9 @@ PROPOSITION_COLUMNS = {
     "outcome_index": "INTEGER",
     "outcome": "VARCHAR",
     "question": "VARCHAR",
+    "description": "VARCHAR",
+    "market_source_hash": "VARCHAR",
+    "normalization_version": "VARCHAR",
     "category": "VARCHAR",
     "tags": "VARCHAR[]",
     "subject_original": "VARCHAR[]",
@@ -116,6 +147,8 @@ PROPOSITION_COLUMNS = {
     "time_end": "TIMESTAMPTZ",
     "competition_original": "VARCHAR",
     "competition": "VARCHAR",
+    "event_scope_original": "VARCHAR",
+    "event_scope": "VARCHAR",
     "jurisdiction_original": "VARCHAR",
     "jurisdiction": "VARCHAR",
     "polarity": "VARCHAR",
@@ -133,8 +166,13 @@ CANDIDATE_COLUMNS = {
     "embedding_similarity": "DOUBLE",
     "embedding_rank": "INTEGER",
     "deterministic_relation": "VARCHAR",
+    "rule_id": "VARCHAR",
+    "rule_status": "VARCHAR",
     "classification_relation": "VARCHAR",
     "classification_confidence": "DOUBLE",
+    "supporting_fields": "VARCHAR",
+    "a_implies_b": "BOOLEAN",
+    "b_implies_a": "BOOLEAN",
     "explanation": "VARCHAR",
     "assumptions": "VARCHAR[]",
     "requires_review": "BOOLEAN",
@@ -155,6 +193,100 @@ REVIEW_COLUMNS = {
     "assumptions": "VARCHAR[]",
     "model_version": "VARCHAR",
     "prompt_version": "VARCHAR",
+}
+
+REJECTED_EDGE_COLUMNS = {
+    "proposal_id": "VARCHAR",
+    "src_node_id": "VARCHAR",
+    "dst_node_id": "VARCHAR",
+    "edge_type": "VARCHAR",
+    "edge_basis": "VARCHAR",
+    "confidence": "DOUBLE",
+    "discovery_method": "VARCHAR",
+    "rule_id": "VARCHAR",
+    "rule_version": "VARCHAR",
+    "model_version": "VARCHAR",
+    "prompt_version": "VARCHAR",
+    "rejection_reason": "VARCHAR",
+    "conflicting_proposal_ids": "VARCHAR[]",
+    "conflicting_constraint_ids": "VARCHAR[]",
+    "solver_component_id": "VARCHAR",
+}
+
+PARSE_ERROR_COLUMNS = {
+    "error_id": "VARCHAR",
+    "proposition_id": "VARCHAR",
+    "market_id": "VARCHAR",
+    "error_kind": "VARCHAR",
+    "error_message": "VARCHAR",
+    "cache_state": "VARCHAR",
+    "error_type": "VARCHAR",
+    "status_code": "INTEGER",
+    "response_json": "VARCHAR",
+    "question": "VARCHAR",
+    "description": "VARCHAR",
+    "parse_confidence": "DOUBLE",
+    "market_source_hash": "VARCHAR",
+    "parser_model": "VARCHAR",
+    "prompt_version": "VARCHAR",
+    "schema_version": "VARCHAR",
+    "normalization_version": "VARCHAR",
+}
+
+MARKET_STATE_COLUMNS = {
+    "market_id": "VARCHAR",
+    "source_hash": "VARCHAR",
+    "parse_model": "VARCHAR",
+    "parse_prompt_version": "VARCHAR",
+    "normalization_version": "VARCHAR",
+    "rule_version": "VARCHAR",
+}
+
+EMBEDDING_STATE_COLUMNS = {
+    "proposition_id": "VARCHAR",
+    "text_hash": "VARCHAR",
+    "embedding_model": "VARCHAR",
+    "embedding_revision": "VARCHAR",
+    "embedding": "FLOAT[]",
+}
+
+SEMANTIC_NEIGHBOR_STATE_COLUMNS = {
+    "proposition_id": "VARCHAR",
+    "neighbor_id": "VARCHAR",
+    "similarity": "DOUBLE",
+    "neighbor_rank": "INTEGER",
+    "proposition_text_hash": "VARCHAR",
+    "neighbor_text_hash": "VARCHAR",
+    "embedding_model": "VARCHAR",
+    "embedding_revision": "VARCHAR",
+}
+
+PROPOSITION_FINGERPRINT_COLUMNS = {
+    "proposition_id": "VARCHAR",
+    "market_id": "VARCHAR",
+    "market_source_hash": "VARCHAR",
+    "parse_fingerprint": "VARCHAR",
+    "normalization_version": "VARCHAR",
+}
+
+CANDIDATE_COMPONENT_STATE_COLUMNS = {
+    "component_id": "VARCHAR",
+    "component_fingerprint": "VARCHAR",
+    "pair_count": "INTEGER",
+    "candidate_version": "VARCHAR",
+}
+
+SOLVER_COMPONENT_STATE_COLUMNS = {
+    "solver_component_id": "VARCHAR",
+    "proposal_hash": "VARCHAR",
+    "accepted_proposal_ids": "VARCHAR[]",
+    "rejected_proposal_ids": "VARCHAR[]",
+    "proposal_count": "INTEGER",
+    "hard_clause_count": "INTEGER",
+    "soft_clause_count": "INTEGER",
+    "objective_cost": "BIGINT",
+    "solver_version": "VARCHAR",
+    "constraint_version": "VARCHAR",
 }
 
 NODE_COLUMNS = {
@@ -209,6 +341,11 @@ LOGIC_EDGE_COLUMNS = dict(
             "VARCHAR",
             "VARCHAR",
             "VARCHAR[]",
+            "VARCHAR",
+            "VARCHAR",
+            "VARCHAR",
+            "VARCHAR",
+            "VARCHAR",
         ),
         strict=True,
     )
@@ -238,13 +375,16 @@ _UNIT_ALIASES = {
 }
 
 _PARSE_PROMPT = """Extract one proposition for every supplied market outcome.
+Use the question, full description, outcome, and authoritative metadata only.
 Use the outcome string exactly as supplied. Normalize dates, numbers, and units.
 Use null for information that is absent or not supported by the schema; never invent it.
 For Yes/No markets, set No to negative polarity. Return every market and outcome exactly once."""
 
 _CLASSIFY_PROMPT = """Classify each proposition pair using only the supplied facts.
 Allowed relations are equivalent, A_implies_B, B_implies_A, mutually_exclusive,
-complement, compatible, unrelated, and uncertain. State assumptions explicitly.
+complement, compatible, unrelated, and uncertain. Evaluate A implies B and B
+implies A independently before choosing the relation. Cite supporting fields
+with their supplied values and state assumptions explicitly.
 Use uncertain and requires_review=true whenever the relation depends on missing context.
 Return every pair_id exactly once."""
 
@@ -258,11 +398,12 @@ def discover(
     _embedder: Callable[[list[str], DiscoveryConfig], Any] | None = None,
 ) -> dict[str, object]:
     config = config or DiscoveryConfig()
-    config.validate()
     input_path = input_path.resolve()
     out_dir = out_dir.resolve()
     if not input_path.is_file():
         raise ValueError(f"Input parquet does not exist: {input_path}")
+    config = _with_packaged_benchmark(config, input_path)
+    config.validate()
 
     out_dir.parent.mkdir(parents=True, exist_ok=True)
     recorder = StageRecorder()
@@ -276,6 +417,19 @@ def discover(
     )
     cache_dir = (config.cache_dir or Path(str(out_dir) + ".cache")).resolve()
     cache = JsonCache(cache_dir)
+    baseline_embeddings, reusable_solver_components, incremental_stats = recorder.run(
+        "prepare_incremental",
+        lambda: _prepare_incremental(
+            config,
+            out_dir,
+            markets,
+            cache,
+        ),
+    )
+    baseline_neighbors = incremental_stats.pop(
+        "_baseline_semantic_neighbors",
+        [],
+    )
     state = RunState()
     propositions, parse_reviews = recorder.run(
         "parse_propositions",
@@ -288,12 +442,71 @@ def discover(
             _client,
         ),
     )
-    candidates = recorder.run(
-        "generate_candidates",
-        lambda: _generate_candidates(
+    reusable_candidates_path = incremental_stats.pop(
+        "_reusable_candidates_path",
+        None,
+    )
+    embedding_state: list[dict[str, Any]] = []
+    semantic_neighbor_state: list[dict[str, Any]] = []
+    if reusable_candidates_path is not None:
+        candidates = recorder.run(
+            "generate_candidates",
+            lambda: _load_reusable_candidates(
+                Path(reusable_candidates_path),
+                propositions,
+                config,
+            ),
+        )
+        embedding_state.extend(
+            _reused_embedding_state(
+                propositions,
+                baseline_embeddings,
+                config,
+            )
+        )
+        semantic_neighbor_state.extend(baseline_neighbors)
+        incremental_stats["candidate_generation_reused"] = True
+    else:
+        candidates = recorder.run(
+            "generate_candidates",
+            lambda: _generate_candidates(
+                propositions,
+                config,
+                _embedder or _embed_texts,
+                baseline_embeddings=baseline_embeddings,
+                baseline_neighbors=baseline_neighbors,
+                embedding_state_sink=embedding_state,
+                neighbor_state_sink=semantic_neighbor_state,
+            ),
+        )
+        incremental_stats["candidate_generation_reused"] = False
+    _record_semantic_neighborhood_reuse(
+        incremental_stats,
+        baseline_neighbors,
+        semantic_neighbor_state,
+    )
+    proposition_fingerprint_state = _proposition_fingerprint_rows(propositions)
+    candidate_component_state = _candidate_component_state_rows(
+        candidates,
+        propositions,
+    )
+    _record_candidate_component_reuse(
+        incremental_stats,
+        candidate_component_state,
+    )
+    _seed_classification_cache_from_incremental(
+        cache,
+        candidates,
+        propositions,
+        config,
+        incremental_stats,
+    )
+    rule_support = recorder.run(
+        "benchmark_rule_gates",
+        lambda: _apply_benchmark_rule_gates(
+            candidates,
             propositions,
-            config,
-            _embedder or _embed_texts,
+            config.benchmark_path,
         ),
     )
     deterministic_edges = recorder.run(
@@ -311,11 +524,19 @@ def discover(
             _client,
         ),
     )
-    logic_edges, consistency_reviews = recorder.run(
-        "validate_consistency",
-        lambda: _validate_logic_edges(deterministic_edges + llm_edges),
+    logic_edges, rejected_edges, consistency_reviews, solver_stats = recorder.run(
+        "solve_consistency",
+        lambda: _solve_logic_edges(
+            deterministic_edges + llm_edges,
+            reusable_solver_components=reusable_solver_components,
+        ),
+    )
+    solver_component_state = _solver_component_state_rows(
+        logic_edges,
+        rejected_edges,
     )
     review_rows = _dedupe_reviews(parse_reviews + llm_reviews + consistency_reviews)
+    parse_error_rows = _parse_error_rows(propositions, parse_reviews)
 
     staging = Path(
         tempfile.mkdtemp(prefix=f".{out_dir.name}.discovery-", dir=out_dir.parent)
@@ -329,22 +550,73 @@ def discover(
                 propositions,
                 candidates,
                 logic_edges,
+                rejected_edges,
+                parse_error_rows,
                 review_rows,
                 source_format=source_format,
                 input_rows=input_rows,
                 input_selection=input_selection,
+                solver_stats=solver_stats,
+                rule_support=rule_support,
+                embedding_state=embedding_state,
+                semantic_neighbor_state=semantic_neighbor_state,
+                proposition_fingerprint_state=proposition_fingerprint_state,
+                candidate_component_state=candidate_component_state,
+                solver_component_state=solver_component_state,
+                incremental_stats=incremental_stats,
             ),
         )
+        input_hash = recorder.run("hash_input", lambda: _sha256(input_path))
+        stats["runtime_seconds"] = recorder.runtime_seconds()
+        stats["peak_rss_mb"] = _peak_rss_mb()
+        evaluation: dict[str, Any] | None = None
+        if config.benchmark_path is not None:
+            from .evaluation import evaluate_build
+
+            evaluation = recorder.run(
+                "evaluate_benchmark",
+                lambda: evaluate_build(
+                    staging,
+                    config.benchmark_path,
+                    input_hash=input_hash,
+                    pricing_file=config.pricing_file,
+                    run_metadata={
+                        "usage": state.usage_manifest(),
+                        "models": {
+                            "parse": {"requested": config.parse_model},
+                            "classify": {"requested": config.classify_model},
+                        },
+                        "stats": stats,
+                        "validation": {
+                            "offline": config.offline,
+                            "max_propositions": config.max_propositions,
+                        },
+                    },
+                ),
+            )
+            stats["evaluation_exit_decision"] = evaluation["exit_decision"]
+        elif config.require_ready:
+            raise ValueError("--require-ready requires --benchmark")
         recorder.run("publish_files", lambda: _publish_staged(staging, out_dir))
-        input_hash, artifact_hashes = recorder.run(
+        artifact_hashes = recorder.run(
             "hash_artifacts",
-            lambda: (
-                _sha256(input_path),
-                {
-                    name: _sha256(out_dir / name)
-                    for name in DISCOVERY_PARQUET_ARTIFACTS
-                },
-            ),
+            lambda: {
+                name: _sha256(out_dir / name)
+                for name in (
+                    *DISCOVERY_PARQUET_ARTIFACTS,
+                    *(
+                        ("benchmark.parquet",)
+                        if (out_dir / "benchmark.parquet").is_file()
+                        else ()
+                    ),
+                )
+            },
+        )
+        state_hashes = recorder.run(
+            "hash_incremental_state",
+            lambda: {
+                name: _sha256(out_dir / name) for name in STATE_ARTIFACTS
+            },
         )
         stats["runtime_seconds"] = recorder.runtime_seconds()
         write_summary_report(out_dir, stats)
@@ -358,11 +630,397 @@ def discover(
             cache,
             state,
             recorder.timings,
+            state_hashes,
         )
         _write_manifest_last(out_dir, manifest)
+        if config.require_ready and (
+            evaluation is None or evaluation["exit_decision"] != "READY_TO_SCALE"
+        ):
+            raise RuntimeError(
+                "Discovery quality gates did not produce READY_TO_SCALE"
+            )
         return dict(manifest["stats"])
     finally:
         shutil.rmtree(staging, ignore_errors=True)
+
+
+def _with_packaged_benchmark(
+    config: DiscoveryConfig,
+    input_path: Path,
+) -> DiscoveryConfig:
+    if config.benchmark_path is not None:
+        return config
+    packaged = Path(__file__).parent / "benchmarks" / "v0.4.0.parquet"
+    if not packaged.is_file():
+        return config
+    db = DuckDB()
+    try:
+        source_hashes = {
+            str(row["source_sha256"])
+            for row in db.rows(
+                f"""
+                SELECT DISTINCT source_sha256
+                FROM read_parquet('{q(packaged)}')
+                """
+            )
+        }
+    finally:
+        db.close()
+    if source_hashes == {_sha256(input_path)}:
+        return replace(config, benchmark_path=packaged)
+    return config
+
+
+def _prepare_incremental(
+    config: DiscoveryConfig,
+    out_dir: Path,
+    markets: Sequence[SourceMarket],
+    cache: JsonCache,
+) -> tuple[
+    dict[str, list[float]],
+    dict[str, dict[str, Any]],
+    dict[str, Any],
+]:
+    explicit_baseline = config.incremental_from.resolve() if config.incremental_from else None
+    offline_replay_baseline = (
+        out_dir
+        if config.offline
+        and (out_dir / "build_manifest.json").is_file()
+        and (out_dir / "state" / "proposition_embeddings.parquet").is_file()
+        else None
+    )
+    baseline = explicit_baseline or offline_replay_baseline
+    if baseline is None:
+        if config.offline:
+            raise ValueError(
+                "Offline discovery cache is missing proposition embedding state; "
+                "rerun online into --out first or use --incremental-from"
+            )
+        return {}, {}, {
+            "enabled": False,
+            "baseline_manifest_hash": None,
+            "markets_reused": 0,
+            "markets_changed": len(markets),
+            "markets_removed": 0,
+            "baseline_parse_entries_seeded": 0,
+            "invalidation_reasons": ["clean_run"],
+        }
+    if explicit_baseline is not None and baseline == out_dir:
+        raise ValueError("--incremental-from must be distinct from --out")
+    manifest_path = baseline / "build_manifest.json"
+    market_state_path = baseline / "state" / "market_state.parquet"
+    proposition_fingerprint_path = (
+        baseline / "state" / "proposition_fingerprints.parquet"
+    )
+    embedding_state_path = baseline / "state" / "proposition_embeddings.parquet"
+    candidate_state_path = baseline / "state" / "candidate_components.parquet"
+    semantic_neighbor_state_path = (
+        baseline / "state" / "semantic_neighbors.parquet"
+    )
+    solver_state_path = baseline / "state" / "solver_components.parquet"
+    propositions_path = baseline / "propositions.parquet"
+    candidates_path = baseline / "relation_candidates.parquet"
+    rejected_edges_path = baseline / "rejected_edges.parquet"
+    required = (
+        manifest_path,
+        market_state_path,
+        proposition_fingerprint_path,
+        embedding_state_path,
+        semantic_neighbor_state_path,
+        candidate_state_path,
+        solver_state_path,
+        propositions_path,
+        candidates_path,
+        rejected_edges_path,
+    )
+    missing = [str(path) for path in required if not path.is_file()]
+    if missing:
+        raise ValueError(
+            "Incremental baseline is incomplete; missing " + ", ".join(missing)
+        )
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if manifest.get("command") != "discover":
+        raise ValueError("Incremental baseline is not a discovery build")
+
+    db = DuckDB()
+    try:
+        db.execute("SET TimeZone = 'UTC'")
+        prior_markets = {
+            str(row["market_id"]): str(row["source_hash"])
+            for row in db.rows(
+                f"""
+                SELECT market_id, source_hash
+                FROM read_parquet('{q(market_state_path)}')
+                """
+            )
+        }
+        prior_propositions = db.rows(
+            f"""
+            SELECT * FROM read_parquet('{q(propositions_path)}')
+            ORDER BY market_id, outcome_index
+            """
+        )
+        embedding_rows = db.rows(
+            f"""
+            SELECT text_hash, embedding_model, embedding_revision, embedding
+            FROM read_parquet('{q(embedding_state_path)}')
+            ORDER BY proposition_id
+            """
+        )
+        semantic_neighbor_rows = db.rows(
+            f"""
+            SELECT *
+            FROM read_parquet('{q(semantic_neighbor_state_path)}')
+            ORDER BY proposition_id, neighbor_rank
+            """
+        )
+        prior_candidate_components = {
+            str(row["component_id"]): str(row["component_fingerprint"])
+            for row in db.rows(
+                f"""
+                SELECT component_id, component_fingerprint
+                FROM read_parquet('{q(candidate_state_path)}')
+                WHERE candidate_version = '{CANDIDATE_STATE_VERSION}'
+                ORDER BY component_id
+                """
+            )
+        }
+        solver_state_rows = db.rows(
+            f"""
+            SELECT * FROM read_parquet('{q(solver_state_path)}')
+            ORDER BY solver_component_id
+            """
+        )
+        prior_rejected = db.rows(
+            f"""
+            SELECT * FROM read_parquet('{q(rejected_edges_path)}')
+            ORDER BY proposal_id
+            """
+        )
+        prior_classifications = db.rows(
+            f"""
+            SELECT proposition_a_id, proposition_b_id,
+                   candidate_reasons, embedding_similarity, embedding_rank,
+                   classification_relation, classification_confidence,
+                   supporting_fields, a_implies_b, b_implies_a,
+                   explanation, assumptions, requires_review,
+                   model_version, prompt_version
+            FROM read_parquet('{q(candidates_path)}')
+            WHERE classification_relation IS NOT NULL
+            ORDER BY proposition_a_id, proposition_b_id
+            """
+        )
+    finally:
+        db.close()
+
+    current_hashes = {market.market_id: market.source_hash for market in markets}
+    unchanged_market_ids = {
+        market_id
+        for market_id, source_hash in current_hashes.items()
+        if prior_markets.get(market_id) == source_hash
+    }
+    changed_market_ids = set(current_hashes) - unchanged_market_ids
+    removed_market_ids = set(prior_markets) - set(current_hashes)
+    models = manifest.get("models") or {}
+    prompts = manifest.get("prompts") or {}
+    parse_compatible = (
+        ((models.get("parse") or {}).get("requested") == config.parse_model)
+        and ((prompts.get("parse") or {}).get("version") == PARSE_PROMPT_VERSION)
+        and (
+            (prompts.get("parse") or {}).get("schema_hash")
+            == _model_schema_hash(ParsedMarketBatch)
+        )
+    )
+    seeded = 0
+    if parse_compatible:
+        seeded = _seed_parse_cache_from_baseline(
+            cache,
+            markets,
+            prior_propositions,
+            unchanged_market_ids,
+            config,
+        )
+
+    embedding_manifest = models.get("embedding") or {}
+    embedding_compatible = (
+        embedding_manifest.get("model") == config.embedding_model
+        and embedding_manifest.get("revision") == config.embedding_revision
+    )
+    baseline_embeddings = (
+        {
+            str(row["text_hash"]): [float(value) for value in row["embedding"]]
+            for row in embedding_rows
+            if row["embedding_model"] == config.embedding_model
+            and row["embedding_revision"] == config.embedding_revision
+        }
+        if embedding_compatible
+        else {}
+    )
+    reasons = []
+    if changed_market_ids:
+        reasons.append("source_hash")
+    if removed_market_ids:
+        reasons.append("selection_or_removal")
+    if not parse_compatible:
+        reasons.append("parser_model_prompt_or_schema")
+    if not embedding_compatible:
+        reasons.append("embedding_model_or_revision")
+    versions = manifest.get("versions") or {}
+    if versions.get("normalization") != NORMALIZATION_VERSION:
+        reasons.append("normalization_version")
+    if versions.get("rules") != RULE_VERSION:
+        reasons.append("rule_version")
+    if versions.get("retrieval") != RETRIEVAL_VERSION:
+        reasons.append("retrieval_version")
+    previous_limits = manifest.get("limits") or {}
+    if previous_limits.get("relation_thresholds") != dict(
+        sorted(config.relation_thresholds.items())
+    ):
+        reasons.append("relation_thresholds")
+    candidate_compatible = (
+        not changed_market_ids
+        and not removed_market_ids
+        and parse_compatible
+        and embedding_compatible
+        and versions.get("normalization") == NORMALIZATION_VERSION
+        and versions.get("rules") == RULE_VERSION
+        and versions.get("retrieval") == RETRIEVAL_VERSION
+        and previous_limits.get("parse_confidence") == config.parse_confidence
+        and previous_limits.get("top_k") == config.top_k
+        and previous_limits.get("max_candidates") == config.max_candidates
+    )
+    classify_manifest = models.get("classify") or {}
+    classify_prompt = prompts.get("classify") or {}
+    classification_compatible = (
+        classify_manifest.get("requested") == config.classify_model
+        and classify_prompt.get("version") == CLASSIFY_PROMPT_VERSION
+        and classify_prompt.get("schema_hash")
+        == _model_schema_hash(PairClassificationBatch)
+    )
+    if not classification_compatible:
+        reasons.append("classifier_model_prompt_or_schema")
+    rejected_by_component: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in prior_rejected:
+        rejected_by_component[str(row["solver_component_id"])].append(row)
+    reusable_solver_components = {
+        str(row["proposal_hash"]): {
+            "accepted_proposal_ids": list(row["accepted_proposal_ids"] or []),
+            "rejected_proposal_ids": list(row["rejected_proposal_ids"] or []),
+            "rejected_rows": rejected_by_component.get(
+                str(row["solver_component_id"]),
+                [],
+            ),
+            "hard_clause_count": int(row["hard_clause_count"]),
+            "soft_clause_count": int(row["soft_clause_count"]),
+            "objective_cost": int(row["objective_cost"]),
+        }
+        for row in solver_state_rows
+        if row["solver_version"] == SOLVER_VERSION
+        and row["constraint_version"] == CONSTRAINT_VERSION
+    }
+    return baseline_embeddings, reusable_solver_components, {
+        "enabled": explicit_baseline is not None,
+        "offline_state_replay": offline_replay_baseline is not None,
+        "baseline_manifest_hash": _sha256(manifest_path),
+        "markets_reused": len(unchanged_market_ids) if parse_compatible else 0,
+        "markets_changed": (
+            len(changed_market_ids)
+            if parse_compatible
+            else len(current_hashes)
+        ),
+        "markets_removed": len(removed_market_ids),
+        "baseline_parse_entries_seeded": seeded,
+        "baseline_embedding_vectors_available": len(baseline_embeddings),
+        "baseline_solver_components_available": len(reusable_solver_components),
+        "_prior_candidate_components": prior_candidate_components,
+        "_baseline_semantic_neighbors": (
+            semantic_neighbor_rows
+            if embedding_compatible
+            and versions.get("retrieval") == RETRIEVAL_VERSION
+            else []
+        ),
+        "_prior_classifications": (
+            prior_classifications if classification_compatible else []
+        ),
+        "_prior_propositions": prior_propositions,
+        "_unchanged_market_ids": sorted(unchanged_market_ids),
+        "_reusable_candidates_path": (
+            str(candidates_path) if candidate_compatible else None
+        ),
+        "invalidation_reasons": sorted(set(reasons)) or ["none"],
+    }
+
+
+def _seed_parse_cache_from_baseline(
+    cache: JsonCache,
+    markets: Sequence[SourceMarket],
+    prior_propositions: Sequence[dict[str, Any]],
+    unchanged_market_ids: set[str],
+    config: DiscoveryConfig,
+) -> int:
+    by_market: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in prior_propositions:
+        market_id = str(row["market_id"])
+        if market_id in unchanged_market_ids:
+            by_market[market_id].append(row)
+    schema_hash = _model_schema_hash(ParsedMarketBatch)
+    seeded = 0
+    for market in markets:
+        rows = sorted(
+            by_market.get(market.market_id, []),
+            key=lambda row: int(row["outcome_index"]),
+        )
+        if len(rows) != len(market.outcomes) or any(
+            row.get("parse_status") != "parsed" for row in rows
+        ):
+            continue
+        payload = _market_payload(market)
+        key = cache.key(
+            "parse",
+            config.parse_model,
+            PARSE_PROMPT_VERSION,
+            _text_hash(_PARSE_PROMPT),
+            schema_hash,
+            payload,
+        )
+        if (cache.directory / f"{key}.json").is_file():
+            continue
+        parsed = ParsedMarket(
+            market_id=market.market_id,
+            propositions=[
+                ParsedOutcome(
+                    outcome=str(row["outcome"]),
+                    subject=list(row.get("subject_original") or row.get("subject") or []),
+                    predicate=_str_or_none(row.get("predicate")),
+                    object=_str_or_none(row.get("object_original")),
+                    operator=row.get("operator"),
+                    threshold=row.get("threshold"),
+                    unit=_str_or_none(row.get("unit_original")),
+                    time_start=row.get("time_start"),
+                    time_end=row.get("time_end"),
+                    competition=_str_or_none(row.get("competition_original")),
+                    event_scope=_str_or_none(row.get("event_scope_original")),
+                    jurisdiction=_str_or_none(row.get("jurisdiction_original")),
+                    polarity=str(row["polarity"]),
+                    parse_confidence=float(row["parse_confidence"]),
+                )
+                for row in rows
+            ],
+        )
+        cache.put(
+            key,
+            cache_entry(
+                task="parse",
+                parsed=parsed.model_dump(mode="json"),
+                error=None,
+                observed_model=str(rows[0]["parser_model"]),
+                usage={},
+                usage_scope=None,
+                state="success",
+            ),
+        )
+        seeded += 1
+    return seeded
 
 
 def _parse_propositions(
@@ -394,6 +1052,7 @@ def _parse_propositions(
             state.add_cached_usage(
                 dict(entry.get("usage") or {}),
                 _str_or_none(entry.get("usage_scope")),
+                "parse",
             )
 
     if missing:
@@ -439,7 +1098,7 @@ def _parse_propositions(
                     for market in parsed.markets
                 }
                 state.observed_parse_models.add(observed_model)
-                state.add_usage(usage)
+                state.add_usage(usage, "parse")
             usage_scope = cache.usage_scope("parse", batch_items)
             for payload in batch_items:
                 market_id = str(payload["market_id"])
@@ -480,6 +1139,30 @@ def _parse_propositions(
                 _validate_parsed_market(market, parsed_market)
             except (ValueError, TypeError) as exc:
                 error = str(exc)
+        cache_error_payload = entry.get("error")
+        error_type = (
+            str(cache_error_payload.get("type"))
+            if isinstance(cache_error_payload, dict)
+            and cache_error_payload.get("type")
+            else ("ValidationError" if error and entry.get("parsed") is not None else None)
+        )
+        status_code = (
+            cache_error_payload.get("status_code")
+            if isinstance(cache_error_payload, dict)
+            else None
+        )
+        if error:
+            parse_review_kind = (
+                "parse_omission"
+                if "omitted" in error
+                else (
+                    "parse_validation"
+                    if entry.get("parsed") is not None
+                    else "parse_response_error"
+                )
+            )
+        else:
+            parse_review_kind = "parse_error"
         parsed_by_outcome = (
             {item.outcome: item for item in parsed_market.propositions}
             if parsed_market
@@ -495,11 +1178,19 @@ def _parse_propositions(
                 source_format,
                 error,
             )
+            proposition["_parse_cache_state"] = entry.get("state")
+            proposition["_parse_error_type"] = error_type
+            proposition["_parse_status_code"] = status_code
+            proposition["_parse_response_json"] = (
+                json.dumps(entry["parsed"], sort_keys=True)
+                if entry.get("parsed") is not None
+                else None
+            )
             propositions.append(proposition)
             if error or parsed is None:
                 reviews.append(
                     _review_row(
-                        "parse_error",
+                        parse_review_kind,
                         proposition["proposition_id"],
                         None,
                         None,
@@ -531,6 +1222,8 @@ def _market_payload(market: SourceMarket) -> dict[str, object]:
     return {
         "market_id": market.market_id,
         "question": market.question,
+        "description": market.description,
+        "market_source_hash": market.source_hash,
         "event_id": market.event_id,
         "event_slug": market.event_slug,
         "category": market.category,
@@ -573,6 +1266,7 @@ def _proposition_row(
     object_original = parsed.object if parsed else None
     unit_original = parsed.unit if parsed else None
     competition_original = parsed.competition if parsed else None
+    event_scope_original = parsed.event_scope if parsed else None
     jurisdiction_original = parsed.jurisdiction if parsed else None
     polarity = (
         parsed.polarity
@@ -588,6 +1282,9 @@ def _proposition_row(
         "outcome_index": source.outcome_index,
         "outcome": source.outcome,
         "question": market.question,
+        "description": market.description,
+        "market_source_hash": market.source_hash,
+        "normalization_version": NORMALIZATION_VERSION,
         "category": market.category,
         "tags": list(market.tags),
         "subject_original": original_subject,
@@ -615,6 +1312,12 @@ def _proposition_row(
         "competition": (
             _canonical_entity(competition_original)
             if competition_original
+            else None
+        ),
+        "event_scope_original": event_scope_original,
+        "event_scope": (
+            _canonical_entity(event_scope_original)
+            if event_scope_original
             else None
         ),
         "jurisdiction_original": jurisdiction_original,
@@ -677,6 +1380,11 @@ def _generate_candidates(
     propositions: Sequence[dict[str, Any]],
     config: DiscoveryConfig,
     embedder: Callable[[list[str], DiscoveryConfig], Any],
+    *,
+    baseline_embeddings: dict[str, list[float]] | None = None,
+    baseline_neighbors: Sequence[dict[str, Any]] | None = None,
+    embedding_state_sink: list[dict[str, Any]] | None = None,
+    neighbor_state_sink: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     return _generate_candidates_bounded(
         propositions,
@@ -689,7 +1397,269 @@ def _generate_candidates(
         embedding_text=_embedding_text,
         stage_rank=_stage_rank,
         is_winner=_is_winner_proposition,
+        baseline_embeddings=baseline_embeddings,
+        baseline_neighbors=baseline_neighbors,
+        embedding_state_sink=embedding_state_sink,
+        neighbor_state_sink=neighbor_state_sink,
     )
+
+
+def _load_reusable_candidates(
+    path: Path,
+    propositions: Sequence[dict[str, Any]],
+    config: DiscoveryConfig,
+) -> list[dict[str, Any]]:
+    db = DuckDB()
+    try:
+        rows = db.rows(
+            f"""
+            SELECT *
+            FROM read_parquet('{q(path)}')
+            ORDER BY proposition_a_id, proposition_b_id
+            """
+        )
+    finally:
+        db.close()
+    by_id = {
+        str(row["proposition_id"]): row for row in propositions
+    }
+    candidates = []
+    for raw in rows:
+        row = dict(raw)
+        a_id = str(row["proposition_a_id"])
+        b_id = str(row["proposition_b_id"])
+        if a_id not in by_id or b_id not in by_id:
+            raise RuntimeError(
+                "Reusable candidate state references a missing proposition"
+            )
+        relation = (
+            _deterministic_relation(
+                by_id[a_id],
+                by_id[b_id],
+                config.parse_confidence,
+            )
+            if row.get("rule_id")
+            else None
+        )
+        row.update(
+            {
+                "classification_relation": None,
+                "classification_confidence": None,
+                "supporting_fields": None,
+                "a_implies_b": None,
+                "b_implies_a": None,
+                "explanation": None,
+                "assumptions": [],
+                "requires_review": False,
+                "status": "pending",
+                "discovery_method": None,
+                "model_version": None,
+                "prompt_version": None,
+            }
+        )
+        if relation is not None:
+            if relation.get("rule_id") != row.get("rule_id"):
+                raise RuntimeError(
+                    "Reusable candidate rule identity does not match current rules"
+                )
+            row["_deterministic"] = relation
+            row["deterministic_relation"] = relation["edge_type"]
+            row["rule_status"] = "enabled"
+            row["status"] = "accepted"
+            row["discovery_method"] = "deterministic"
+            row["explanation"] = relation["explanation"]
+        candidates.append(row)
+    return candidates
+
+
+def _reused_embedding_state(
+    propositions: Sequence[dict[str, Any]],
+    baseline_embeddings: dict[str, list[float]],
+    config: DiscoveryConfig,
+) -> list[dict[str, Any]]:
+    rows = []
+    for proposition in sorted(
+        propositions,
+        key=lambda row: str(row["proposition_id"]),
+    ):
+        text_hash = _text_hash(_embedding_text(proposition))
+        embedding = baseline_embeddings.get(text_hash)
+        if embedding is None:
+            raise RuntimeError(
+                "Reusable candidate state is missing an embedding vector"
+            )
+        rows.append(
+            {
+                "proposition_id": str(proposition["proposition_id"]),
+                "text_hash": text_hash,
+                "embedding_model": config.embedding_model,
+                "embedding_revision": config.embedding_revision,
+                "embedding": embedding,
+                "reused": True,
+            }
+        )
+    return rows
+
+
+def _apply_benchmark_rule_gates(
+    candidates: Sequence[dict[str, Any]],
+    propositions: Sequence[dict[str, Any]],
+    benchmark_path: Path | None,
+) -> dict[str, Any]:
+    if benchmark_path is None:
+        return {
+            "benchmark_enforced": False,
+            "minimum_positive_examples": 10,
+            "minimum_adversarial_examples": 10,
+            "enabled": sorted(RULE_REGISTRY),
+            "experimental": [],
+            "support": {},
+        }
+    benchmark_path = benchmark_path.resolve()
+    if not benchmark_path.is_file():
+        raise ValueError(f"Benchmark does not exist: {benchmark_path}")
+    db = DuckDB()
+    try:
+        benchmark_pairs = db.rows(
+            f"""
+            SELECT proposition_a_id, proposition_b_id, expected_relation
+            FROM read_parquet('{q(benchmark_path)}')
+            WHERE record_type = 'pair'
+            ORDER BY proposition_a_id, proposition_b_id
+            """
+        )
+    finally:
+        db.close()
+    by_id = {
+        str(proposition["proposition_id"]): proposition
+        for proposition in propositions
+    }
+    candidate_by_pair = {
+        (
+            str(candidate["proposition_a_id"]),
+            str(candidate["proposition_b_id"]),
+        ): candidate
+        for candidate in candidates
+        if candidate.get("_deterministic")
+    }
+    support = {
+        rule_id: {"positive": 0, "adversarial": 0}
+        for rule_id in RULE_REGISTRY
+    }
+    for benchmark in benchmark_pairs:
+        a_id, b_id = sorted(
+            (
+                str(benchmark["proposition_a_id"]),
+                str(benchmark["proposition_b_id"]),
+            )
+        )
+        if a_id not in by_id or b_id not in by_id:
+            continue
+        candidate = candidate_by_pair.get((a_id, b_id))
+        expected = str(benchmark["expected_relation"])
+        if candidate is not None:
+            relation = candidate["_deterministic"]
+            rule_id = str(relation["rule_id"])
+            if _relation_matches_benchmark(relation, a_id, b_id, expected):
+                support[rule_id]["positive"] += 1
+            else:
+                support[rule_id]["adversarial"] += 1
+        for rule_id in RULE_REGISTRY:
+            if candidate is not None and candidate.get("rule_id") == rule_id:
+                continue
+            if _rule_near_applicable(rule_id, by_id[a_id], by_id[b_id]):
+                support[rule_id]["adversarial"] += 1
+
+    enabled = {
+        rule_id
+        for rule_id, counts in support.items()
+        if counts["positive"] >= 10 and counts["adversarial"] >= 10
+    }
+    for candidate in candidates:
+        rule_id = candidate.get("rule_id")
+        if not rule_id:
+            continue
+        if rule_id in enabled:
+            candidate["rule_status"] = "enabled"
+            continue
+        candidate.pop("_deterministic", None)
+        candidate["rule_status"] = "experimental"
+        candidate["status"] = "pending"
+        candidate["discovery_method"] = None
+    return {
+        "benchmark_enforced": True,
+        "minimum_positive_examples": 10,
+        "minimum_adversarial_examples": 10,
+        "enabled": sorted(enabled),
+        "experimental": sorted(set(RULE_REGISTRY) - enabled),
+        "support": support,
+    }
+
+
+def _relation_matches_benchmark(
+    relation: dict[str, Any],
+    a_id: str,
+    b_id: str,
+    expected: str,
+) -> bool:
+    edge_type = str(relation["edge_type"])
+    if edge_type != "implies":
+        return edge_type == expected
+    observed = (
+        "A_implies_B"
+        if str(relation["src_node_id"]) == a_id
+        and str(relation["dst_node_id"]) == b_id
+        else "B_implies_A"
+    )
+    return observed == expected
+
+
+def _rule_near_applicable(
+    rule_id: str,
+    a: dict[str, Any],
+    b: dict[str, Any],
+) -> bool:
+    same_subject = set(a.get("subject") or []) == set(b.get("subject") or [])
+    same_predicate = a.get("predicate") == b.get("predicate")
+    same_event = bool(
+        (a.get("event_id") or a.get("event_slug"))
+        and (a.get("event_id") or a.get("event_slug"))
+        == (b.get("event_id") or b.get("event_slug"))
+    )
+    if rule_id == "same_market.binary_complement.v1":
+        return same_event and a["market_id"] != b["market_id"]
+    if rule_id == "same_market.categorical_exclusion.v1":
+        return same_event and a["market_id"] != b["market_id"]
+    if rule_id == "equivalence.normalized_fields.v1":
+        return same_subject and same_predicate
+    if rule_id == "threshold.interval_containment.v2":
+        return (
+            same_subject
+            and same_predicate
+            and a.get("unit") == b.get("unit")
+            and a.get("threshold") is not None
+            and b.get("threshold") is not None
+        )
+    if rule_id == "time.interval_containment.v1":
+        return (
+            same_subject
+            and same_predicate
+            and all(
+                (
+                    a.get("time_start"),
+                    a.get("time_end"),
+                    b.get("time_start"),
+                    b.get("time_end"),
+                )
+            )
+        )
+    if rule_id == "tournament.stage_progression.v1":
+        return same_subject and a.get("competition") == b.get("competition")
+    if rule_id == "event.single_winner.v1":
+        return same_event and (
+            _is_winner_proposition(a) or _is_winner_proposition(b)
+        )
+    return False
 
 
 def _embed_texts(texts: list[str], config: DiscoveryConfig) -> Any:
@@ -720,9 +1690,11 @@ def _embedding_text(proposition: dict[str, Any]) -> str:
         proposition.get("threshold"),
         proposition.get("unit"),
         proposition.get("competition"),
+        proposition.get("event_scope"),
         proposition.get("jurisdiction"),
         proposition.get("outcome"),
         proposition.get("question"),
+        proposition.get("description"),
     ]
     return " | ".join(str(part) for part in parts if part not in (None, "", []))
 
@@ -809,6 +1781,7 @@ def _classify_candidates(
             state.add_cached_usage(
                 dict(entry.get("usage") or {}),
                 _str_or_none(entry.get("usage_scope")),
+                "classify",
             )
 
     if missing:
@@ -854,7 +1827,7 @@ def _classify_candidates(
                     for pair in parsed.pairs
                 }
                 state.observed_classify_models.add(observed_model)
-                state.add_usage(usage)
+                state.add_usage(usage, "classify")
             usage_scope = cache.usage_scope("classify", batch_items)
             for payload in batch_items:
                 pair_id = str(payload["pair_id"])
@@ -931,6 +1904,15 @@ def _classify_candidates(
             {
                 "classification_relation": classification.relation,
                 "classification_confidence": classification.confidence,
+                "supporting_fields": json.dumps(
+                    [
+                        item.model_dump(mode="json")
+                        for item in classification.supporting_fields
+                    ],
+                    sort_keys=True,
+                ),
+                "a_implies_b": classification.a_implies_b.supported,
+                "b_implies_a": classification.b_implies_a.supported,
                 "explanation": classification.explanation,
                 "assumptions": classification.assumptions,
                 "requires_review": classification.requires_review,
@@ -939,10 +1921,33 @@ def _classify_candidates(
                 "prompt_version": CLASSIFY_PROMPT_VERSION,
             }
         )
+        validation_error = _classification_validation_error(
+            classification,
+            by_id[str(candidate["proposition_a_id"])],
+            by_id[str(candidate["proposition_b_id"])],
+        )
+        if validation_error:
+            candidate["status"] = "review"
+            candidate["requires_review"] = True
+            reviews.append(
+                _review_row(
+                    "classification_invalid_evidence",
+                    str(candidate["proposition_a_id"]),
+                    str(candidate["proposition_b_id"]),
+                    classification.relation,
+                    classification.confidence,
+                    validation_error,
+                    classification.assumptions,
+                    observed_model,
+                    CLASSIFY_PROMPT_VERSION,
+                )
+            )
+            continue
         accepted_label = classification.relation not in {"unrelated", "uncertain"}
         accepted = (
             accepted_label
-            and classification.confidence >= config.accept_confidence
+            and classification.confidence
+            >= config.threshold_for(classification.relation)
             and not classification.requires_review
         )
         if accepted:
@@ -982,6 +1987,70 @@ def _classify_candidates(
                 )
             )
     return edges, reviews
+
+
+def _classification_validation_error(
+    classification: PairClassification,
+    proposition_a: dict[str, Any],
+    proposition_b: dict[str, Any],
+) -> str | None:
+    expected_directions = {
+        "equivalent": (True, True),
+        "A_implies_B": (True, False),
+        "B_implies_A": (False, True),
+        "mutually_exclusive": (False, False),
+        "complement": (False, False),
+        "compatible": (False, False),
+        "unrelated": (False, False),
+        "uncertain": (False, False),
+    }
+    actual = (
+        classification.a_implies_b.supported,
+        classification.b_implies_a.supported,
+    )
+    if actual != expected_directions[classification.relation]:
+        return (
+            "directional entailment assessments disagree with the selected "
+            f"relation {classification.relation}"
+        )
+    all_support = [
+        *classification.supporting_fields,
+        *classification.a_implies_b.supporting_fields,
+        *classification.b_implies_a.supporting_fields,
+    ]
+    if classification.assumptions and not classification.supporting_fields:
+        return "classification contains assumptions without supporting-field citations"
+    for direction, assessment in (
+        ("A-to-B", classification.a_implies_b),
+        ("B-to-A", classification.b_implies_a),
+    ):
+        if assessment.assumptions and not assessment.supporting_fields:
+            return (
+                f"{direction} assessment contains assumptions without "
+                "supporting-field citations"
+            )
+    if (
+        classification.relation not in {"unrelated", "uncertain"}
+        and not all_support
+    ):
+        return "positive classifications require supporting-field citations"
+    for citation in all_support:
+        proposition = (
+            proposition_a if citation.proposition == "A" else proposition_b
+        )
+        raw_value = proposition.get(citation.field)
+        if raw_value in (None, "", []):
+            return (
+                f"supporting field {citation.proposition}.{citation.field} "
+                "is empty in the supplied proposition"
+            )
+        supplied = json.dumps(raw_value, sort_keys=True, default=str).casefold()
+        if citation.value.strip().casefold() not in supplied:
+            return (
+                f"supporting value for {citation.proposition}.{citation.field} "
+                "does not occur in the supplied proposition"
+            )
+    return None
 
 
 async def _openai_classify_batch(
@@ -1078,6 +2147,20 @@ def _logic_edge_row(
     src = propositions[str(relation["src_node_id"])]
     dst = propositions[str(relation["dst_node_id"])]
     explanation = str(relation["explanation"])
+    rule_id = relation.get("rule_id") if discovery_method == "deterministic" else None
+    proposal_id = _text_hash(
+        "|".join(
+            (
+                str(relation["src_node_id"]),
+                str(relation["dst_node_id"]),
+                str(relation["edge_type"]),
+                discovery_method,
+                str(rule_id or ""),
+                str(model_version or ""),
+                str(prompt_version or ""),
+            )
+        )
+    )
     return {
         "src_node_id": relation["src_node_id"],
         "dst_node_id": relation["dst_node_id"],
@@ -1095,7 +2178,88 @@ def _logic_edge_row(
         "prompt_version": prompt_version,
         "explanation": explanation,
         "assumptions": assumptions,
+        "rule_id": rule_id,
+        "proposal_id": proposal_id,
+        "solver_version": None,
+        "constraint_version": None,
+        "solver_component_id": None,
     }
+
+
+def _solve_logic_edges(
+    edges: Sequence[dict[str, Any]],
+    *,
+    reusable_solver_components: dict[str, dict[str, Any]] | None = None,
+) -> tuple[
+    list[dict[str, Any]],
+    list[dict[str, Any]],
+    list[dict[str, Any]],
+    dict[str, int],
+]:
+    accepted, rejected, stats = solve_proposals(
+        edges,
+        reusable_components=reusable_solver_components,
+    )
+    reviews = [
+        _review_row(
+            "consistency_conflict",
+            str(row["src_node_id"]),
+            str(row["dst_node_id"]),
+            str(row["edge_type"]),
+            float(row["confidence"]),
+            str(row["rejection_reason"]),
+            [],
+            _str_or_none(row.get("model_version")),
+            _str_or_none(row.get("prompt_version")),
+        )
+        for row in rejected
+    ]
+    return accepted, rejected, reviews, stats
+
+
+def _solver_component_state_rows(
+    accepted: Sequence[dict[str, Any]],
+    rejected: Sequence[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    accepted_by_component: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    rejected_by_component: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in accepted:
+        accepted_by_component[str(row["solver_component_id"])].append(row)
+    for row in rejected:
+        rejected_by_component[str(row["solver_component_id"])].append(row)
+    rows = []
+    for component_id in sorted(
+        set(accepted_by_component) | set(rejected_by_component)
+    ):
+        accepted_rows = accepted_by_component[component_id]
+        rejected_rows = rejected_by_component[component_id]
+        proposals = [*accepted_rows, *rejected_rows]
+        representative = proposals[0]
+        rows.append(
+            {
+                "solver_component_id": component_id,
+                "proposal_hash": proposal_set_hash(proposals),
+                "accepted_proposal_ids": sorted(
+                    str(row["proposal_id"]) for row in accepted_rows
+                ),
+                "rejected_proposal_ids": sorted(
+                    str(row["proposal_id"]) for row in rejected_rows
+                ),
+                "proposal_count": len(proposals),
+                "hard_clause_count": int(
+                    representative["_solver_component_hard_clauses"]
+                ),
+                "soft_clause_count": int(
+                    representative["_solver_component_soft_clauses"]
+                ),
+                "objective_cost": int(
+                    representative["_solver_component_objective"]
+                ),
+                "solver_version": SOLVER_VERSION,
+                "constraint_version": CONSTRAINT_VERSION,
+            }
+        )
+    return rows
 
 
 def _validate_logic_edges(
@@ -1244,21 +2408,279 @@ def _validate_logic_edges(
     ), reviews
 
 
+def _proposition_fingerprint_rows(
+    propositions: Sequence[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    ignored = {
+        "parse_confidence",
+        "parse_status",
+        "parser_model",
+        "prompt_version",
+        "source_format",
+    }
+    return [
+        {
+            "proposition_id": str(row["proposition_id"]),
+            "market_id": str(row["market_id"]),
+            "market_source_hash": str(row["market_source_hash"]),
+            "parse_fingerprint": _text_hash(
+                json.dumps(
+                    {
+                        key: row.get(key)
+                        for key in sorted(PROPOSITION_COLUMNS)
+                        if key not in ignored
+                    },
+                    default=str,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+            ),
+            "normalization_version": NORMALIZATION_VERSION,
+        }
+        for row in propositions
+    ]
+
+
+def _candidate_component_state_rows(
+    candidates: Sequence[dict[str, Any]],
+    propositions: Sequence[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    by_proposition: dict[str, list[dict[str, Any]]] = {
+        str(row["proposition_id"]): [] for row in propositions
+    }
+    for row in candidates:
+        payload = {
+            "a": str(row["proposition_a_id"]),
+            "b": str(row["proposition_b_id"]),
+            "reasons": sorted(row.get("candidate_reasons") or []),
+            "similarity": row.get("embedding_similarity"),
+            "rank": row.get("embedding_rank"),
+            "rule_id": row.get("rule_id"),
+        }
+        by_proposition[payload["a"]].append(payload)
+        by_proposition[payload["b"]].append(payload)
+    return [
+        {
+            "component_id": proposition_id,
+            "component_fingerprint": _text_hash(
+                json.dumps(
+                    sorted(rows, key=lambda row: (row["a"], row["b"])),
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+            ),
+            "pair_count": len(rows),
+            "candidate_version": CANDIDATE_STATE_VERSION,
+        }
+        for proposition_id, rows in sorted(by_proposition.items())
+    ]
+
+
+def _record_candidate_component_reuse(
+    incremental_stats: dict[str, Any],
+    candidate_components: Sequence[dict[str, Any]],
+) -> None:
+    prior = incremental_stats.pop("_prior_candidate_components", {})
+    reused = sum(
+        prior.get(str(row["component_id"])) == row["component_fingerprint"]
+        for row in candidate_components
+    )
+    incremental_stats["candidate_components_reused"] = reused
+    incremental_stats["candidate_components_recomputed"] = (
+        len(candidate_components) - reused
+    )
+    incremental_stats["candidate_components_removed"] = len(
+        set(prior)
+        - {str(row["component_id"]) for row in candidate_components}
+    )
+
+
+def _record_semantic_neighborhood_reuse(
+    incremental_stats: dict[str, Any],
+    prior_rows: Sequence[dict[str, Any]],
+    current_rows: Sequence[dict[str, Any]],
+) -> None:
+    def fingerprints(
+        rows: Sequence[dict[str, Any]],
+    ) -> dict[str, str]:
+        grouped: dict[str, list[tuple[str, float, int]]] = defaultdict(list)
+        for row in rows:
+            grouped[str(row["proposition_id"])].append(
+                (
+                    str(row["neighbor_id"]),
+                    float(row["similarity"]),
+                    int(row["neighbor_rank"]),
+                )
+            )
+        return {
+            proposition_id: _text_hash(
+                json.dumps(sorted(neighbors), separators=(",", ":"))
+            )
+            for proposition_id, neighbors in grouped.items()
+        }
+
+    prior = fingerprints(prior_rows)
+    current = fingerprints(current_rows)
+    reused = sum(
+        prior.get(proposition_id) == fingerprint
+        for proposition_id, fingerprint in current.items()
+    )
+    incremental_stats["semantic_neighborhoods_reused"] = reused
+    incremental_stats["semantic_neighborhoods_recomputed"] = (
+        len(current) - reused
+    )
+    incremental_stats["semantic_neighborhoods_removed"] = len(
+        set(prior) - set(current)
+    )
+
+
+def _seed_classification_cache_from_incremental(
+    cache: JsonCache,
+    candidates: Sequence[dict[str, Any]],
+    propositions: Sequence[dict[str, Any]],
+    config: DiscoveryConfig,
+    incremental_stats: dict[str, Any],
+) -> None:
+    prior = {
+        (
+            str(row["proposition_a_id"]),
+            str(row["proposition_b_id"]),
+        ): row
+        for row in incremental_stats.pop("_prior_classifications", [])
+    }
+    prior_propositions = {
+        str(row["proposition_id"]): row
+        for row in incremental_stats.pop("_prior_propositions", [])
+    }
+    unchanged_markets = set(
+        incremental_stats.pop("_unchanged_market_ids", [])
+    )
+    by_id = {
+        str(row["proposition_id"]): row for row in propositions
+    }
+    schema_hash = _model_schema_hash(PairClassificationBatch)
+    prompt_hash = _text_hash(_CLASSIFY_PROMPT)
+    seeded = 0
+    for candidate in candidates:
+        pair = (
+            str(candidate["proposition_a_id"]),
+            str(candidate["proposition_b_id"]),
+        )
+        row = prior.get(pair)
+        if row is None or any(
+            str(by_id[proposition_id]["market_id"]) not in unchanged_markets
+            for proposition_id in pair
+        ):
+            continue
+        if (
+            list(row.get("candidate_reasons") or [])
+            != list(candidate.get("candidate_reasons") or [])
+            or row.get("embedding_rank") != candidate.get("embedding_rank")
+            or row.get("embedding_similarity")
+            != candidate.get("embedding_similarity")
+        ):
+            continue
+        payload = _pair_payload(candidate, by_id)
+        if any(
+            proposition_id not in prior_propositions
+            for proposition_id in pair
+        ):
+            continue
+        prior_payload = _pair_payload(row, prior_propositions)
+        if json.dumps(
+            prior_payload,
+            sort_keys=True,
+            default=str,
+            separators=(",", ":"),
+        ) != json.dumps(
+            payload,
+            sort_keys=True,
+            default=str,
+            separators=(",", ":"),
+        ):
+            continue
+        key = cache.key(
+            "classify",
+            config.classify_model,
+            CLASSIFY_PROMPT_VERSION,
+            prompt_hash,
+            schema_hash,
+            payload,
+        )
+        if (cache.directory / f"{key}.json").is_file():
+            continue
+        supporting_fields = json.loads(row.get("supporting_fields") or "[]")
+        assumptions = list(row.get("assumptions") or [])
+        parsed = PairClassification(
+            pair_id=str(payload["pair_id"]),
+            relation=str(row["classification_relation"]),
+            confidence=float(row["classification_confidence"]),
+            supporting_fields=supporting_fields,
+            explanation=str(row["explanation"]),
+            assumptions=assumptions,
+            a_implies_b={
+                "supported": bool(row["a_implies_b"]),
+                "supporting_fields": (
+                    supporting_fields if row["a_implies_b"] else []
+                ),
+                "assumptions": assumptions if row["a_implies_b"] else [],
+            },
+            b_implies_a={
+                "supported": bool(row["b_implies_a"]),
+                "supporting_fields": (
+                    supporting_fields if row["b_implies_a"] else []
+                ),
+                "assumptions": assumptions if row["b_implies_a"] else [],
+            },
+            requires_review=bool(row["requires_review"]),
+        )
+        cache.put(
+            key,
+            cache_entry(
+                task="classify",
+                parsed=parsed.model_dump(mode="json"),
+                error=None,
+                observed_model=str(
+                    row.get("model_version") or config.classify_model
+                ),
+                usage={},
+                usage_scope=None,
+                state="success",
+            ),
+        )
+        seeded += 1
+    incremental_stats["baseline_classification_entries_seeded"] = seeded
+
+
 def _write_discovery_artifacts(
     directory: Path,
     markets: Sequence[SourceMarket],
     propositions: Sequence[dict[str, Any]],
     candidates: Sequence[dict[str, Any]],
     logic_edges: Sequence[dict[str, Any]],
+    rejected_edges: Sequence[dict[str, Any]],
+    parse_errors: Sequence[dict[str, Any]],
     reviews_: Sequence[dict[str, Any]],
     *,
     source_format: str,
     input_rows: int,
     input_selection: dict[str, object],
+    solver_stats: dict[str, int],
+    rule_support: dict[str, Any],
+    embedding_state: Sequence[dict[str, Any]],
+    semantic_neighbor_state: Sequence[dict[str, Any]],
+    proposition_fingerprint_state: Sequence[dict[str, Any]],
+    candidate_component_state: Sequence[dict[str, Any]],
+    solver_component_state: Sequence[dict[str, Any]],
+    incremental_stats: dict[str, Any],
 ) -> dict[str, object]:
     db = DuckDB(directory / "oddsfox_graph.duckdb")
     try:
         db.execute("SET TimeZone = 'UTC'")
+        parser_by_market = {
+            str(row["market_id"]): str(row["parser_model"])
+            for row in propositions
+        }
         _create_and_fill(
             db,
             "propositions_v",
@@ -1296,7 +2718,65 @@ def _write_discovery_artifacts(
             [_published_candidate(row) for row in candidates],
         )
         _create_and_fill(db, "logic_edges_v", LOGIC_EDGE_COLUMNS, logic_edges)
+        _create_and_fill(
+            db,
+            "rejected_edges_v",
+            REJECTED_EDGE_COLUMNS,
+            rejected_edges,
+        )
+        _create_and_fill(
+            db,
+            "parse_errors_v",
+            PARSE_ERROR_COLUMNS,
+            parse_errors,
+        )
         _create_and_fill(db, "review_queue_v", REVIEW_COLUMNS, reviews_)
+        _create_and_fill(
+            db,
+            "market_state_v",
+            MARKET_STATE_COLUMNS,
+            [
+                {
+                    "market_id": market.market_id,
+                    "source_hash": market.source_hash,
+                    "parse_model": parser_by_market.get(market.market_id, ""),
+                    "parse_prompt_version": PARSE_PROMPT_VERSION,
+                    "normalization_version": NORMALIZATION_VERSION,
+                    "rule_version": RULE_VERSION,
+                }
+                for market in markets
+            ],
+        )
+        _create_and_fill(
+            db,
+            "proposition_embeddings_v",
+            EMBEDDING_STATE_COLUMNS,
+            embedding_state,
+        )
+        _create_and_fill(
+            db,
+            "semantic_neighbors_v",
+            SEMANTIC_NEIGHBOR_STATE_COLUMNS,
+            semantic_neighbor_state,
+        )
+        _create_and_fill(
+            db,
+            "proposition_fingerprints_v",
+            PROPOSITION_FINGERPRINT_COLUMNS,
+            proposition_fingerprint_state,
+        )
+        _create_and_fill(
+            db,
+            "candidate_components_v",
+            CANDIDATE_COMPONENT_STATE_COLUMNS,
+            candidate_component_state,
+        )
+        _create_and_fill(
+            db,
+            "solver_components_v",
+            SOLVER_COMPONENT_STATE_COLUMNS,
+            solver_component_state,
+        )
 
         _copy_table(
             db,
@@ -1335,10 +2815,68 @@ def _write_discovery_artifacts(
         )
         _copy_table(
             db,
+            "rejected_edges_v",
+            directory / "rejected_edges.parquet",
+            list(REJECTED_EDGE_COLUMNS),
+            "proposal_id",
+        )
+        _copy_table(
+            db,
+            "parse_errors_v",
+            directory / "parse_errors.parquet",
+            list(PARSE_ERROR_COLUMNS),
+            "error_id",
+        )
+        _copy_table(
+            db,
             "review_queue_v",
             directory / "review_queue.parquet",
             list(REVIEW_COLUMNS),
             "review_id",
+        )
+        state_directory = directory / "state"
+        state_directory.mkdir(parents=True, exist_ok=True)
+        _copy_table(
+            db,
+            "market_state_v",
+            state_directory / "market_state.parquet",
+            list(MARKET_STATE_COLUMNS),
+            "market_id",
+        )
+        _copy_table(
+            db,
+            "proposition_fingerprints_v",
+            state_directory / "proposition_fingerprints.parquet",
+            list(PROPOSITION_FINGERPRINT_COLUMNS),
+            "proposition_id",
+        )
+        _copy_table(
+            db,
+            "proposition_embeddings_v",
+            state_directory / "proposition_embeddings.parquet",
+            list(EMBEDDING_STATE_COLUMNS),
+            "proposition_id",
+        )
+        _copy_table(
+            db,
+            "semantic_neighbors_v",
+            state_directory / "semantic_neighbors.parquet",
+            list(SEMANTIC_NEIGHBOR_STATE_COLUMNS),
+            "proposition_id, neighbor_rank",
+        )
+        _copy_table(
+            db,
+            "candidate_components_v",
+            state_directory / "candidate_components.parquet",
+            list(CANDIDATE_COMPONENT_STATE_COLUMNS),
+            "component_id",
+        )
+        _copy_table(
+            db,
+            "solver_components_v",
+            state_directory / "solver_components.parquet",
+            list(SOLVER_COMPONENT_STATE_COLUMNS),
+            "solver_component_id",
         )
         write_conditionals(db, directory)
         write_graph_snapshot(db, directory)
@@ -1370,9 +2908,21 @@ def _write_discovery_artifacts(
                 db.scalar("SELECT count(*) FROM conditional_edges_v") or 0
             ),
             "review_queue": len(reviews_),
+            "rejected_edges": len(rejected_edges),
             "parse_failures": sum(
                 1 for row in propositions if row["parse_status"] != "parsed"
             ),
+            "solver": solver_stats,
+            "rules": rule_support,
+            "incremental": {
+                **incremental_stats,
+                "embedding_vectors_reused": sum(
+                    bool(row.get("reused")) for row in embedding_state
+                ),
+                "embedding_vectors_recomputed": sum(
+                    not bool(row.get("reused")) for row in embedding_state
+                ),
+            },
             "time_range_start": min(
                 (
                     market.first_seen_ts or market.time_start
@@ -1513,11 +3063,19 @@ def _validate_discovery_artifacts(db: DuckDB, directory: Path) -> None:
         "propositions.parquet": PROPOSITION_COLUMNS,
         "relation_candidates.parquet": CANDIDATE_COLUMNS,
         "logic_edges.parquet": LOGIC_EDGE_COLUMNS,
+        "rejected_edges.parquet": REJECTED_EDGE_COLUMNS,
+        "parse_errors.parquet": PARSE_ERROR_COLUMNS,
         "conditional_edges.parquet": {
             name: ""
             for name in ARTIFACT_COLUMNS["conditional_edges.parquet"]
         },
         "review_queue.parquet": REVIEW_COLUMNS,
+        "state/market_state.parquet": MARKET_STATE_COLUMNS,
+        "state/proposition_fingerprints.parquet": PROPOSITION_FINGERPRINT_COLUMNS,
+        "state/proposition_embeddings.parquet": EMBEDDING_STATE_COLUMNS,
+        "state/semantic_neighbors.parquet": SEMANTIC_NEIGHBOR_STATE_COLUMNS,
+        "state/candidate_components.parquet": CANDIDATE_COMPONENT_STATE_COLUMNS,
+        "state/solver_components.parquet": SOLVER_COMPONENT_STATE_COLUMNS,
     }
     for artifact, expected in contracts.items():
         path = directory / artifact
@@ -1561,10 +3119,17 @@ def _discovery_manifest(
     cache: JsonCache,
     state: RunState,
     timings: dict[str, float],
+    state_hashes: dict[str, str],
 ) -> dict[str, object]:
     artifact_names = [
         *DISCOVERY_PARQUET_ARTIFACTS,
+        *STATE_ARTIFACTS,
         GRAPH_SNAPSHOT_ARTIFACT,
+        *(
+            ("benchmark.parquet", "evaluation_report.json")
+            if config.benchmark_path is not None
+            else ()
+        ),
     ]
     manifest = {
         "command": "discover",
@@ -1601,15 +3166,55 @@ def _discovery_manifest(
                 "schema_hash": _model_schema_hash(PairClassificationBatch),
             },
         },
+        "versions": {
+            "normalization": NORMALIZATION_VERSION,
+            "domain_taxonomy": DOMAIN_TAXONOMY_VERSION,
+            "rules": RULE_VERSION,
+            "retrieval": RETRIEVAL_VERSION,
+            "candidate_state": CANDIDATE_STATE_VERSION,
+            "cache": CACHE_ENTRY_VERSION,
+            "rule_registry_hash": _text_hash(
+                json.dumps(RULE_REGISTRY, sort_keys=True)
+            ),
+            "constraints": CONSTRAINT_VERSION,
+            "solver": SOLVER_VERSION,
+        },
         "limits": {
             "accept_confidence": config.accept_confidence,
+            "relation_thresholds": dict(sorted(config.relation_thresholds.items())),
             "parse_confidence": config.parse_confidence,
             "top_k": config.top_k,
+            "embedding_block_size": config.embedding_block_size,
             "max_propositions": config.max_propositions,
             "max_candidates": config.max_candidates,
             "max_llm_pairs": config.max_llm_pairs,
             "llm_concurrency": config.llm_concurrency,
         },
+        "incremental": {
+            "baseline": (
+                str(config.incremental_from.resolve())
+                if config.incremental_from is not None
+                else None
+            ),
+        },
+        "benchmark": (
+            {
+                "path": str(config.benchmark_path.resolve()),
+                "hash": _sha256(config.benchmark_path.resolve()),
+            }
+            if config.benchmark_path is not None
+            else None
+        ),
+        "pricing": (
+            {
+                "path": str(config.pricing_file.resolve()),
+                "hash": _sha256(config.pricing_file.resolve()),
+            }
+            if config.pricing_file is not None
+            else None
+        ),
+        "solver": stats.get("solver"),
+        "rules": stats.get("rules"),
         "cache": {
             "directory": str(cache.directory),
             "offline": config.offline,
@@ -1618,6 +3223,7 @@ def _discovery_manifest(
         "usage": state.usage_manifest(),
         "artifacts": artifact_names,
         "artifact_hashes": artifact_hashes,
+        "state_hashes": state_hashes,
         "reports": list(reports()),
         "stats": stats,
         "stage_timings": timings,
@@ -1632,11 +3238,27 @@ def _publish_staged(staging: Path, out_dir: Path) -> None:
         manifest.unlink()
     for name in DISCOVERY_PARQUET_ARTIFACTS:
         os.replace(staging / name, out_dir / name)
+    state_out = out_dir / "state"
+    state_out.mkdir(exist_ok=True)
+    for relative_name in STATE_ARTIFACTS:
+        name = Path(relative_name).name
+        os.replace(staging / "state" / name, state_out / name)
     os.replace(staging / GRAPH_SNAPSHOT_ARTIFACT, out_dir / GRAPH_SNAPSHOT_ARTIFACT)
     reports_out = out_dir / "reports"
     reports_out.mkdir(exist_ok=True)
     for name in REPORTS:
         os.replace(staging / "reports" / name, reports_out / name)
+    if (staging / "benchmark.parquet").exists():
+        os.replace(staging / "benchmark.parquet", out_dir / "benchmark.parquet")
+        os.replace(
+            staging / "evaluation_report.json",
+            out_dir / "evaluation_report.json",
+        )
+    else:
+        for stale_name in ("benchmark.parquet", "evaluation_report.json"):
+            stale = out_dir / stale_name
+            if stale.exists():
+                stale.unlink()
 
 
 def _write_manifest_last(out_dir: Path, manifest: dict[str, object]) -> None:
@@ -1665,6 +3287,48 @@ def _dedupe_reviews(rows: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
         {str(row["review_id"]): row for row in rows}.values(),
         key=lambda row: str(row["review_id"]),
     )
+
+
+def _parse_error_rows(
+    propositions: Sequence[dict[str, Any]],
+    reviews: Sequence[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    review_by_id = {
+        str(row["proposition_a_id"]): row
+        for row in reviews
+        if str(row.get("review_kind") or "").startswith("parse_")
+    }
+    rows = []
+    for proposition in propositions:
+        proposition_id = str(proposition["proposition_id"])
+        review = review_by_id.get(proposition_id)
+        if review is None:
+            continue
+        kind = str(review["review_kind"])
+        rows.append(
+            {
+                "error_id": _text_hash(
+                    f"{proposition_id}|{kind}|{review.get('explanation') or ''}"
+                ),
+                "proposition_id": proposition_id,
+                "market_id": proposition["market_id"],
+                "error_kind": kind,
+                "error_message": review.get("explanation") or "",
+                "cache_state": proposition.get("_parse_cache_state"),
+                "error_type": proposition.get("_parse_error_type"),
+                "status_code": proposition.get("_parse_status_code"),
+                "response_json": proposition.get("_parse_response_json"),
+                "question": proposition["question"],
+                "description": proposition["description"],
+                "parse_confidence": proposition["parse_confidence"],
+                "market_source_hash": proposition["market_source_hash"],
+                "parser_model": proposition["parser_model"],
+                "prompt_version": proposition["prompt_version"],
+                "schema_version": _model_schema_hash(ParsedMarketBatch),
+                "normalization_version": proposition["normalization_version"],
+            }
+        )
+    return sorted(rows, key=lambda row: str(row["error_id"]))
 
 
 def _review_row(
@@ -1808,6 +3472,18 @@ def _sha256(path: Path) -> str:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _peak_rss_mb() -> float:
+    try:
+        import resource
+
+        value = float(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
+    except (ImportError, ValueError):  # pragma: no cover - platform guard
+        return 0.0
+    # macOS reports bytes; Linux reports KiB.
+    denominator = 1024 * 1024 if sys.platform == "darwin" else 1024
+    return round(value / denominator, 3)
 
 
 def _text_hash(text: str) -> str:
