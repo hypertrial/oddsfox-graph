@@ -228,8 +228,19 @@ def solve_proposals(
                     "discovery_method": row["discovery_method"],
                     "rule_id": row.get("rule_id"),
                     "rule_version": row.get("rule_version"),
-                    "model_version": row.get("model_version"),
                     "prompt_version": row.get("prompt_version"),
+                    "primary_model_version": row.get("primary_model_version"),
+                    "verifier_model_version": row.get("verifier_model_version"),
+                    "primary_assessment_id": row.get("primary_assessment_id"),
+                    "verifier_assessment_id": row.get("verifier_assessment_id"),
+                    "primary_inference_fingerprint": row.get(
+                        "primary_inference_fingerprint"
+                    ),
+                    "verifier_inference_fingerprint": row.get(
+                        "verifier_inference_fingerprint"
+                    ),
+                    "consensus_fingerprint": row.get("consensus_fingerprint"),
+                    "automation_profile_id": row.get("automation_profile_id"),
                     "rejection_reason": (
                         "conflicts with selected logic constraints"
                         if conflicts or constraints
@@ -296,7 +307,8 @@ def _normalize_proposal(row: dict[str, Any]) -> dict[str, Any]:
                 relation,
                 str(normalized.get("discovery_method") or ""),
                 str(normalized.get("rule_id") or ""),
-                str(normalized.get("model_version") or ""),
+                str(normalized.get("primary_model_version") or ""),
+                str(normalized.get("verifier_model_version") or ""),
                 str(normalized.get("prompt_version") or ""),
             )
         )

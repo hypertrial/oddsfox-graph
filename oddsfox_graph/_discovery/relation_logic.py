@@ -47,9 +47,7 @@ def derive_atomic_relation(
     if (a_to_b or b_to_a) and not co_possible:
         return None, "entailment contradicts the claim that both cannot be true"
     if (a_to_b or b_to_a or exhaustive or not co_possible) and not related:
-        return None, (
-            "positive logical judgments contradict logically_related=no"
-        )
+        return None, "positive logical judgments contradict logically_related=no"
     if a_to_b and b_to_a:
         return "equivalent", None
     if not a_to_b and not b_to_a and not co_possible:
@@ -71,20 +69,17 @@ def classification_validation_error(
     all_support = classification.supporting_fields
     if classification.unsupported_assumption:
         return "classification declares an unsupported assumption"
-    if classification.assumptions and not classification.supporting_fields:
-        return (
-            "classification contains assumptions without "
-            "supporting-field citations"
-        )
+    if classification.assumptions:
+        return "classification contains assumptions"
+    if classification.requires_review:
+        return "classification requests quarantine"
     relation, relation_error = derive_atomic_relation(classification)
     if relation_error:
         return relation_error
     if relation not in {"unrelated", "uncertain"} and not all_support:
         return "positive classifications require supporting-field citations"
     for citation in all_support:
-        proposition = (
-            proposition_a if citation.proposition == "A" else proposition_b
-        )
+        proposition = proposition_a if citation.proposition == "A" else proposition_b
         raw_value = proposition.get(citation.field)
         if raw_value in (None, "", []):
             return (

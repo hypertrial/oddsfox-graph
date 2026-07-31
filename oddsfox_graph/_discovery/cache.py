@@ -298,6 +298,58 @@ class InferenceCache:
             return
         self._db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
+    def get_qualification_profile(self, key: str) -> dict[str, Any] | None:
+        row = self._db.execute(
+            "SELECT profile_json FROM qualification_profiles WHERE profile_key = ?",
+            [key],
+        ).fetchone()
+        if row is None:
+            return None
+        value = json.loads(str(row[0]))
+        if not isinstance(value, dict):
+            raise ValueError("Invalid cached automation profile")
+        return {str(name): item for name, item in value.items()}
+
+    def qualification_profile_ids(self) -> frozenset[str]:
+        """Return validated profile IDs stored in this cache."""
+        profile_ids: set[str] = set()
+        for row in self._db.execute(
+            "SELECT profile_json FROM qualification_profiles ORDER BY profile_key"
+        ).fetchall():
+            try:
+                value = json.loads(str(row[0]))
+            except json.JSONDecodeError as exc:
+                raise ValueError("Invalid cached automation profile") from exc
+            if not isinstance(value, dict) or not isinstance(
+                value.get("profile_id"), str
+            ):
+                raise ValueError("Invalid cached automation profile")
+            profile_ids.add(str(value["profile_id"]))
+        return frozenset(profile_ids)
+
+    def put_qualification_profile(self, key: str, profile: Mapping[str, Any]) -> None:
+        if self.offline:
+            raise ValueError("Offline discovery cache is read-only")
+        payload = json.dumps(
+            dict(profile),
+            sort_keys=True,
+            separators=(",", ":"),
+            default=str,
+        )
+        with self._db:
+            existing = self._db.execute(
+                "SELECT profile_json FROM qualification_profiles WHERE profile_key = ?",
+                [key],
+            ).fetchone()
+            if existing is not None and str(existing[0]) != payload:
+                raise ValueError("Conflicting immutable automation profile")
+            self._db.execute(
+                "INSERT OR IGNORE INTO qualification_profiles "
+                "(profile_key, profile_json) VALUES (?, ?)",
+                [key, payload],
+            )
+        self.transactions += 1
+
     def integrity_check(self) -> str:
         row = self._db.execute("PRAGMA integrity_check").fetchone()
         return str(row[0]) if row is not None else "missing"
@@ -310,6 +362,9 @@ class InferenceCache:
                 "SELECT state, count(*) FROM cache_entries GROUP BY state"
             ).fetchall()
         }
+        qualification_profiles = int(
+            self._db.execute("SELECT count(*) FROM qualification_profiles").fetchone()[0]
+        )
         storage_bytes = sum(
             candidate.stat().st_size
             for candidate in (
@@ -341,6 +396,7 @@ class InferenceCache:
             "success_entries": state_counts.get("success", 0),
             "stable_failure_entries": state_counts.get("stable_failure", 0),
             "transient_failure_entries": state_counts.get("transient_failure", 0),
+            "qualification_profiles": qualification_profiles,
         }
 
     def close(self) -> None:
@@ -400,6 +456,14 @@ class InferenceCache:
                 "CREATE INDEX cache_entries_task_state "
                 "ON cache_entries (task, state)"
             )
+            self._db.execute(
+                """
+                CREATE TABLE qualification_profiles (
+                    profile_key TEXT PRIMARY KEY,
+                    profile_json TEXT NOT NULL
+                )
+                """
+            )
 
     def _validate_schema(self) -> None:
         try:
@@ -421,6 +485,12 @@ class InferenceCache:
                     [CACHE_ENTRY_VERSION],
                 ).fetchone()[0]
             )
+            profile_columns = tuple(
+                (str(row[1]), str(row[2]).upper())
+                for row in self._db.execute(
+                    "PRAGMA table_info('qualification_profiles')"
+                ).fetchall()
+            )
         except sqlite3.DatabaseError as exc:
             raise ValueError(
                 "Incompatible discovery cache. Use an empty cache directory."
@@ -429,7 +499,10 @@ class InferenceCache:
             "format": CACHE_FORMAT,
             "entry_version": str(CACHE_ENTRY_VERSION),
             "lineage": "self-hosted-open-model",
-        } or columns != _CACHE_ENTRY_COLUMNS or incompatible_entries:
+        } or columns != _CACHE_ENTRY_COLUMNS or incompatible_entries or profile_columns != (
+            ("profile_key", "TEXT"),
+            ("profile_json", "TEXT"),
+        ):
             raise ValueError(
                 "Incompatible discovery cache. Use an empty cache directory."
             )

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import re
 from datetime import datetime
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from pydantic import BaseModel, ConfigDict
 
@@ -15,10 +15,16 @@ from .contracts import (
     SourceMarket,
     SourceOutcome,
 )
-from .inference import GenerationSettings
-from .provenance import text_sha256
+from .inference import (
+    GenerationSettings,
+    ModelManifest,
+    inference_fingerprint,
+)
+from .nli import nli_inference_fingerprint
+from .provenance import canonical_json_sha256, text_sha256
 from .versions import (
     CLASSIFY_PROMPT_VERSION,
+    DUAL_CONSENSUS_PROTOCOL_VERSION,
     NORMALIZATION_VERSION,
     PARSE_PROMPT_VERSION,
     SOURCE_SCHEMA,
@@ -35,7 +41,8 @@ Field semantics: subject is the entity set; predicate is the event; object is it
 target; operator/threshold/unit describe comparisons; time_start/time_end are UTC
 resolution bounds; competition, event_scope, and jurisdiction constrain identity;
 polarity says whether the outcome asserts or negates the proposition; confidence is
-your confidence that every field is supported. Return this market and every supplied
+your confidence that every field is supported. Cite at least one supplied, nonempty
+source field for each outcome using citations. Return this market and every supplied
 outcome exactly once."""
 
 CLASSIFY_PROMPT = """/no_think
@@ -119,6 +126,59 @@ def default_generation_settings(
     role: Literal["parse", "classify"],
 ) -> GenerationSettings:
     return generation_settings(DiscoveryConfig(), role=role)
+
+
+def consensus_inference_fingerprints(
+    config: DiscoveryConfig,
+    primary_manifest: ModelManifest,
+    verifier_manifest: ModelManifest,
+) -> dict[str, str]:
+    """Build every role fingerprint from the shared production contracts."""
+    fingerprints: dict[str, str] = {}
+    for role, manifest, model in (
+        ("primary", primary_manifest, config.primary_model),
+        ("verifier", verifier_manifest, config.verifier_model),
+    ):
+        for task, prompt, prompt_version, request_hash, response_model in (
+            (
+                "parse",
+                PARSE_PROMPT,
+                PARSE_PROMPT_VERSION,
+                parse_request_hash(),
+                ParsedMarket,
+            ),
+            (
+                "classify",
+                CLASSIFY_PROMPT,
+                CLASSIFY_PROMPT_VERSION,
+                classify_request_hash(),
+                AtomicPairAssessment,
+            ),
+        ):
+            fingerprints[f"{role}_{task}"] = inference_fingerprint(
+                manifest,
+                role=f"{role}_{task}",
+                requested_model=model,
+                prompt_version=prompt_version,
+                prompt_hash=text_sha256(prompt),
+                request_schema_hash=request_hash,
+                schema_hash=model_schema_hash(response_model),
+                settings=generation_settings(
+                    config,
+                    role=cast(Literal["parse", "classify"], task),
+                ),
+            )
+    fingerprints["nli"] = nli_inference_fingerprint(
+        config.nli_model,
+        config.nli_revision,
+    )
+    fingerprints["consensus"] = canonical_json_sha256(
+        {
+            "protocol": DUAL_CONSENSUS_PROTOCOL_VERSION,
+            **fingerprints,
+        }
+    )
+    return fingerprints
 
 
 def deterministic_extract(
@@ -267,10 +327,13 @@ def conformance_pair_request(model_id: str) -> PairRequest:
         "jurisdiction": None,
         "parse_confidence": 1.0,
         "parse_status": "parsed",
-        "parser_model": model_id,
+        "primary_parser_model": model_id,
+        "verifier_parser_model": model_id,
         "prompt_version": PARSE_PROMPT_VERSION,
-        "inference_fingerprint": None,
-        "model_profile_id": None,
+        "primary_parse_fingerprint": None,
+        "verifier_parse_fingerprint": None,
+        "consensus_fingerprint": None,
+        "automation_profile_id": None,
         "source_schema": SOURCE_SCHEMA,
     }
     yes = PropositionRecord.model_validate(

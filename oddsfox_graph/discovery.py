@@ -21,8 +21,12 @@ from ._discovery.pipeline import (
     PARSE_ERROR_COLUMNS,
     PROPOSITION_COLUMNS,
     REJECTED_EDGE_COLUMNS,
-    REVIEW_COLUMNS,
     discover,
+)
+from ._discovery.consensus import (
+    MODEL_ASSESSMENT_COLUMNS,
+    PARSE_ASSESSMENT_COLUMNS,
+    QUARANTINE_COLUMNS,
 )
 from ._discovery.workspace import CANDIDATE_COLUMNS
 
@@ -33,7 +37,9 @@ __all__ = [
     "PARSE_ERROR_COLUMNS",
     "PROPOSITION_COLUMNS",
     "REJECTED_EDGE_COLUMNS",
-    "REVIEW_COLUMNS",
+    "MODEL_ASSESSMENT_COLUMNS",
+    "PARSE_ASSESSMENT_COLUMNS",
+    "QUARANTINE_COLUMNS",
     "AtomicPairAssessment",
     "DiscoveryConfig",
     "InferenceCache",

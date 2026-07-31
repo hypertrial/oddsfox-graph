@@ -3,7 +3,7 @@ from __future__ import annotations
 import shutil
 import tempfile
 from pathlib import Path
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from typing import Any, cast
 
 from .bulk import create_and_fill, insert_rows
@@ -21,18 +21,14 @@ CANDIDATE_COLUMNS = {
     "rule_status": "VARCHAR",
     "classification_relation": "VARCHAR",
     "classification_confidence": "DOUBLE",
-    "atomic_a_implies_b": "VARCHAR",
-    "atomic_b_implies_a": "VARCHAR",
-    "atomic_can_both_be_true": "VARCHAR",
-    "atomic_must_one_be_true": "VARCHAR",
-    "atomic_logically_related": "VARCHAR",
-    "supporting_fields": "VARCHAR",
+    "primary_relation": "VARCHAR",
+    "primary_confidence": "DOUBLE",
+    "verifier_relation": "VARCHAR",
+    "verifier_confidence": "DOUBLE",
+    "consensus_status": "VARCHAR",
     "a_implies_b": "BOOLEAN",
     "b_implies_a": "BOOLEAN",
     "explanation": "VARCHAR",
-    "assumptions": "VARCHAR[]",
-    "requires_review": "BOOLEAN",
-    "unsupported_assumption": "BOOLEAN",
     "nli_a_to_b_entailment": "DOUBLE",
     "nli_a_to_b_contradiction": "DOUBLE",
     "nli_a_to_b_neutral": "DOUBLE",
@@ -42,10 +38,15 @@ CANDIDATE_COLUMNS = {
     "nli_action": "VARCHAR",
     "status": "VARCHAR",
     "discovery_method": "VARCHAR",
-    "model_version": "VARCHAR",
     "prompt_version": "VARCHAR",
-    "inference_fingerprint": "VARCHAR",
-    "model_profile_id": "VARCHAR",
+    "primary_model_version": "VARCHAR",
+    "verifier_model_version": "VARCHAR",
+    "primary_assessment_id": "VARCHAR",
+    "verifier_assessment_id": "VARCHAR",
+    "primary_inference_fingerprint": "VARCHAR",
+    "verifier_inference_fingerprint": "VARCHAR",
+    "consensus_fingerprint": "VARCHAR",
+    "automation_profile_id": "VARCHAR",
 }
 
 CANDIDATE_BLOCK_COLUMNS = {
@@ -178,13 +179,22 @@ class CandidateStore:
         self._record_materialization(rows)
         return rows
 
-    def mark_classification_budget(self) -> None:
+    def mark_classification_budget(
+        self,
+        eligible_proposition_ids: list[str],
+    ) -> None:
         self.db.execute(
             """
             UPDATE relation_candidates_work
-            SET status = 'not_classified_budget'
+            SET status = CASE
+                WHEN proposition_a_id IN (SELECT unnest(?))
+                 AND proposition_b_id IN (SELECT unnest(?))
+                    THEN 'not_classified_budget'
+                ELSE 'quarantined_parse'
+            END
             WHERE discovery_method IS NULL
-            """
+            """,
+            [eligible_proposition_ids, eligible_proposition_ids],
         )
 
     def prepare_inference_queue(self, limit: int) -> None:
@@ -204,6 +214,7 @@ class CandidateStore:
                 proposition_b_id
             FROM relation_candidates_work
             WHERE discovery_method IS NULL
+              AND status IN ('pending', 'not_classified_budget')
             ORDER BY queue_index
             LIMIT ?
             """,
@@ -253,21 +264,17 @@ class CandidateStore:
             SET
                 classification_relation = NULL,
                 classification_confidence = NULL,
-                atomic_a_implies_b = NULL,
-                atomic_b_implies_a = NULL,
-                atomic_can_both_be_true = NULL,
-                atomic_must_one_be_true = NULL,
-                atomic_logically_related = NULL,
-                supporting_fields = NULL,
+                primary_relation = NULL,
+                primary_confidence = NULL,
+                verifier_relation = NULL,
+                verifier_confidence = NULL,
+                consensus_status = NULL,
                 a_implies_b = NULL,
                 b_implies_a = NULL,
                 explanation = CASE
                     WHEN deterministic_relation IS NULL THEN NULL
                     ELSE explanation
                 END,
-                assumptions = [],
-                requires_review = false,
-                unsupported_assumption = false,
                 nli_a_to_b_entailment = NULL,
                 nli_a_to_b_contradiction = NULL,
                 nli_a_to_b_neutral = NULL,
@@ -275,10 +282,15 @@ class CandidateStore:
                 nli_b_to_a_contradiction = NULL,
                 nli_b_to_a_neutral = NULL,
                 nli_action = NULL,
-                model_version = NULL,
                 prompt_version = NULL,
-                inference_fingerprint = NULL,
-                model_profile_id = NULL,
+                primary_model_version = NULL,
+                verifier_model_version = NULL,
+                primary_assessment_id = NULL,
+                verifier_assessment_id = NULL,
+                primary_inference_fingerprint = NULL,
+                verifier_inference_fingerprint = NULL,
+                consensus_fingerprint = NULL,
+                automation_profile_id = NULL,
                 status = CASE
                     WHEN deterministic_relation IS NULL THEN 'pending'
                     ELSE 'accepted'
@@ -600,15 +612,6 @@ class CandidateStore:
         self._update_columns(
             rows,
             (
-                "classification_relation",
-                "classification_confidence",
-                "supporting_fields",
-                "a_implies_b",
-                "b_implies_a",
-                "explanation",
-                "assumptions",
-                "requires_review",
-                "unsupported_assumption",
                 "nli_a_to_b_entailment",
                 "nli_a_to_b_contradiction",
                 "nli_a_to_b_neutral",
@@ -616,12 +619,6 @@ class CandidateStore:
                 "nli_b_to_a_contradiction",
                 "nli_b_to_a_neutral",
                 "nli_action",
-                "status",
-                "discovery_method",
-                "model_version",
-                "prompt_version",
-                "inference_fingerprint",
-                "model_profile_id",
             ),
         )
 
@@ -631,24 +628,25 @@ class CandidateStore:
             (
                 "classification_relation",
                 "classification_confidence",
-                "atomic_a_implies_b",
-                "atomic_b_implies_a",
-                "atomic_can_both_be_true",
-                "atomic_must_one_be_true",
-                "atomic_logically_related",
-                "supporting_fields",
+                "primary_relation",
+                "primary_confidence",
+                "verifier_relation",
+                "verifier_confidence",
+                "consensus_status",
                 "a_implies_b",
                 "b_implies_a",
                 "explanation",
-                "assumptions",
-                "requires_review",
-                "unsupported_assumption",
                 "status",
                 "discovery_method",
-                "model_version",
                 "prompt_version",
-                "inference_fingerprint",
-                "model_profile_id",
+                "primary_model_version",
+                "verifier_model_version",
+                "primary_assessment_id",
+                "verifier_assessment_id",
+                "primary_inference_fingerprint",
+                "verifier_inference_fingerprint",
+                "consensus_fingerprint",
+                "automation_profile_id",
             ),
         )
 
@@ -846,7 +844,7 @@ class CandidateStore:
             SELECT
                 count(*)::INTEGER AS candidate_edges,
                 count(*) FILTER (
-                    WHERE discovery_method IN ('generative_model', 'nli')
+                    WHERE discovery_method = 'generative_consensus'
                 )::INTEGER AS classified_pairs,
                 count(*) FILTER (
                     WHERE status = 'not_classified_budget'
@@ -858,6 +856,44 @@ class CandidateStore:
             key: int(cast(int, value))
             for key, value in row.items()
         }
+
+    def matching_pair_ids(
+        self,
+        pairs: Sequence[tuple[str, str, str]],
+    ) -> frozenset[str]:
+        """Return qualification case IDs whose canonical pair was retrieved."""
+        if not pairs:
+            return frozenset()
+        self.db.execute("DROP TABLE IF EXISTS qualification_expected_pairs")
+        self.db.execute(
+            """
+            CREATE TEMP TABLE qualification_expected_pairs (
+                case_id VARCHAR NOT NULL,
+                proposition_a_id VARCHAR NOT NULL,
+                proposition_b_id VARCHAR NOT NULL
+            )
+            """
+        )
+        self.db.executemany(
+            "INSERT INTO qualification_expected_pairs VALUES (?, ?, ?)",
+            [
+                (case_id, min(first, second), max(first, second))
+                for case_id, first, second in pairs
+            ],
+        )
+        rows = self.db.rows(
+            """
+            SELECT e.case_id
+            FROM qualification_expected_pairs e
+            JOIN relation_candidates_work c USING (
+                proposition_a_id,
+                proposition_b_id
+            )
+            ORDER BY e.case_id
+            """
+        )
+        self.db.execute("DROP TABLE qualification_expected_pairs")
+        return frozenset(str(row["case_id"]) for row in rows)
 
     def seal(self) -> None:
         if not self._closed:

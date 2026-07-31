@@ -6,6 +6,7 @@ import argparse
 import hashlib
 import json
 import platform
+import shutil
 import statistics
 import subprocess
 import sys
@@ -39,13 +40,14 @@ from oddsfox_graph._discovery.versions import (
     PERFORMANCE_BUDGET_VERSION,
 )
 from oddsfox_graph.discovery import DiscoveryConfig, discover
+from oddsfox_graph.qualification import qualify_catalog
 from oddsfox_graph.queries import DuckDB, q
 
 
 class _Response:
-    def __init__(self, parsed: object) -> None:
+    def __init__(self, parsed: object, model: str) -> None:
         self.parsed = parsed
-        self.observed_model = "Qwen/Qwen3-4B-GGUF:Q8_0"
+        self.observed_model = model
         self.usage = {
             "input_tokens": 20,
             "output_tokens": 10,
@@ -54,6 +56,15 @@ class _Response:
 
 
 class _Client:
+    def __init__(self, model: str) -> None:
+        self.model = model
+
+    async def aclose(self) -> None:
+        return None
+
+    async def preflight(self, **_: object) -> dict[str, str]:
+        return {"runtime_version": "test-fixture", "model": self.model}
+
     async def generate(self, **kwargs: object) -> _Response:
         payload = kwargs["payload"]
         if kwargs["response_model"] is ParsedMarket:
@@ -81,25 +92,72 @@ class _Client:
                                 else "positive"
                             ),
                             parse_confidence=0.99,
+                            citations=["question", "outcome"],
                         )
                         for outcome in market["outcomes"]
                     ]
-                )
+                ),
+                self.model,
             )
+        identifier = str(payload["proposition_A"]["proposition_id"])
+        relation = next(
+            (
+                value
+                for value in (
+                    "complement",
+                    "equivalent",
+                    "mutually_exclusive",
+                    "implies",
+                    "compatible",
+                    "unrelated",
+                    "uncertain",
+                )
+                if f"-{value}-" in identifier
+            ),
+            "unrelated",
+        )
+        judgments = {
+            "a_implies_b": "no",
+            "b_implies_a": "no",
+            "can_both_be_true": "yes",
+            "must_one_be_true": "no",
+            "logically_related": "yes",
+        }
+        if relation == "complement":
+            judgments.update(can_both_be_true="no", must_one_be_true="yes")
+        elif relation == "equivalent":
+            judgments.update(a_implies_b="yes", b_implies_a="yes")
+        elif relation == "mutually_exclusive":
+            judgments.update(can_both_be_true="no")
+        elif relation == "implies":
+            judgments.update(a_implies_b="yes")
+        elif relation == "unrelated":
+            judgments.update(logically_related="no")
+        elif relation == "uncertain":
+            judgments = {key: "unknown" for key in judgments}
+        supporting = (
+            []
+            if relation in {"unrelated", "uncertain"}
+            else [
+                {
+                    "proposition": side,
+                    "field": "question",
+                    "value": str(payload[f"proposition_{side}"]["question"]),
+                }
+                for side in ("A", "B")
+            ]
+        )
         return _Response(
             AtomicPairAssessment(
                 pair_id=str(payload["pair_id"]),
-                a_implies_b="no",
-                b_implies_a="no",
-                can_both_be_true="yes",
-                must_one_be_true="no",
-                logically_related="no",
+                **judgments,
                 confidence=0.99,
-                supporting_fields=[],
+                supporting_fields=supporting,
                 assumptions=[],
                 unsupported_assumption=False,
-                requires_review=False,
-            )
+                requires_review=relation == "uncertain",
+            ),
+            self.model,
         )
 
 
@@ -129,13 +187,17 @@ def _worker(args: argparse.Namespace) -> int:
         max_propositions=args.size,
         max_candidates=args.max_candidates,
         max_llm_pairs=args.max_llm_pairs,
+        progress_format="quiet",
     )
     started = time.perf_counter()
     stats = discover(
         args.input,
         args.out,
         config=config,
-        _client=_Client(),
+        _primary_client=_Client("Qwen/Qwen3-4B-GGUF:Q8_0"),
+        _verifier_client=_Client(
+            "ibm-granite/granite-3.3-2b-instruct-GGUF:Q8_0"
+        ),
         _embedder=_embeddings,
     )
     elapsed = time.perf_counter() - started
@@ -511,11 +573,29 @@ def _collect_samples(
 ) -> tuple[str, list[dict[str, Any]]]:
     changed_input = runs_root / "one-market-changed.parquet"
     changed_market_id = _changed_catalog(input_path, changed_input)
+    qualification_cache = runs_root / "qualification-seed-cache"
+    qualify_catalog(
+        input_path,
+        runs_root / "qualification-seed-output",
+        config=DiscoveryConfig(
+            cache_dir=qualification_cache,
+            top_k=args.top_k,
+            max_candidates=args.max_candidates,
+            max_llm_pairs=args.max_llm_pairs,
+            progress_format="quiet",
+        ),
+        _primary_client=_Client("Qwen/Qwen3-4B-GGUF:Q8_0"),
+        _verifier_client=_Client(
+            "ibm-granite/granite-3.3-2b-instruct-GGUF:Q8_0"
+        ),
+        _embedder=_embeddings,
+    )
     samples: list[dict[str, Any]] = []
     for repetition in range(1, args.repetitions + 1):
         for size in sizes:
             run_root = runs_root / f"r{repetition}-{size}"
             cache = run_root / "cache"
+            shutil.copytree(qualification_cache, cache)
             clean_out = run_root / "clean"
             clean = _run_worker(
                 input_path=input_path,
@@ -649,7 +729,9 @@ def main() -> int:
         "top_k": args.top_k,
         "max_candidates": args.max_candidates,
         "max_llm_pairs": args.max_llm_pairs,
+        "qualification_cache_preseeded": True,
     }
+    acceptance = _acceptance(summary, budget)
     result = {
         "input": str(args.input.resolve()),
         "changed_market_id": changed_market_id,
@@ -662,7 +744,8 @@ def main() -> int:
         "samples": samples,
         "summary": summary,
         "performance_budget": budget,
-        "acceptance": _acceptance(summary, budget),
+        "passed": acceptance["passed"],
+        "acceptance": acceptance,
     }
     atomic_write_json(root, result)
     return int(args.require_gates and not result["acceptance"]["passed"])

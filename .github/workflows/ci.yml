@@ -37,7 +37,7 @@ jobs:
           test ! -e oddsfox_graph/build.py
           test ! -e oddsfox_graph/review.py
           test ! -d oddsfox_graph/taxonomies
-          if rg -ni 'review-export|review-score|pricing-file|pricing_file|source_format|input_granularity_seconds|wc2026|minutely|hourly|\[discovery\]' oddsfox_graph docs README.md pyproject.toml scripts; then
+          if rg -ni 'review-export|review-score|benchmark-export|benchmark-compile|benchmark-summary|model-profile|ready_to_scale|pricing-file|pricing_file|review_queue|benchmark\.parquet|evaluation_report|source_format|input_granularity_seconds|wc2026|minutely|hourly|\.\[discovery\]' oddsfox_graph docs README.md pyproject.toml scripts; then
             echo "Removed compatibility surface detected"
             exit 1
           fi
@@ -45,4 +45,5 @@ jobs:
       - run: python -m build
       - run: python -m pip install -c constraints-dev.txt --force-reinstall dist/*.whl
       - run: python -I -c "from oddsfox_graph.discovery import DiscoveryConfig"
+      - run: python -I -c "from oddsfox_graph.graph import Graph"
       - run: python -I -m oddsfox_graph.cli --help

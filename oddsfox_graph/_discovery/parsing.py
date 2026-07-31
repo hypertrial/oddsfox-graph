@@ -44,17 +44,39 @@ def validate_parsed_market(source: SourceMarket, parsed: ParsedMarket) -> None:
         raise ValueError(
             f"Structured parse outcomes for {source.market_id!r} do not match input"
         )
+    available_citations: set[str] = {"question", "outcome"}
+    for field, value in (
+        ("description", source.description),
+        ("event_id", source.event_id),
+        ("event_slug", source.event_slug),
+        ("category", source.category),
+        ("tags", source.tags),
+        ("time_start", source.time_start),
+        ("time_end", source.time_end),
+    ):
+        if value not in (None, "", ()):
+            available_citations.add(field)
+    for outcome in parsed.propositions:
+        invalid = {str(value) for value in outcome.citations} - available_citations
+        if invalid:
+            raise ValueError(
+                "Parse citations reference empty or unavailable source fields: "
+                + ", ".join(sorted(invalid))
+            )
 
 
 def proposition_row(
     market: SourceMarket,
     source: SourceOutcome,
     parsed: ParsedOutcome | None,
-    observed_model: str,
+    primary_model: str,
+    verifier_model: str,
     source_schema: str,
     error: str | None,
-    inference_fingerprint: str,
-    model_profile_id: str | None,
+    primary_fingerprint: str,
+    verifier_fingerprint: str,
+    consensus_fingerprint: str,
+    automation_profile_id: str | None,
 ) -> dict[str, Any]:
     original_subject = parsed.subject if parsed else []
     object_original = parsed.object if parsed else None
@@ -148,10 +170,13 @@ def proposition_row(
             parsed.parse_confidence if parsed and not error else 0.0
         ),
         "parse_status": "parsed" if parsed and not error else "failed",
-        "parser_model": observed_model,
+        "primary_parser_model": primary_model,
+        "verifier_parser_model": verifier_model,
         "prompt_version": PARSE_PROMPT_VERSION,
-        "inference_fingerprint": inference_fingerprint,
-        "model_profile_id": model_profile_id,
+        "primary_parse_fingerprint": primary_fingerprint,
+        "verifier_parse_fingerprint": verifier_fingerprint,
+        "consensus_fingerprint": consensus_fingerprint,
+        "automation_profile_id": automation_profile_id,
         "source_schema": source_schema,
         "_expected_tokens": len(market.outcomes),
         "_is_active": market.is_active,

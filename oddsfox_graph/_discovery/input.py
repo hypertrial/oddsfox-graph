@@ -94,7 +94,7 @@ def load_source_markets(
         selected_ids = (
             _select_market_summaries(eligible_summaries, max_propositions)
             if max_propositions is not None
-            else None
+            else [str(row["market_id"]) for row in eligible_summaries]
         )
         markets = _load_compact_markets(
             db,

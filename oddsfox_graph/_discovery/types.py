@@ -82,7 +82,8 @@ class IncrementalPreparation:
 @dataclass(frozen=True)
 class ParsingStageResult:
     propositions: list[dict[str, Any]]
-    reviews: list[dict[str, Any]]
+    parse_assessments: list[dict[str, Any]]
+    quarantines: list[dict[str, Any]]
 
 
 @dataclass(frozen=True)
@@ -92,16 +93,17 @@ class RetrievalStageResult:
 
 
 @dataclass(frozen=True)
-class AdjudicationStageResult:
+class ConsensusStageResult:
     edges: list[dict[str, Any]]
-    reviews: list[dict[str, Any]]
+    model_assessments: list[dict[str, Any]]
+    quarantines: list[dict[str, Any]]
 
 
 @dataclass(frozen=True)
 class SolvingStageResult:
     accepted_edges: list[dict[str, Any]]
     rejected_edges: list[dict[str, Any]]
-    reviews: list[dict[str, Any]]
+    quarantines: list[dict[str, Any]]
     stats: dict[str, int]
 
 

@@ -1,52 +1,32 @@
-# CLI Reference
+# CLI
 
-## `discover`
+Current commands:
 
-Required: `--input`, `--out`.
+- pipeline: `doctor`, `qualify`, `discover`, `release-validate`, `run-summary`;
+- runtime: `model-manifest`, `model-check`;
+- graph: `search`, `nodes`, `edges`, `condition`, `explain`, `explain-edge`,
+  `prove`, `why-not`.
 
-Runtime and provenance: `--cache-dir`, `--benchmark`, `--incremental-from`,
-`--compute-profile`, `--llm-base-url`, `--llm-runtime`, `--model-manifest`,
-`--model-profile`, `--allow-remote-inference`, `--require-ready`,
-`--allow-unbenchmarked-rules`, `--offline`.
+`discover`, `qualify`, and `doctor` require the compact input, cache directory,
+primary/verifier manifests and endpoints, and compute profile. Discovery also
+supports offline replay, incremental baselines, confidence limits, bounded
+retrieval/classification settings, and progress formatting.
 
-Models and acceptance: `--parse-model`, `--classify-model`,
-`--embedding-model`, `--embedding-revision`, `--accept-confidence`,
-`--relation-threshold`, `--parse-confidence`.
+The shared runtime flags are `--primary-model-manifest`,
+`--verifier-model-manifest`, `--primary-base-url`, `--verifier-base-url`, and
+`--allow-remote-inference`. Discovery selects progress rendering with
+`--progress-format`; commands select final rendering with `--output-format`.
 
-Limits: `--top-k`, `--embedding-block-size`, `--max-propositions`,
-`--max-candidates`, `--max-llm-pairs`, `--llm-concurrency`.
+All graph commands accept `--output-format table|json|jsonl`. `doctor`,
+`qualify`, runtime checks, release validation, and summaries accept table or JSON.
+Progress is always written to stderr; result data is written to stdout.
+Progress events cover stage boundaries, retries, bounded parse/classification
+completion, cache and candidate reuse, quarantine totals, runtime/RSS, publication
+storage, and terminal completion.
 
-Sampling: `--sampling-seed`, `--temperature`, `--generation-top-p`,
-`--generation-top-k`, `--presence-penalty`, `--parse-max-output-tokens`,
-`--classify-max-output-tokens`.
+`prove` accepts `--from`, `--to`, `--max-hops`, and `--max-paths`. Paths are
+ordered by fewest hops, highest bottleneck confidence, and stable node IDs.
 
-`--cache-dir` must be empty or contain the current
-`inference-cache-v6.sqlite3`; offline mode opens it read-only. Earlier cache,
-profile, and incremental formats are rejected.
-
-## Benchmark commands
-
-- `benchmark-export`: `--input`, `--out`, `--output-dir`, `--parse-count`,
-  `--pair-count`, `--seed`.
-- `benchmark-compile`: `--input`, `--review-a`, `--review-b`,
-  `--adjudication`, `--sampling-manifest`, `--output`.
-- `evaluate`: `--out`, `--benchmark`, `--compute-profile`, `--output`.
-- `benchmark-summary`: `--out`.
-
-## Model commands
-
-- `model-manifest`: `--model-path`, `--model-id`, `--revision`, `--license`,
-  `--runtime`, `--llm-base-url`, `--allow-remote-inference`, `--output`.
-- `model-check`: `--model-manifest`, `--llm-base-url`,
-  `--allow-remote-inference`.
-- `model-profile`: `--input`, `--benchmark`, `--cache-dir`,
-  `--model-manifest`, `--out`, `--allow-remote-inference`.
-
-## Query commands
-
-- `nodes`: `--out`, `--top`.
-- `edges`: `--out`, `--edge-type`, `--top`.
-- `condition`: `--out`, `--a`, `--b`.
-- `explain`: `--out`, `--node`.
-- `explain-edge`: `--out`, `--src`, `--dst`, `--edge-type`.
-- `search`: `--out`, `--query`, `--top`.
+`why-not` accepts a pair and relation. It distinguishes accepted, solver-rejected,
+quarantined parse, model disagreement, assumption, invalid citation, NLI veto,
+below threshold, inference failure, not retrieved, and unknown node outcomes.

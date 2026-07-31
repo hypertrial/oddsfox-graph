@@ -10,15 +10,32 @@ from urllib.parse import urlsplit, urlunsplit
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
 
+from .contracts import DEFAULT_PRIMARY_MODEL, DEFAULT_VERIFIER_MODEL
 from .provenance import canonical_json_sha256, sha256_file
 from .versions import (
+    AUTOMATION_PROFILE_SCHEMA_VERSION,
     INFERENCE_FINGERPRINT_VERSION,
     MODEL_MANIFEST_SCHEMA_VERSION,
-    MODEL_PROFILE_SCHEMA_VERSION,
 )
 
 
 APPROVED_OPEN_LICENSES = frozenset({"Apache-2.0"})
+
+
+def validate_consensus_model_pair(
+    primary: ModelManifest,
+    verifier: ModelManifest,
+) -> None:
+    if primary.model_id != DEFAULT_PRIMARY_MODEL:
+        raise ValueError(
+            f"Primary discovery model must be {DEFAULT_PRIMARY_MODEL!r}"
+        )
+    if verifier.model_id != DEFAULT_VERIFIER_MODEL:
+        raise ValueError(
+            f"Verifier discovery model must be {DEFAULT_VERIFIER_MODEL!r}"
+        )
+    if primary.artifact_sha256 == verifier.artifact_sha256:
+        raise ValueError("Primary and verifier model artifacts must be independent")
 
 
 class InferenceError(RuntimeError):
@@ -57,7 +74,7 @@ class ModelManifest(BaseModel):
     inference_origin: str
 
 
-class ProfileRelation(BaseModel):
+class QualifiedRelation(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     enabled: bool
@@ -66,35 +83,29 @@ class ProfileRelation(BaseModel):
     precision: float = Field(ge=0.0, le=1.0)
 
 
-class NliProfileAction(BaseModel):
+class AutomationProfile(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    enabled: bool
-    threshold: float = Field(ge=0.0, le=1.0)
-    support: int = Field(ge=0)
-    precision: float = Field(ge=0.0, le=1.0)
-
-
-class ModelProfile(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    schema_version: Literal["model-profile-v2"] = MODEL_PROFILE_SCHEMA_VERSION
+    schema_version: Literal["automation-profile-v1"] = (
+        AUTOMATION_PROFILE_SCHEMA_VERSION
+    )
     profile_id: str
-    model_manifest_id: str
-    model_manifest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    runtime: Literal["llama.cpp", "vllm"]
-    runtime_version: str
-    benchmark_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    calibration_partition_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    status: Literal["AUTOMATION_VALIDATED", "QUALIFICATION_FAILED"]
+    case_set_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    qualification_generator_version: str
+    retrieval_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    primary_manifest_id: str
+    primary_manifest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    verifier_manifest_id: str
+    verifier_manifest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     parse_prompt_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     parse_schema_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     classify_prompt_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     classify_schema_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     request_contract_hashes: dict[str, str]
     inference_fingerprints: dict[str, str]
-    relations: dict[str, ProfileRelation]
-    nli_actions: dict[str, NliProfileAction]
-    structured_output_validity: float = Field(ge=0.0, le=1.0)
+    relations: dict[str, QualifiedRelation]
+    structured_output_validity: dict[str, float]
     metrics: dict[str, Any]
 
 
@@ -259,17 +270,17 @@ def load_model_manifest(path: Path) -> ModelManifest:
     return manifest
 
 
-def load_model_profile(path: Path) -> ModelProfile:
+def load_automation_profile(path: Path) -> AutomationProfile:
     try:
         raw = json.loads(path.resolve().read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
-        raise ValueError(f"Invalid model profile {path}: {exc}") from exc
-    profile = ModelProfile.model_validate(raw)
+        raise ValueError(f"Invalid automation profile {path}: {exc}") from exc
+    profile = AutomationProfile.model_validate(raw)
     profile_content = profile.model_dump(mode="json")
     profile_content.pop("schema_version", None)
     profile_content.pop("profile_id", None)
     if profile.profile_id != canonical_json_sha256(profile_content):
-        raise ValueError("Model profile ID does not match its canonical content")
+        raise ValueError("Automation profile ID does not match its canonical content")
     return profile
 
 
@@ -281,32 +292,38 @@ def load_compute_profile(path: Path) -> ComputeProfile:
     return ComputeProfile.model_validate(raw)
 
 
-def validate_profile_match(
-    profile: ModelProfile,
-    manifest: ModelManifest,
+def validate_automation_profile_match(
+    profile: AutomationProfile,
+    primary_manifest: ModelManifest,
+    verifier_manifest: ModelManifest,
     fingerprints: dict[str, str],
     request_contract_hashes: dict[str, str],
     *,
+    retrieval_fingerprint: str,
     parse_prompt_hash: str,
     parse_schema_hash: str,
     classify_prompt_hash: str,
     classify_schema_hash: str,
 ) -> None:
-    if profile.model_manifest_id != manifest.manifest_id:
-        raise ValueError("Model profile does not match the model manifest ID")
-    if profile.model_manifest_sha256 != manifest_sha256(manifest):
-        raise ValueError("Model profile does not match the model manifest content")
-    if profile.runtime != manifest.runtime or (
-        profile.runtime_version != manifest.runtime_version
+    if profile.retrieval_fingerprint != retrieval_fingerprint:
+        raise ValueError(
+            "Automation profile retrieval contract does not match this run"
+        )
+    if profile.primary_manifest_id != primary_manifest.manifest_id or (
+        profile.primary_manifest_sha256 != manifest_sha256(primary_manifest)
     ):
-        raise ValueError("Model profile runtime does not match the model manifest")
+        raise ValueError("Automation profile does not match the primary model manifest")
+    if profile.verifier_manifest_id != verifier_manifest.manifest_id or (
+        profile.verifier_manifest_sha256 != manifest_sha256(verifier_manifest)
+    ):
+        raise ValueError("Automation profile does not match the verifier model manifest")
     if profile.inference_fingerprints != fingerprints:
         raise ValueError(
-            "Model profile inference fingerprints do not match this run"
+            "Automation profile inference fingerprints do not match this run"
         )
     if profile.request_contract_hashes != request_contract_hashes:
         raise ValueError(
-            "Model profile request contracts do not match this run"
+            "Automation profile request contracts do not match this run"
         )
     expected_protocol_hashes = {
         "parse_prompt_hash": parse_prompt_hash,
@@ -320,9 +337,11 @@ def validate_profile_match(
     }
     if actual_protocol_hashes != expected_protocol_hashes:
         raise ValueError(
-            "Model profile prompt or response schema contracts do not match "
+            "Automation profile prompt or response schema contracts do not match "
             "this run"
         )
+    if profile.status != "AUTOMATION_VALIDATED":
+        raise ValueError("Automation profile did not pass qualification")
 
 
 class LocalStructuredClient:

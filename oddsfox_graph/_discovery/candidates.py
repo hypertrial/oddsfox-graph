@@ -168,6 +168,8 @@ def generate_candidate_store(
             add_structural("entity", subject, proposition_id)
 
         high_confidence = (
+            proposition.get("parse_status") == "parsed"
+            and
             float(proposition.get("parse_confidence") or 0.0)
             >= float(config.parse_confidence)
         )
@@ -1169,18 +1171,14 @@ SELECT
     CASE WHEN d.rule_id IS NULL THEN NULL ELSE 'enabled' END AS rule_status,
     NULL::VARCHAR AS classification_relation,
     NULL::DOUBLE AS classification_confidence,
-    NULL::VARCHAR AS atomic_a_implies_b,
-    NULL::VARCHAR AS atomic_b_implies_a,
-    NULL::VARCHAR AS atomic_can_both_be_true,
-    NULL::VARCHAR AS atomic_must_one_be_true,
-    NULL::VARCHAR AS atomic_logically_related,
-    NULL::VARCHAR AS supporting_fields,
+    NULL::VARCHAR AS primary_relation,
+    NULL::DOUBLE AS primary_confidence,
+    NULL::VARCHAR AS verifier_relation,
+    NULL::DOUBLE AS verifier_confidence,
+    NULL::VARCHAR AS consensus_status,
     NULL::BOOLEAN AS a_implies_b,
     NULL::BOOLEAN AS b_implies_a,
     d.explanation,
-    []::VARCHAR[] AS assumptions,
-    false AS requires_review,
-    false AS unsupported_assumption,
     NULL::DOUBLE AS nli_a_to_b_entailment,
     NULL::DOUBLE AS nli_a_to_b_contradiction,
     NULL::DOUBLE AS nli_a_to_b_neutral,
@@ -1191,10 +1189,15 @@ SELECT
     CASE WHEN d.rule_id IS NULL THEN 'pending' ELSE 'accepted' END AS status,
     CASE WHEN d.rule_id IS NULL THEN NULL ELSE 'deterministic' END
         AS discovery_method,
-    NULL::VARCHAR AS model_version,
     NULL::VARCHAR AS prompt_version,
-    NULL::VARCHAR AS inference_fingerprint,
-    NULL::VARCHAR AS model_profile_id
+    NULL::VARCHAR AS primary_model_version,
+    NULL::VARCHAR AS verifier_model_version,
+    NULL::VARCHAR AS primary_assessment_id,
+    NULL::VARCHAR AS verifier_assessment_id,
+    NULL::VARCHAR AS primary_inference_fingerprint,
+    NULL::VARCHAR AS verifier_inference_fingerprint,
+    NULL::VARCHAR AS consensus_fingerprint,
+    NULL::VARCHAR AS automation_profile_id
 FROM prioritized p
 LEFT JOIN accepted_deterministic_pairs d USING (
     proposition_a_id,

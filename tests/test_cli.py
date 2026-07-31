@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-from pathlib import Path
 
 import pytest
 
@@ -16,29 +15,40 @@ def _commands(parser: argparse.ArgumentParser) -> set[str]:
     raise AssertionError("No argparse subcommands found")
 
 
-def test_cli_contains_only_current_workflows() -> None:
-    parser = build_parser()
-    commands = _commands(parser)
-    assert {"build", "review-export", "review-score"}.isdisjoint(commands)
-    assert {
+def test_cli_contains_only_v09_workflows() -> None:
+    commands = _commands(build_parser())
+    assert commands == {
         "discover",
-        "benchmark-export",
-        "benchmark-compile",
-        "evaluate",
+        "doctor",
+        "qualify",
+        "release-validate",
+        "run-summary",
         "model-manifest",
         "model-check",
-        "model-profile",
         "nodes",
         "edges",
         "condition",
         "explain",
         "explain-edge",
         "search",
+        "prove",
+        "why-not",
+    }
+
+
+@pytest.mark.parametrize(
+    "command",
+    (
+        "build",
+        "review-export",
+        "review-score",
+        "benchmark-export",
+        "benchmark-compile",
+        "evaluate",
+        "model-profile",
         "benchmark-summary",
-    } <= commands
-
-
-@pytest.mark.parametrize("command", ["build", "review-export", "review-score"])
+    ),
+)
 def test_removed_commands_are_rejected(command: str) -> None:
     with pytest.raises(SystemExit) as exc:
         build_parser().parse_args([command])
@@ -46,24 +56,46 @@ def test_removed_commands_are_rejected(command: str) -> None:
 
 
 @pytest.mark.parametrize(
-    ("command", "flag"),
-    [
-        ("evaluate", "--pricing-file"),
-        ("discover", "--pricing-file"),
-        ("discover", "--taxonomy"),
-    ],
+    "flag",
+    (
+        "--benchmark",
+        "--model-profile",
+        "--require-ready",
+        "--pricing-file",
+        "--parse-model",
+        "--classify-model",
+    ),
 )
-def test_removed_flags_are_rejected(
-    tmp_path: Path,
-    command: str,
-    flag: str,
-) -> None:
-    arguments = [command, "--out", str(tmp_path)]
-    if command == "evaluate":
-        arguments.extend(
-            ["--benchmark", str(tmp_path / "benchmark.parquet")]
-        )
-    arguments.extend([flag, str(tmp_path / "removed-value")])
+def test_removed_discovery_flags_are_rejected(flag: str) -> None:
+    required = [
+        "discover",
+        "--input",
+        "input.parquet",
+        "--out",
+        "out",
+        "--cache-dir",
+        "cache",
+        "--primary-model-manifest",
+        "primary.json",
+        "--verifier-model-manifest",
+        "verifier.json",
+        "--compute-profile",
+        "compute.json",
+    ]
     with pytest.raises(SystemExit) as exc:
-        build_parser().parse_args(arguments)
+        build_parser().parse_args([*required, flag, "removed"])
     assert exc.value.code == 2
+
+
+@pytest.mark.parametrize(
+    "command",
+    ("nodes", "edges", "condition", "explain", "explain-edge", "search", "prove", "why-not"),
+)
+def test_query_commands_offer_all_output_formats(command: str) -> None:
+    parser = build_parser()
+    subparsers = next(
+        action for action in parser._actions if isinstance(action, argparse._SubParsersAction)
+    )
+    command_parser = subparsers.choices[command]
+    output = next(action for action in command_parser._actions if action.dest == "output_format")
+    assert set(output.choices or ()) == {"table", "json", "jsonl"}

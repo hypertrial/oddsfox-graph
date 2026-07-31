@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import time
+import json
+import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -23,8 +25,10 @@ def _add_usage(target: dict[str, int], usage: dict[str, int]) -> None:
 class RunState:
     """Mutable request provenance collected before the manifest is frozen."""
 
-    observed_parse_models: set[str] = field(default_factory=set)
-    observed_classify_models: set[str] = field(default_factory=set)
+    observed_primary_parse_models: set[str] = field(default_factory=set)
+    observed_verifier_parse_models: set[str] = field(default_factory=set)
+    observed_primary_classify_models: set[str] = field(default_factory=set)
+    observed_verifier_classify_models: set[str] = field(default_factory=set)
     current_usage: dict[str, int] = field(default_factory=lambda: dict(_ZERO_USAGE))
     cached_origin_usage: dict[str, int] = field(
         default_factory=lambda: dict(_ZERO_USAGE)
@@ -93,15 +97,21 @@ class RunState:
 class StageRecorder:
     """Monotonic stage and total-runtime recorder."""
 
-    def __init__(self) -> None:
+    def __init__(self, progress_format: str = "quiet") -> None:
         self.started = time.perf_counter()
         self.timings: dict[str, float] = {}
         self.stage_metrics: dict[str, dict[str, float]] = {}
         self._last_peak_rss_mb = peak_rss_mb()
+        self.progress_format = progress_format
 
     def run(self, name: str, fn: Callable[[], Any]) -> Any:
+        self._emit("stage_start", stage=name)
         stage_started = time.perf_counter()
-        value = fn()
+        try:
+            value = fn()
+        except Exception as exc:
+            self._emit("stage_failed", stage=name, error=str(exc))
+            raise
         wall_seconds = round(time.perf_counter() - stage_started, 3)
         current_peak_rss = peak_rss_mb()
         self.timings[name] = wall_seconds
@@ -114,7 +124,30 @@ class StageRecorder:
             ),
         }
         self._last_peak_rss_mb = current_peak_rss
+        self._emit(
+            "stage_complete",
+            stage=name,
+            wall_seconds=wall_seconds,
+            peak_rss_mb=current_peak_rss,
+        )
         return value
 
     def runtime_seconds(self) -> float:
         return round(time.perf_counter() - self.started, 3)
+
+    def event(self, event: str, **fields: object) -> None:
+        """Emit a deterministic progress event outside a timed stage boundary."""
+        self._emit(event, **fields)
+
+    def _emit(self, event: str, **fields: object) -> None:
+        mode = self.progress_format
+        if mode == "auto":
+            mode = "plain" if sys.stderr.isatty() else "json"
+        if mode == "quiet":
+            return
+        payload = {"event": event, **fields}
+        if mode == "json":
+            print(json.dumps(payload, sort_keys=True), file=sys.stderr, flush=True)
+        else:
+            details = " ".join(f"{key}={value}" for key, value in fields.items())
+            print(f"[{event}] {details}".rstrip(), file=sys.stderr, flush=True)

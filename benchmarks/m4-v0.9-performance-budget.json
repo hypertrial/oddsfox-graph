@@ -1,19 +1,17 @@
 {
-  "fake_runtime_version": "fake-runtime-v2",
-  "before": {
-    "20000_clean_peak_rss_mb": 2110.0,
-    "20000_publication_seconds": 4.59,
-    "5000_clean_wall_seconds": 12.9
-  },
+  "fake_runtime_version": "fake-runtime-v3",
   "gates": {
     "max_20000_clean_peak_rss_mb": 1688.0,
     "max_20000_publication_seconds": 3.67,
-    "max_5000_clean_wall_seconds": 10.32
+    "max_5000_clean_wall_seconds": 10.32,
+    "max_offline_candidate_time_ratio": 0.25,
+    "max_incremental_candidate_time_ratio": 0.95,
+    "require_logical_hash_equality": true
   },
   "input_sha256": "790bd1595b379472ad65ba0073105b4eb630974d04e7b44d58c8a4929f274aa2",
   "machine": "arm64",
   "processor_contains": "Apple M4",
   "repetitions": 3,
-  "schema_version": "performance-budget-v1",
+  "schema_version": "performance-budget-v2",
   "system": "Darwin"
 }

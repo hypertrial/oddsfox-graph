@@ -11,7 +11,8 @@ from pydantic import BaseModel, ConfigDict, Field
 DEFAULT_EMBEDDING_REVISION = "1110a243fdf4706b3f48f1d95db1a4f5529b4d41"
 DEFAULT_NLI_MODEL = "tasksource/ModernBERT-base-nli"
 DEFAULT_NLI_REVISION = "975123f23a50424f9ca95d5382504d24d9ed9fd2"
-DEFAULT_OPEN_MODEL = "Qwen/Qwen3-4B-GGUF:Q8_0"
+DEFAULT_PRIMARY_MODEL = "Qwen/Qwen3-4B-GGUF:Q8_0"
+DEFAULT_VERIFIER_MODEL = "ibm-granite/granite-3.3-2b-instruct-GGUF:Q8_0"
 DEFAULT_RELATION_THRESHOLDS = {
     "complement": 0.995,
     "equivalent": 0.99,
@@ -71,6 +72,19 @@ class ParsedOutcome(BaseModel):
     jurisdiction: str | None
     polarity: Literal["positive", "negative"]
     parse_confidence: float = Field(ge=0.0, le=1.0)
+    citations: list[
+        Literal[
+            "question",
+            "description",
+            "outcome",
+            "event_id",
+            "event_slug",
+            "category",
+            "tags",
+            "time_start",
+            "time_end",
+        ]
+    ] = Field(min_length=1)
 
 
 class ParsedMarket(BaseModel):
@@ -143,11 +157,14 @@ class PropositionRecord(BaseModel):
     jurisdiction: str | None
     polarity: Literal["positive", "negative"]
     parse_confidence: float = Field(ge=0.0, le=1.0)
-    parse_status: Literal["parsed", "failed"]
-    parser_model: str
+    parse_status: Literal["parsed", "failed", "quarantined"]
+    primary_parser_model: str
+    verifier_parser_model: str
     prompt_version: str
-    inference_fingerprint: str | None
-    model_profile_id: str | None
+    primary_parse_fingerprint: str | None
+    verifier_parse_fingerprint: str | None
+    consensus_fingerprint: str | None
+    automation_profile_id: str | None
     source_schema: str
 
 
@@ -181,19 +198,16 @@ class SourceMarket:
 @dataclass(frozen=True)
 class DiscoveryConfig:
     cache_dir: Path | None = None
-    benchmark_path: Path | None = None
     incremental_from: Path | None = None
     compute_profile: Path | None = None
-    model_manifest: Path | None = None
-    model_profile: Path | None = None
-    require_ready: bool = False
-    allow_unbenchmarked_rules: bool = False
+    primary_model_manifest: Path | None = None
+    verifier_model_manifest: Path | None = None
     offline: bool = False
-    llm_base_url: str = "http://127.0.0.1:8080/v1"
-    llm_runtime: Literal["llama.cpp", "vllm"] = "llama.cpp"
+    primary_base_url: str = "http://127.0.0.1:8080/v1"
+    verifier_base_url: str = "http://127.0.0.1:8081/v1"
     allow_remote_inference: bool = False
-    parse_model: str = DEFAULT_OPEN_MODEL
-    classify_model: str = DEFAULT_OPEN_MODEL
+    primary_model: str = DEFAULT_PRIMARY_MODEL
+    verifier_model: str = DEFAULT_VERIFIER_MODEL
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     embedding_revision: str = DEFAULT_EMBEDDING_REVISION
     nli_model: str = DEFAULT_NLI_MODEL
@@ -216,6 +230,8 @@ class DiscoveryConfig:
     max_candidates: int = 400_000
     max_llm_pairs: int = 5_000
     llm_concurrency: int = 2
+    output_format: Literal["table", "json", "jsonl"] = "table"
+    progress_format: Literal["auto", "plain", "json", "quiet"] = "auto"
 
     def validate(self) -> None:
         if not 0.0 <= self.accept_confidence <= 1.0:
