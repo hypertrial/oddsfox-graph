@@ -36,6 +36,8 @@ def test_cli_docs_cover_every_current_subcommand() -> None:
         "run-summary",
         "search",
         "why-not",
+        "serve",
+        "explorer-export",
     }
     for command in sorted(subcommands):
         assert f"`{command}`" in cli_doc
@@ -46,6 +48,11 @@ def test_cli_docs_cover_every_current_subcommand() -> None:
         "--verifier-base-url",
         "--progress-format",
         "--output-format",
+        "--all-propositions",
+        "--classification-coverage-target",
+        "--max-visible-coverage-gap",
+        "--destination",
+        "--identifier",
     ):
         assert flag in cli_doc + (DOCS / "discovery.md").read_text(encoding="utf-8")
 
@@ -94,12 +101,12 @@ def test_removed_workflows_do_not_appear_in_product_or_docs() -> None:
 
 
 def test_current_versions_and_fixture_schema_are_documented() -> None:
-    assert __version__ == "0.9.0"
+    assert __version__ == "0.10.0"
     assert CACHE_ENTRY_VERSION == 7
     schema = (DOCS / "release-fixture-manifest.schema.json").read_text(
         encoding="utf-8"
     )
-    assert '"0.9.0"' in schema
+    assert '"0.10.0"' in schema
     assert RELEASE_FIXTURE_SCHEMA_VERSION in schema
 
 

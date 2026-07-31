@@ -229,3 +229,9 @@ data/
 
 # macOS
 .DS_Store
+
+# Explorer build workspace
+web/node_modules/
+web/*.tsbuildinfo
+web/test-results/
+web/playwright-report/

@@ -49,6 +49,9 @@ jobs:
           test -d fixture/cache
           test -d fixture/baselines/5000/state
           test -d fixture/baselines/20000/state
+          test -d fixture/baselines/all/state
+          test -f fixture/baselines/all/viewer_manifest.json
+          test -f fixture/baselines/all/coverage_summary.json
           test -f fixture/expected_artifact_hashes.json
           test -f fixture/qualification_cases.parquet
           test -f fixture/qualification_report.json
@@ -113,9 +116,19 @@ jobs:
           python -c "import json; from pathlib import Path; a=json.loads(Path('output/20000-online-manifest.json').read_text())['artifact_hashes']; b=json.loads(Path('output/20000/build_manifest.json').read_text())['artifact_hashes']; assert a == b"
           python -m oddsfox_graph.cli discover --input fixture/input.parquet --out output/20000-incremental --cache-dir output/live-cache --primary-model-manifest fixture/primary_model_manifest.json --verifier-model-manifest fixture/verifier_model_manifest.json --compute-profile fixture/compute_profile.json --max-propositions 20000 --incremental-from output/20000 --offline --progress-format json --output-format json
           python -c "import json; from pathlib import Path; a=json.loads(Path('output/20000/build_manifest.json').read_text())['artifact_hashes']; b=json.loads(Path('output/20000-incremental/build_manifest.json').read_text())['artifact_hashes']; assert a == b"
+          python -m oddsfox_graph.cli discover --input fixture/input.parquet --out output/all --cache-dir output/live-cache --primary-model-manifest fixture/primary_model_manifest.json --verifier-model-manifest fixture/verifier_model_manifest.json --compute-profile fixture/compute_profile.json --all-propositions --progress-format json --output-format json
+          cp output/all/build_manifest.json output/all-online-manifest.json
+          python -m oddsfox_graph.cli discover --input fixture/input.parquet --out output/all --cache-dir output/live-cache --primary-model-manifest fixture/primary_model_manifest.json --verifier-model-manifest fixture/verifier_model_manifest.json --compute-profile fixture/compute_profile.json --all-propositions --offline --progress-format json --output-format json
+          python -c "import json; from pathlib import Path; a=json.loads(Path('output/all-online-manifest.json').read_text())['artifact_hashes']; b=json.loads(Path('output/all/build_manifest.json').read_text())['artifact_hashes']; c=json.loads(Path('output/all/coverage_summary.json').read_text()); assert a == b; assert c['all_market_selection'] is True; assert c['markets'] == 94777; assert c['propositions'] == 189570; assert c['input_selection']['input_market_rows'] == 94781; assert c['input_selection']['invalid_market_rows'] == 4"
+          python -m oddsfox_graph.cli discover --input fixture/input.parquet --out output/all-incremental --cache-dir output/live-cache --primary-model-manifest fixture/primary_model_manifest.json --verifier-model-manifest fixture/verifier_model_manifest.json --compute-profile fixture/compute_profile.json --all-propositions --incremental-from output/all --offline --progress-format json --output-format json
+          python -c "import json; from pathlib import Path; a=json.loads(Path('output/all/build_manifest.json').read_text())['artifact_hashes']; b=json.loads(Path('output/all-incremental/build_manifest.json').read_text())['artifact_hashes']; assert a == b"
+      - name: Validate all-market explorer API and static export
+        run: |
+          python -c "from pathlib import Path; from fastapi.testclient import TestClient; from oddsfox_graph._explorer.service import create_app; c=TestClient(create_app(Path('output/all'))); assert c.get('/api/v1/meta').status_code == 200; assert c.get('/api/v1/overview?level=event&max_nodes=100&max_edges=200').status_code == 200"
+          python -c "from pathlib import Path; from oddsfox_graph.graph import Graph; from oddsfox_graph.explorer import export_explorer; g=Graph.open('output/all'); event=str(g.events(limit=1).rows[0]['event_key']); export_explorer(Path('output/all'), Path('output/static-explorer'), scope='event', identifier=event, max_nodes=5000, max_edges=10000)"
       - name: Enforce process-isolated M4 performance gates
         run: |
-          python scripts/benchmark_discovery.py --input fixture/input.parquet --output output/performance_report.json --sizes 5000,20000 --modes clean,offline,one-market-incremental --repetitions 3 --performance-budget benchmarks/m4-v0.9-performance-budget.json --require-gates
+          python scripts/benchmark_discovery.py --input fixture/input.parquet --output output/performance_report.json --sizes 5000,20000 --modes clean,offline,one-market-incremental --repetitions 3 --performance-budget benchmarks/m4-v0.10-performance-budget.json --require-gates
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:

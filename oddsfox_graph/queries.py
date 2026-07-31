@@ -8,9 +8,14 @@ import duckdb
 
 
 class DuckDB:
-    def __init__(self, database: Path | str = ":memory:") -> None:
+    def __init__(
+        self,
+        database: Path | str = ":memory:",
+        *,
+        read_only: bool = False,
+    ) -> None:
         self.database = str(database)
-        self._conn = duckdb.connect(self.database)
+        self._conn = duckdb.connect(self.database, read_only=read_only)
 
     def close(self) -> None:
         self._conn.close()

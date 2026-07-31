@@ -72,7 +72,7 @@ def doctor(
     try:
         schema, rows, _, selection = load_source_markets(
             input_path,
-            max_propositions=20_000,
+            max_propositions=None,
         )
         eligible = selection.get("eligible_propositions")
         if not isinstance(eligible, int):
@@ -235,7 +235,7 @@ def doctor(
             Check(
                 name="inference_cache",
                 status="fail",
-                message="cache directory is nonempty but has no v0.9 SQLite cache",
+                message="cache directory is nonempty but has no current SQLite cache",
             )
         )
 
@@ -283,11 +283,12 @@ def doctor(
 
 
 def run_summary(out_dir: Path) -> dict[str, Any]:
-    manifest_path = out_dir.resolve() / "build_manifest.json"
+    resolved = out_dir.resolve()
+    manifest_path = resolved / "build_manifest.json"
     if not manifest_path.is_file():
         raise ValueError("Discovery output is incomplete")
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    return {
+    result = {
         "version": manifest.get("version"),
         "input_hash": manifest.get("input_hash"),
         "qualification": manifest.get("qualification"),
@@ -297,3 +298,11 @@ def run_summary(out_dir: Path) -> dict[str, Any]:
         "compute": manifest.get("compute"),
         "stage_timings": manifest.get("stage_timings"),
     }
+    for name, key in (
+        ("coverage_summary.json", "coverage"),
+        ("viewer_manifest.json", "viewer"),
+    ):
+        path = resolved / name
+        if path.is_file():
+            result[key] = json.loads(path.read_text(encoding="utf-8"))
+    return result

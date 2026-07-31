@@ -1,14 +1,14 @@
 # OddsFox Graph
 
-OddsFox Graph 0.9 builds a deterministic logical graph from compact Polymarket
-market snapshots. It runs entirely against self-hosted open models: a Qwen3-4B
-Q8 primary and Granite 3.3 2B verifier must independently agree before a
-model-derived relation can be published. NLI can veto consensus but cannot
-publish an edge.
+OddsFox Graph 0.10 discovers a deterministic logical graph across compact
+Polymarket market snapshots and ships a local, interactive explorer for browsing
+the resulting propositions, events, connected components, proofs, and diagnostics.
 
-`AUTOMATION_VALIDATED` means the exact model pair, runtimes, protocols, generated
-cases, settings, and thresholds passed deterministic catalog-derived qualification.
-It is not a claim of independently measured real-world semantic accuracy.
+Inference is self-hosted. Qwen3-4B Q8 and Granite 3.3 2B must independently agree
+before a model-derived relation can publish; NLI may veto consensus but cannot
+publish an edge. `AUTOMATION_VALIDATED` certifies deterministic generated-case
+conformance, reproducibility, and performance for the exact runtime pair. It is
+not an independently measured claim about real-world semantic accuracy.
 
 ## Install
 
@@ -17,68 +17,63 @@ python -m pip install -e '.[dev]'
 ```
 
 llama.cpp or vLLM, model weights, MiniLM embeddings, and ModernBERT NLI files are
-managed outside this package. The package never downloads or launches a model.
+external. The package never downloads or launches a model.
 
 ## Input
 
-The only accepted Parquet contract is `polymarket-market-snapshot-v1`:
+The accepted Parquet contract is `polymarket-market-snapshot-v1`:
 
 - required: `market_id`, `question`, `outcomes`, `clob_token_ids`;
 - optional: `event_id`, `event_slug`, `description`, `start_time`, `end_time`,
   `category`, and `tags`;
-- `outcomes` and `clob_token_ids` must be nonempty equal-length `VARCHAR[]`
-  columns and token IDs must be globally unique.
+- outcomes and token IDs must be nonempty, equal-length arrays, and token IDs
+  must be globally unique.
 
-## Local model workflow
+## Discover the complete catalog
 
-Run Qwen on `127.0.0.1:8080` and Granite on `127.0.0.1:8081`, then create and
-check one content-bound manifest per runtime:
-
-```bash
-oddsfox-graph model-manifest --model-path /models/qwen.gguf \
-  --model-id Qwen/Qwen3-4B-GGUF:Q8_0 --revision <revision> \
-  --license Apache-2.0 --runtime llama.cpp \
-  --llm-base-url http://127.0.0.1:8080/v1 --output primary.json
-
-oddsfox-graph model-check --model-manifest primary.json \
-  --llm-base-url http://127.0.0.1:8080/v1
-```
-
-Repeat for Granite and port 8081. `doctor` checks the catalog, both runtimes,
-licenses, cache, local dependencies, compute profile, and output capacity.
-
-## Qualify and discover
+After creating and checking one Apache-2.0 model manifest per local runtime:
 
 ```bash
-oddsfox-graph qualify --input data/polymarket.parquet --out qualification \
-  --cache-dir cache --primary-model-manifest primary.json \
-  --verifier-model-manifest verifier.json --compute-profile compute.json
-
 oddsfox-graph discover --input data/polymarket.parquet --out output/graph \
   --cache-dir cache --primary-model-manifest primary.json \
   --verifier-model-manifest verifier.json --compute-profile compute.json \
-  --progress-format plain
+  --all-propositions --progress-format plain
 ```
 
-Online discovery runs or reuses exact automated qualification. A cache-complete
-replay uses `--offline`; an incremental build also supplies
-`--incremental-from <completed-output>`. Older caches and outputs require clean
-regeneration.
+The default remains a bounded 5,000-proposition development run. Use
+`--all-propositions` for the complete catalog. The classification budget is
+balanced across event scopes, and coverage is published explicitly rather than
+implying that every retrieved pair was classified. Cache-complete replay uses
+`--offline`; incremental runs add `--incremental-from <completed-output>`.
+When a run must meet a minimum pair-assessment envelope, set
+`--classification-coverage-target` or `--max-visible-coverage-gap` together with
+a sufficient `--max-llm-pairs` budget.
 
-## Query
-
-Every query supports table, JSON, and JSONL output:
+## Explore
 
 ```bash
-oddsfox-graph search --out output/graph --query bitcoin --output-format json
-oddsfox-graph prove --out output/graph --from <node> --to <node> --max-hops 4
-oddsfox-graph why-not --out output/graph --a <node> --b <node> \
-  --relation implies --output-format json
+oddsfox-graph serve --out output/graph --open-browser
 ```
 
-Python callers use `oddsfox_graph.graph.Graph` for typed immutable nodes, edges,
-proofs, proof steps, and diagnostics.
+The loopback-only server opens an interactive WebGL graph. Start at event or
+component level, search for a proposition, expand a bounded neighborhood, filter
+relations and confidence, inspect provenance, prove implications, or explain why
+a requested edge is absent.
+
+Create a portable, bounded snapshot for an event, component, or neighborhood:
+
+```bash
+oddsfox-graph explorer-export --out output/graph --destination export/event \
+  --scope event --identifier <event-key>
+```
+
+Static exports query bundled Parquet with DuckDB-Wasm and never contain the full
+catalog unless the declared scope fits the explicit response ceilings.
+
+Python callers use `oddsfox_graph.graph.Graph` for typed nodes, edges, pages,
+views, proofs, and diagnostics.
 
 See [architecture](docs/architecture.md), [discovery](docs/discovery.md),
-[qualification](docs/qualification.md), [artifacts](docs/artifacts.md),
-[CLI](docs/cli.md), and [release validation](docs/release.md).
+[explorer](docs/explorer.md), [qualification](docs/qualification.md),
+[artifacts](docs/artifacts.md), [CLI](docs/cli.md), and
+[release validation](docs/release.md).

@@ -204,6 +204,18 @@ def test_canonical_catalog_binding() -> None:
     db = DuckDB()
     try:
         assert db.scalar(f"SELECT count(*) FROM read_parquet('{q(REAL_INPUT)}')") == 94_781
+        assert db.scalar(
+            f"SELECT sum(len(clob_token_ids)) FROM read_parquet('{q(REAL_INPUT)}')"
+        ) == 189_570
+        assert db.scalar(
+            f"SELECT sum(len(outcomes)) FROM read_parquet('{q(REAL_INPUT)}')"
+        ) == 189_578
+        assert db.scalar(
+            f"SELECT count(*) FROM read_parquet('{q(REAL_INPUT)}') "
+            "WHERE market_id IS NULL OR question IS NULL OR outcomes IS NULL "
+            "OR clob_token_ids IS NULL OR len(outcomes) = 0 "
+            "OR len(outcomes) != len(clob_token_ids)"
+        ) == 4
     finally:
         db.close()
 
@@ -216,6 +228,13 @@ def test_compact_loader_is_deterministic_and_rejects_old_exports(tmp_path: Path)
     assert rows == 3
     assert [market.market_id for market in markets] == ["m1", "m2"]
     assert selection["selected_propositions"] == 4
+    _, _, all_markets, all_selection = load_source_markets(
+        catalog,
+        max_propositions=None,
+    )
+    assert len(all_markets) == 3
+    assert all_selection["selected_propositions"] == 7
+    assert all_selection["truncated"] is False
     old = tmp_path / "old.parquet"
     db = DuckDB()
     try:
@@ -393,6 +412,32 @@ def test_aggregate_endpoint_loss_aborts_and_transient_cache_recovers(
     assert (tmp_path / "out" / "build_manifest.json").is_file()
 
 
+def test_classification_coverage_gate_blocks_incomplete_publication(
+    tmp_path: Path,
+) -> None:
+    catalog = tmp_path / "catalog.parquet"
+    _write_catalog(catalog)
+    config = DiscoveryConfig(
+        cache_dir=tmp_path / "cache",
+        max_propositions=4,
+        max_candidates=100,
+        max_llm_pairs=1,
+        top_k=2,
+        classification_coverage_target=1.0,
+        progress_format="quiet",
+    )
+    with pytest.raises(RuntimeError, match="coverage target"):
+        discover(
+            catalog,
+            tmp_path / "out",
+            config=config,
+            _primary_client=_FakeClient(config.primary_model),
+            _verifier_client=_FakeClient(config.verifier_model),
+            _embedder=_embeddings,
+        )
+    assert not (tmp_path / "out" / "build_manifest.json").exists()
+
+
 @requires_real_catalog
 def test_dual_model_online_offline_incremental_and_graph_queries(tmp_path: Path) -> None:
     out = tmp_path / "out"
@@ -417,11 +462,13 @@ def test_dual_model_online_offline_incremental_and_graph_queries(tmp_path: Path)
     )
     manifest = json.loads((out / "build_manifest.json").read_text(encoding="utf-8"))
     first_hashes = manifest["artifact_hashes"]
-    assert manifest["version"] == "0.9.0"
+    assert manifest["version"] == "0.10.0"
     assert manifest["stats"]["qualification_status"] == "AUTOMATION_VALIDATED"
     assert manifest["inference"]["primary"]["manifest_id"]
     assert manifest["inference"]["verifier"]["manifest_id"]
     assert set(DISCOVERY_PARQUET_ARTIFACTS) <= {path.name for path in out.glob("*.parquet")}
+    assert (out / "coverage_summary.json").is_file()
+    assert (out / "viewer_manifest.json").is_file()
     assert not (out / "review_queue.parquet").exists()
     assert not (out / "benchmark.parquet").exists()
     assert first["tokens"] == 6
@@ -462,6 +509,10 @@ def test_dual_model_online_offline_incremental_and_graph_queries(tmp_path: Path)
     assert graph.edges("complement")
     methods = {edge.discovery_method for edge in graph.edges(top=100)}
     assert methods <= {"deterministic", "generative_consensus"}
+    assert graph.metadata().package_version == "0.10.0"
+    assert graph.events(limit=10).rows
+    assert graph.components(limit=10).rows
+    assert graph.overview("event").nodes
 
 
 def test_incompatible_v08_incremental_baseline_is_rejected(tmp_path: Path) -> None:

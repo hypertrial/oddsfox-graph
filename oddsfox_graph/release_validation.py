@@ -1,4 +1,4 @@
-"""Installed, content-bound v0.9 release fixture validation."""
+"""Installed, content-bound v0.10 release fixture validation."""
 
 from __future__ import annotations
 
@@ -41,8 +41,11 @@ REQUIRED_FILES = (
     "expected_artifact_hashes.json",
     "baselines/5000/build_manifest.json",
     "baselines/20000/build_manifest.json",
+    "baselines/all/build_manifest.json",
+    "baselines/all/viewer_manifest.json",
+    "baselines/all/coverage_summary.json",
 )
-REQUIRED_TREES = ("cache", "baselines/5000", "baselines/20000")
+REQUIRED_TREES = ("cache", "baselines/5000", "baselines/20000", "baselines/all")
 
 
 def validate_release_fixture(fixture_root: Path, work_dir: Path) -> dict[str, Any]:
@@ -132,7 +135,7 @@ def validate_release_fixture(fixture_root: Path, work_dir: Path) -> dict[str, An
         raise ValueError("Qualification report case set does not match the profile")
 
     expected_hashes = _read_json(root / "expected_artifact_hashes.json")
-    for envelope in ("5000", "20000"):
+    for envelope in ("5000", "20000", "all"):
         baseline_manifest = _read_json(root / "baselines" / envelope / "build_manifest.json")
         if baseline_manifest.get("version") != __version__:
             raise ValueError(f"The {envelope} baseline version is incompatible")
@@ -145,6 +148,22 @@ def validate_release_fixture(fixture_root: Path, work_dir: Path) -> dict[str, An
         expected_artifacts = expected_hashes.get(envelope)
         if not isinstance(expected_artifacts, dict) or expected_artifacts != baseline_manifest.get("artifact_hashes"):
             raise ValueError(f"The {envelope} baseline artifact hashes do not match")
+        if envelope == "all":
+            coverage = _read_json(root / "baselines" / envelope / "coverage_summary.json")
+            if coverage.get("all_market_selection") is not True:
+                raise ValueError("The all-market baseline is not a full-catalog selection")
+            selection = coverage.get("input_selection")
+            if (
+                int(coverage.get("markets") or 0) != 94_777
+                or int(coverage.get("propositions") or 0) != 189_570
+                or not isinstance(selection, dict)
+                or int(selection.get("input_market_rows") or 0) != 94_781
+                or int(selection.get("invalid_market_rows") or 0) != 4
+            ):
+                raise ValueError("The all-market baseline catalog counts are not canonical")
+            viewer = _read_json(root / "baselines" / envelope / "viewer_manifest.json")
+            if not viewer.get("graph_content_fingerprint"):
+                raise ValueError("The all-market baseline is missing its viewer fingerprint")
     performance = _read_json(root / "performance_report.json")
     if performance.get("passed") is not True:
         raise ValueError("Release performance gates did not pass")

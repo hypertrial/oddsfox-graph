@@ -179,14 +179,35 @@ class RuleQualificationCase:
 
 
 def assign_domain(market: SourceMarket) -> str:
+    return assign_domain_fields(
+        question=market.question,
+        description=market.description,
+        event_slug=market.event_slug,
+        event_id=market.event_id,
+        category=market.category,
+        tags=market.tags,
+    )
+
+
+def assign_domain_fields(
+    *,
+    question: str,
+    description: str,
+    event_slug: str | None,
+    event_id: str | None,
+    category: str | None,
+    tags: tuple[str, ...],
+) -> str:
+    """Assign the shared versioned primary domain from authoritative fields."""
+
     text = " ".join(
         (
-            market.question,
-            market.description,
-            market.event_slug or "",
-            market.event_id or "",
-            market.category or "",
-            " ".join(market.tags),
+            question,
+            description,
+            event_slug or "",
+            event_id or "",
+            category or "",
+            " ".join(tags),
         )
     )
     for domain in (

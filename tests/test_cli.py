@@ -15,7 +15,7 @@ def _commands(parser: argparse.ArgumentParser) -> set[str]:
     raise AssertionError("No argparse subcommands found")
 
 
-def test_cli_contains_only_v09_workflows() -> None:
+def test_cli_contains_current_discovery_and_explorer_workflows() -> None:
     commands = _commands(build_parser())
     assert commands == {
         "discover",
@@ -33,6 +33,8 @@ def test_cli_contains_only_v09_workflows() -> None:
         "search",
         "prove",
         "why-not",
+        "serve",
+        "explorer-export",
     }
 
 
@@ -85,6 +87,39 @@ def test_removed_discovery_flags_are_rejected(flag: str) -> None:
     with pytest.raises(SystemExit) as exc:
         build_parser().parse_args([*required, flag, "removed"])
     assert exc.value.code == 2
+
+
+def test_discovery_all_propositions_is_explicit_and_exclusive() -> None:
+    required = [
+        "discover",
+        "--input", "input.parquet",
+        "--out", "out",
+        "--cache-dir", "cache",
+        "--primary-model-manifest", "primary.json",
+        "--verifier-model-manifest", "verifier.json",
+        "--compute-profile", "compute.json",
+    ]
+    args = build_parser().parse_args([*required, "--all-propositions"])
+    assert args.all_propositions is True
+    with pytest.raises(SystemExit) as exc:
+        build_parser().parse_args(
+            [*required, "--all-propositions", "--max-propositions", "10"]
+        )
+    assert exc.value.code == 2
+
+
+def test_explorer_export_uses_explicit_scope_and_identifier() -> None:
+    args = build_parser().parse_args(
+        [
+            "explorer-export",
+            "--out", "graph",
+            "--destination", "export",
+            "--scope", "event",
+            "--identifier", "event-one",
+        ]
+    )
+    assert args.scope == "event"
+    assert args.identifier == "event-one"
 
 
 @pytest.mark.parametrize(

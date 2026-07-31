@@ -5,13 +5,20 @@ from __future__ import annotations
 import json
 import heapq
 import itertools
-from collections import defaultdict
 from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
 from . import __version__
+from ._explorer.contracts import (
+    ExplorerMetadata,
+    GraphFilter,
+    GraphPage,
+    GraphView,
+)
+from ._explorer.queries import ExplorerStore
+from .queries import DuckDB
 from .search import PATH_SENTINEL, read_rows, require_artifact, resolve_node, search_nodes
 
 
@@ -22,6 +29,11 @@ Relation = Literal[
     "implies",
     "mutually_exclusive",
 ]
+
+_MAX_PROOF_HOPS = 8
+_MAX_PROOF_PATHS = 20
+_MAX_PROOF_OUTGOING = 10_000
+_MAX_PROOF_STATES = 100_000
 
 
 class Node(BaseModel):
@@ -110,15 +122,23 @@ class Graph:
             raise ValueError("Graph manifest is not a discovery output")
         if manifest.get("version") != __version__:
             raise ValueError(
-                "Graph output is incompatible; run a clean v0.9 discovery"
+                f"Graph output is incompatible; run a clean v{__version__} discovery"
             )
         required = (
+            "oddsfox_graph.duckdb",
             "nodes.parquet",
             "logic_edges.parquet",
             "conditional_edges.parquet",
             "relation_candidates.parquet",
             "rejected_edges.parquet",
             "quarantined_pairs.parquet",
+            "event_summary.parquet",
+            "event_relation_summary.parquet",
+            "component_summary.parquet",
+            "node_metrics.parquet",
+            "visualization_layout.parquet",
+            "coverage_summary.json",
+            "viewer_manifest.json",
         )
         declared = manifest.get("artifacts")
         if not isinstance(declared, list) or any(
@@ -128,6 +148,100 @@ class Graph:
         for artifact in required:
             require_artifact(resolved, artifact)
         return cls(resolved)
+
+    def metadata(self) -> ExplorerMetadata:
+        return self._explorer().metadata()
+
+    def coverage(self) -> dict[str, object]:
+        return self._explorer().coverage()
+
+    def events(
+        self,
+        filters: GraphFilter | None = None,
+        *,
+        cursor: str | None = None,
+        limit: int = 100,
+    ) -> GraphPage:
+        return self._explorer().events(filters, cursor=cursor, limit=limit)
+
+    def components(
+        self,
+        *,
+        cursor: str | None = None,
+        limit: int = 100,
+    ) -> GraphPage:
+        return self._explorer().components(cursor=cursor, limit=limit)
+
+    def overview(
+        self,
+        level: Literal["component", "event"] = "event",
+        filters: GraphFilter | None = None,
+        *,
+        max_nodes: int = 5_000,
+        max_edges: int = 10_000,
+    ) -> GraphView:
+        return self._explorer().overview(
+            level,
+            filters,
+            max_nodes=max_nodes,
+            max_edges=max_edges,
+        )
+
+    def neighborhood(
+        self,
+        node_ids: tuple[str, ...],
+        *,
+        hops: int = 1,
+        filters: GraphFilter | None = None,
+        max_nodes: int = 5_000,
+        max_edges: int = 10_000,
+    ) -> GraphView:
+        return self._explorer().neighborhood(
+            node_ids,
+            hops=hops,
+            filters=filters,
+            max_nodes=max_nodes,
+            max_edges=max_edges,
+        )
+
+    def subgraph(
+        self,
+        node_ids: tuple[str, ...],
+        *,
+        hops: int = 1,
+        filters: GraphFilter | None = None,
+        max_nodes: int = 5_000,
+        max_edges: int = 10_000,
+    ) -> GraphView:
+        return self.neighborhood(
+            node_ids,
+            hops=hops,
+            filters=filters,
+            max_nodes=max_nodes,
+            max_edges=max_edges,
+        )
+
+    def event(self, event_key: str) -> dict[str, object]:
+        return self._explorer().event(event_key)
+
+    def component(self, component_id: str) -> dict[str, object]:
+        return self._explorer().component(component_id)
+
+    def diagnostics(
+        self,
+        *,
+        status: str | None = None,
+        cursor: str | None = None,
+        limit: int = 100,
+    ) -> GraphPage:
+        return self._explorer().diagnostics(
+            status=status,
+            cursor=cursor,
+            limit=limit,
+        )
+
+    def accepted_proposal(self, proposal_id: str) -> dict[str, object]:
+        return self._explorer().edge(proposal_id)
 
     def search(self, query: str, top: int = 20) -> tuple[Node, ...]:
         return tuple(Node.model_validate(row) for row in search_nodes(self.out_dir, query, top))
@@ -179,7 +293,14 @@ class Graph:
             )
         )
 
-    def explain_node(self, node: str) -> dict[str, object]:
+    def explain_node(
+        self,
+        node: str,
+        *,
+        edge_limit: int | None = None,
+    ) -> dict[str, object]:
+        if edge_limit is not None and not 0 <= edge_limit <= 10_000:
+            raise ValueError("edge_limit must be between 0 and 10000")
         node_id = self._resolve(node)
         node_rows = read_rows(
             self.out_dir,
@@ -187,17 +308,28 @@ class Graph:
             f"SELECT * FROM read_parquet('{PATH_SENTINEL}') WHERE node_id = ?",
             [node_id],
         )
-        touching = read_rows(
+        limit_sql = f"LIMIT {edge_limit + 1}" if edge_limit is not None else ""
+        touching_rows = read_rows(
             self.out_dir,
             "logic_edges.parquet",
             f"""
             SELECT * FROM read_parquet('{PATH_SENTINEL}')
             WHERE src_node_id = ? OR dst_node_id = ?
             ORDER BY edge_type, src_node_id, dst_node_id
+            {limit_sql}
             """,
             [node_id, node_id],
         )
-        return {"node": node_rows[0], "edges": touching}
+        truncated = edge_limit is not None and len(touching_rows) > edge_limit
+        touching = (
+            touching_rows[:edge_limit]
+            if edge_limit is not None
+            else touching_rows
+        )
+        result: dict[str, object] = {"node": node_rows[0], "edges": touching}
+        if edge_limit is not None:
+            result["edges_truncated"] = truncated
+        return result
 
     def explain_edge(self, src: str, dst: str, relation: Relation) -> dict[str, object]:
         src_id = self._resolve(src)
@@ -233,33 +365,52 @@ class Graph:
         max_hops: int = 4,
         max_paths: int = 3,
     ) -> tuple[Proof, ...]:
-        if max_hops < 1 or max_paths < 1:
-            raise ValueError("max_hops and max_paths must be positive")
+        if not 1 <= max_hops <= _MAX_PROOF_HOPS:
+            raise ValueError(
+                f"max_hops must be between 1 and {_MAX_PROOF_HOPS}"
+            )
+        if not 1 <= max_paths <= _MAX_PROOF_PATHS:
+            raise ValueError(
+                f"max_paths must be between 1 and {_MAX_PROOF_PATHS}"
+            )
         source = self._resolve(from_node)
         target = self._resolve(to_node)
-        rows = read_rows(
-            self.out_dir,
-            "logic_edges.parquet",
-            f"""
-            SELECT src_node_id, dst_node_id, edge_type, confidence, proposal_id
-            FROM read_parquet('{PATH_SENTINEL}')
-            WHERE edge_type IN ('implies', 'equivalent')
-            ORDER BY src_node_id, dst_node_id, edge_type, proposal_id
-            """,
-        )
-        adjacency: dict[str, list[ProofStep]] = defaultdict(list)
-        for row in rows:
-            step = ProofStep.model_validate(row)
-            adjacency[step.src_node_id].append(step)
-            if step.edge_type == "equivalent":
-                adjacency[step.dst_node_id].append(
-                    step.model_copy(
-                        update={
-                            "src_node_id": step.dst_node_id,
-                            "dst_node_id": step.src_node_id,
-                        }
-                    )
+        db = DuckDB(self.out_dir / "oddsfox_graph.duckdb", read_only=True)
+        adjacency: dict[str, tuple[ProofStep, ...]] = {}
+
+        def outgoing(node_id: str) -> tuple[ProofStep, ...]:
+            cached = adjacency.get(node_id)
+            if cached is not None:
+                return cached
+            rows = db.rows(
+                """
+                SELECT src_node_id, dst_node_id, edge_type, confidence, proposal_id
+                FROM (
+                    SELECT src_node_id, dst_node_id, edge_type,
+                           confidence, proposal_id
+                    FROM logic_edges_v
+                    WHERE src_node_id = ?
+                      AND edge_type IN ('implies', 'equivalent')
+                    UNION ALL
+                    SELECT dst_node_id AS src_node_id,
+                           src_node_id AS dst_node_id,
+                           edge_type, confidence, proposal_id
+                    FROM logic_edges_v
+                    WHERE dst_node_id = ? AND edge_type = 'equivalent'
+                ) traversable
+                ORDER BY dst_node_id, edge_type, proposal_id
+                LIMIT ?
+                """,
+                [node_id, node_id, _MAX_PROOF_OUTGOING + 1],
+            )
+            if len(rows) > _MAX_PROOF_OUTGOING:
+                raise ValueError(
+                    f"Proof expansion for {node_id!r} exceeds the "
+                    f"{_MAX_PROOF_OUTGOING}-edge safety cap"
                 )
+            result = tuple(ProofStep.model_validate(row) for row in rows)
+            adjacency[node_id] = result
+            return result
         counter = itertools.count()
         queue: list[
             tuple[
@@ -273,40 +424,55 @@ class Graph:
             ]
         ] = [(0, -1.0, (source,), next(counter), source, (), frozenset({source}))]
         proofs: list[Proof] = []
-        while queue and len(proofs) < max_paths:
-            hops, negative_bottleneck, path_nodes, _, node, path, visited = heapq.heappop(
-                queue
-            )
-            if node == target and path:
-                proofs.append(
-                    Proof(
-                        from_node_id=source,
-                        to_node_id=target,
-                        steps=path,
-                        hops=hops,
-                        bottleneck_confidence=-negative_bottleneck,
+        examined_states = 0
+        generated_states = 1
+        try:
+            while queue and len(proofs) < max_paths:
+                examined_states += 1
+                if examined_states > _MAX_PROOF_STATES:
+                    raise ValueError(
+                        "Proof traversal exceeded the bounded search-state limit"
                     )
+                hops, negative_bottleneck, path_nodes, _, node, path, visited = heapq.heappop(
+                    queue
                 )
-                continue
-            if hops >= max_hops:
-                continue
-            for step in adjacency.get(node, []):
-                if step.dst_node_id in visited:
+                if node == target and path:
+                    proofs.append(
+                        Proof(
+                            from_node_id=source,
+                            to_node_id=target,
+                            steps=path,
+                            hops=hops,
+                            bottleneck_confidence=-negative_bottleneck,
+                        )
+                    )
                     continue
-                next_path = (*path, step)
-                bottleneck = min(-negative_bottleneck, step.confidence)
-                heapq.heappush(
-                    queue,
-                    (
-                        hops + 1,
-                        -bottleneck,
-                        (*path_nodes, step.dst_node_id),
-                        next(counter),
-                        step.dst_node_id,
-                        next_path,
-                        visited | {step.dst_node_id},
-                    ),
-                )
+                if hops >= max_hops:
+                    continue
+                for step in outgoing(node):
+                    if step.dst_node_id in visited:
+                        continue
+                    next_path = (*path, step)
+                    bottleneck = min(-negative_bottleneck, step.confidence)
+                    generated_states += 1
+                    if generated_states > _MAX_PROOF_STATES:
+                        raise ValueError(
+                            "Proof traversal exceeded the bounded search-state limit"
+                        )
+                    heapq.heappush(
+                        queue,
+                        (
+                            hops + 1,
+                            -bottleneck,
+                            (*path_nodes, step.dst_node_id),
+                            next(counter),
+                            step.dst_node_id,
+                            next_path,
+                            visited | {step.dst_node_id},
+                        ),
+                    )
+        finally:
+            db.close()
         return tuple(proofs)
 
     def why_not(self, a: str, b: str, relation: Relation) -> Diagnostic:
@@ -396,6 +562,9 @@ class Graph:
         if result is None:
             raise ValueError(f"Could not resolve node {text!r}")
         return result
+
+    def _explorer(self) -> ExplorerStore:
+        return ExplorerStore(self.out_dir)
 
 
 def _pair_rows(

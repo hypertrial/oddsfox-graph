@@ -1,12 +1,12 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "OddsFox v0.9 automated discovery release fixture",
+  "title": "OddsFox v0.10 automated discovery and explorer release fixture",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema_version", "package_version", "source_sha256", "files", "trees"],
   "properties": {
-    "schema_version": {"const": "discovery-release-fixture-v5"},
-    "package_version": {"const": "0.9.0"},
+    "schema_version": {"const": "discovery-release-fixture-v6"},
+    "package_version": {"const": "0.10.0"},
     "source_sha256": {
       "const": "790bd1595b379472ad65ba0073105b4eb630974d04e7b44d58c8a4929f274aa2"
     },
@@ -24,14 +24,17 @@
         "qualification_cases.parquet",
         "expected_artifact_hashes.json",
         "baselines/5000/build_manifest.json",
-        "baselines/20000/build_manifest.json"
+        "baselines/20000/build_manifest.json",
+        "baselines/all/build_manifest.json",
+        "baselines/all/viewer_manifest.json",
+        "baselines/all/coverage_summary.json"
       ],
       "additionalProperties": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
     },
     "trees": {
       "type": "object",
       "propertyNames": {"pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+$"},
-      "required": ["cache", "baselines/5000", "baselines/20000"],
+      "required": ["cache", "baselines/5000", "baselines/20000", "baselines/all"],
       "additionalProperties": {
         "type": "object",
         "additionalProperties": false,

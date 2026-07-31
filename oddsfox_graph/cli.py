@@ -72,6 +72,29 @@ def build_parser() -> argparse.ArgumentParser:
     summary.add_argument("--out", required=True, type=Path)
     summary.add_argument("--output-format", choices=("table", "json"), default="table")
 
+    serve = sub.add_parser("serve")
+    serve.add_argument("--out", required=True, type=Path)
+    serve.add_argument("--host", default="127.0.0.1")
+    serve.add_argument("--port", type=int, default=8765)
+    serve.add_argument("--open-browser", action="store_true")
+    serve.add_argument("--max-response-nodes", type=int, default=5_000)
+    serve.add_argument("--max-response-edges", type=int, default=10_000)
+
+    explorer_export = sub.add_parser("explorer-export")
+    explorer_export.add_argument("--out", required=True, type=Path)
+    explorer_export.add_argument("--destination", required=True, type=Path)
+    explorer_export.add_argument(
+        "--scope",
+        required=True,
+        choices=("event", "component", "neighborhood"),
+    )
+    explorer_export.add_argument("--identifier", required=True)
+    explorer_export.add_argument("--max-nodes", type=int, default=5_000)
+    explorer_export.add_argument("--max-edges", type=int, default=10_000)
+    explorer_export.add_argument(
+        "--output-format", choices=("table", "json"), default="table"
+    )
+
     nodes = sub.add_parser("nodes")
     _add_query_output(nodes)
     nodes.add_argument("--top", type=int, default=50)
@@ -137,9 +160,13 @@ def _add_discovery_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--parse-confidence", type=float, default=0.95)
     parser.add_argument("--top-k", type=int, default=20)
     parser.add_argument("--embedding-block-size", type=int, default=512)
-    parser.add_argument("--max-propositions", type=int, default=5_000)
+    selection = parser.add_mutually_exclusive_group()
+    selection.add_argument("--max-propositions", type=int, default=5_000)
+    selection.add_argument("--all-propositions", action="store_true")
     parser.add_argument("--max-candidates", type=int, default=400_000)
     parser.add_argument("--max-llm-pairs", type=int, default=5_000)
+    parser.add_argument("--classification-coverage-target", type=float, default=0.0)
+    parser.add_argument("--max-visible-coverage-gap", type=float, default=1.0)
     parser.add_argument("--llm-concurrency", type=int, default=2)
     parser.add_argument("--temperature", type=float, default=0.1)
     parser.add_argument("--generation-top-p", type=float, default=0.8)
@@ -205,9 +232,13 @@ def _dispatch(args: argparse.Namespace) -> dict[str, Any] | list[dict[str, Any]]
             parse_confidence=args.parse_confidence,
             top_k=args.top_k,
             embedding_block_size=args.embedding_block_size,
-            max_propositions=args.max_propositions,
+            max_propositions=(
+                None if args.all_propositions else args.max_propositions
+            ),
             max_candidates=args.max_candidates,
             max_llm_pairs=args.max_llm_pairs,
+            classification_coverage_target=args.classification_coverage_target,
+            max_visible_coverage_gap=args.max_visible_coverage_gap,
             llm_concurrency=args.llm_concurrency,
             output_format=getattr(args, "output_format", "table"),
             progress_format=getattr(args, "progress_format", "quiet"),
@@ -262,6 +293,29 @@ def _dispatch(args: argparse.Namespace) -> dict[str, Any] | list[dict[str, Any]]
         from .operability import run_summary
 
         return run_summary(args.out)
+    if args.cmd == "serve":
+        from .explorer import serve_graph
+
+        serve_graph(
+            args.out,
+            host=args.host,
+            port=args.port,
+            open_browser=args.open_browser,
+            max_response_nodes=args.max_response_nodes,
+            max_response_edges=args.max_response_edges,
+        )
+        return {"status": "stopped"}
+    if args.cmd == "explorer-export":
+        from .explorer import export_explorer
+
+        return export_explorer(
+            args.out,
+            args.destination,
+            scope=args.scope,
+            identifier=args.identifier,
+            max_nodes=args.max_nodes,
+            max_edges=args.max_edges,
+        )
     graph = Graph.open(args.out)
     if args.cmd == "nodes":
         return [row.model_dump(mode="json") for row in graph.nodes(args.top)]

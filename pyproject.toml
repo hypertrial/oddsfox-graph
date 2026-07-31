@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "oddsfox-graph"
-version = "0.9.0"
-description = "Discover structural logic graph artifacts from Polymarket market snapshots."
+version = "0.10.0"
+description = "Discover and explore logical connections across Polymarket market snapshots."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
@@ -13,10 +13,12 @@ authors = [{name = "Hypertrial"}]
 dependencies = [
   "duckdb>=1.0",
   "httpx>=0.27",
+  "fastapi>=0.115",
   "numpy>=1.26",
   "pydantic>=2",
   "python-sat==1.9.dev7",
   "sentence-transformers>=5",
+  "uvicorn>=0.34",
 ]
 classifiers = [
   "Programming Language :: Python :: 3",
@@ -49,6 +51,9 @@ oddsfox-graph = "oddsfox_graph.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["oddsfox_graph*"]
+
+[tool.setuptools.package-data]
+oddsfox_graph = ["static/explorer/**/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

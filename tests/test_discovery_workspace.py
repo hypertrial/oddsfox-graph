@@ -134,6 +134,43 @@ def test_inference_queue_streams_bounded_candidate_batches() -> None:
         store.close()
 
 
+def test_inference_queue_balances_distinct_event_pair_scopes() -> None:
+    store = CandidateStore()
+    candidates = [
+        _candidate("a1", "a2", ["event:a"], 0.99, 1),
+        _candidate("a1", "a3", ["event:a"], 0.98, 2),
+        _candidate("a2", "a3", ["event:a"], 0.97, 3),
+        _candidate("b1", "b2", ["event:b"], 0.50, 4),
+    ]
+    try:
+        create_and_fill(
+            store.db,
+            "relation_candidates_work",
+            CANDIDATE_COLUMNS,
+            candidates,
+        )
+        store.prepare_inference_queue(
+            2,
+            {
+                "a1": "a|b",
+                "a2": "a|b",
+                "a3": "a|b",
+                "b1": "a",
+                "b2": "b|a|b",
+            },
+        )
+
+        selected = [
+            (str(row["proposition_a_id"]), str(row["proposition_b_id"]))
+            for batch in store.inference_batches(batch_size=10)
+            for row in batch
+        ]
+
+        assert set(selected) == {("a1", "a2"), ("b1", "b2")}
+    finally:
+        store.close()
+
+
 def test_changed_text_is_not_hidden_by_cross_proposition_vector_reuse() -> None:
     store = CandidateStore()
     try:

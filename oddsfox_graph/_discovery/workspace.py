@@ -197,29 +197,125 @@ class CandidateStore:
             [eligible_proposition_ids, eligible_proposition_ids],
         )
 
-    def prepare_inference_queue(self, limit: int) -> None:
+    def prepare_inference_queue(
+        self,
+        limit: int,
+        proposition_scopes: dict[str, str] | None = None,
+    ) -> None:
         self.db.execute("DROP TABLE IF EXISTS inference_candidate_queue")
-        self.db.execute(
+        self.db.execute("DROP TABLE IF EXISTS inference_proposition_scopes")
+        if proposition_scopes:
+            create_and_fill(
+                self.db,
+                "inference_proposition_scopes",
+                {"proposition_id": "VARCHAR", "scope_key": "VARCHAR"},
+                [
+                    {"proposition_id": proposition_id, "scope_key": scope_key}
+                    for proposition_id, scope_key in sorted(
+                        proposition_scopes.items()
+                    )
+                ],
+            )
+            ranked_source = """
+                SELECT
+                    c.proposition_a_id,
+                    c.proposition_b_id,
+                    len(c.candidate_reasons) AS reason_count,
+                    coalesce(c.embedding_similarity, -1.0) AS similarity,
+                    least(a.scope_key, b.scope_key) AS scheduling_scope_a,
+                    greatest(a.scope_key, b.scope_key) AS scheduling_scope_b
+                FROM relation_candidates_work c
+                JOIN inference_proposition_scopes a
+                  ON a.proposition_id = c.proposition_a_id
+                JOIN inference_proposition_scopes b
+                  ON b.proposition_id = c.proposition_b_id
+                WHERE c.discovery_method IS NULL
+                  AND c.status IN ('pending', 'not_classified_budget')
             """
+        else:
+            ranked_source = """
+                SELECT
+                    proposition_a_id,
+                    proposition_b_id,
+                    len(candidate_reasons) AS reason_count,
+                    coalesce(embedding_similarity, -1.0) AS similarity,
+                    ''::VARCHAR AS scheduling_scope_a,
+                    ''::VARCHAR AS scheduling_scope_b
+                FROM relation_candidates_work
+                WHERE discovery_method IS NULL
+                  AND status IN ('pending', 'not_classified_budget')
+            """
+        self.db.execute(
+            f"""
             CREATE TABLE inference_candidate_queue AS
+            WITH candidates AS (
+                {ranked_source}
+            ), scoped AS (
+                SELECT
+                    *,
+                    row_number() OVER (
+                        PARTITION BY scheduling_scope_a, scheduling_scope_b
+                        ORDER BY reason_count DESC, similarity DESC,
+                                 proposition_a_id, proposition_b_id
+                    ) AS scope_rank
+                FROM candidates
+            ), selected AS (
+                SELECT *
+                FROM scoped
+                ORDER BY scope_rank,
+                         sha256(to_json(list_value(
+                             scheduling_scope_a, scheduling_scope_b
+                         ))),
+                         scheduling_scope_a, scheduling_scope_b,
+                         reason_count DESC, similarity DESC,
+                         proposition_a_id, proposition_b_id
+                LIMIT ?
+            )
             SELECT
                 row_number() OVER (
-                    ORDER BY
-                        len(candidate_reasons) DESC,
-                        coalesce(embedding_similarity, -1.0) DESC,
-                        proposition_a_id,
-                        proposition_b_id
+                    ORDER BY scope_rank,
+                             sha256(to_json(list_value(
+                                 scheduling_scope_a, scheduling_scope_b
+                             ))),
+                             scheduling_scope_a, scheduling_scope_b,
+                             reason_count DESC, similarity DESC,
+                             proposition_a_id, proposition_b_id
                 )::INTEGER AS queue_index,
                 proposition_a_id,
                 proposition_b_id
-            FROM relation_candidates_work
-            WHERE discovery_method IS NULL
-              AND status IN ('pending', 'not_classified_budget')
+            FROM selected
             ORDER BY queue_index
-            LIMIT ?
             """,
             [int(limit)],
         )
+
+    def classification_coverage(self) -> dict[str, float | int]:
+        row = self.db.rows(
+            """
+            SELECT
+                count(*) FILTER (
+                    WHERE deterministic_relation IS NULL
+                      AND status != 'quarantined_parse'
+                )::BIGINT AS eligible,
+                count(*) FILTER (
+                    WHERE deterministic_relation IS NULL
+                      AND status IN ('accepted', 'rejected', 'quarantined')
+                )::BIGINT AS assessed,
+                count(*) FILTER (
+                    WHERE deterministic_relation IS NULL
+                      AND status = 'not_classified_budget'
+                )::BIGINT AS unclassified
+            FROM relation_candidates_work
+            """
+        )[0]
+        eligible = int(cast(int, row["eligible"]))
+        assessed = int(cast(int, row["assessed"]))
+        return {
+            "eligible": eligible,
+            "assessed": assessed,
+            "unclassified": int(cast(int, row["unclassified"])),
+            "coverage": 1.0 if eligible == 0 else assessed / eligible,
+        }
 
     def inference_batches(
         self,
@@ -935,6 +1031,7 @@ class CandidateStore:
             "directed_embedding_neighbors",
             "embedding_reasons",
             "inference_candidate_queue",
+            "inference_proposition_scopes",
             "proposition_features",
             "reusable_neighbor_sources",
             "structural_memberships",

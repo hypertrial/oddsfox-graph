@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
 
 from oddsfox_graph import __version__
 from oddsfox_graph._discovery.cache import InferenceCache
@@ -16,6 +17,11 @@ from oddsfox_graph._discovery.inference import load_model_manifest, manifest_sha
 from oddsfox_graph._discovery.provenance import canonical_json_sha256, sha256_file
 from oddsfox_graph._discovery.versions import RELEASE_FIXTURE_SCHEMA_VERSION
 from oddsfox_graph.graph import Graph
+from oddsfox_graph.explorer import (
+    create_explorer_app,
+    export_explorer,
+    validate_explorer_host,
+)
 from oddsfox_graph.queries import DuckDB, q
 from oddsfox_graph import release_validation
 from oddsfox_graph import operability
@@ -52,6 +58,10 @@ def test_graph_proof_ordering_and_limits_are_deterministic(tmp_path: Path) -> No
     assert len(first) == 1
     with pytest.raises(ValueError):
         graph.prove("a", "d", max_hops=0)
+    with pytest.raises(ValueError, match="max_hops"):
+        graph.prove("a", "d", max_hops=9)
+    with pytest.raises(ValueError, match="max_paths"):
+        graph.prove("a", "d", max_paths=21)
 
 
 def test_why_not_reports_accepted_rejected_quarantine_and_not_retrieved(tmp_path: Path) -> None:
@@ -100,6 +110,126 @@ def test_graph_search_nodes_edges_condition_and_explanations(tmp_path: Path) -> 
     assert graph.condition("a", "b")[0]["method"] == "logic"
     assert graph.explain_node("a")["edges"]
     assert graph.explain_edge("a", "b", "implies")["edges"]
+
+
+def test_explorer_api_is_loopback_bounded_and_cacheable(tmp_path: Path) -> None:
+    out = _write_graph(tmp_path)
+    assert validate_explorer_host("127.0.0.1") == "127.0.0.1"
+    assert validate_explorer_host("::1") == "::1"
+    assert validate_explorer_host("[::1]") == "::1"
+    with pytest.raises(ValueError, match="loopback"):
+        validate_explorer_host("0.0.0.0")
+
+    client = TestClient(
+        create_explorer_app(out, max_response_nodes=4, max_response_edges=5)
+    )
+    metadata = client.get("/api/v1/meta")
+    assert metadata.status_code == 200
+    assert metadata.json()["package_version"] == __version__
+    assert metadata.headers["x-content-type-options"] == "nosniff"
+    assert "frame-ancestors 'none'" in metadata.headers["content-security-policy"]
+    assert client.get("/api/v1/overview?level=event").json()["nodes"][0]["id"] == "e"
+    assert client.get("/api/v1/subgraph?node=a&hops=1").status_code == 200
+    assert client.get("/api/v1/subgraph?node=a&max_nodes=5").status_code == 422
+    bounded_node = TestClient(
+        create_explorer_app(out, max_response_nodes=4, max_response_edges=2)
+    ).get("/api/v1/nodes/b")
+    assert bounded_node.status_code == 200
+    assert len(bounded_node.json()["edges"]) == 2
+    assert bounded_node.json()["edges_truncated"] is True
+    etag = metadata.headers["etag"]
+    assert client.get("/api/v1/meta", headers={"If-None-Match": etag}).status_code == 304
+
+    manifest_path = out / "build_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["review_marker"] = "changed"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    changed_client = TestClient(
+        create_explorer_app(out, max_response_nodes=4, max_response_edges=5)
+    )
+    assert changed_client.get("/api/v1/meta").headers["etag"] != etag
+
+
+def test_neighborhood_enforces_seed_ceiling_without_false_truncation(
+    tmp_path: Path,
+) -> None:
+    graph = Graph.open(_write_graph(tmp_path))
+    complete = graph.neighborhood(
+        ("a", "b", "c", "d"),
+        hops=1,
+        max_nodes=4,
+        max_edges=5,
+    )
+    assert complete.truncated_nodes is False
+    assert complete.truncated_edges is False
+    assert {node.id for node in complete.nodes} == {"a", "b", "c", "d"}
+    assert all(
+        edge.source in {node.id for node in complete.nodes}
+        and edge.target in {node.id for node in complete.nodes}
+        for edge in complete.edges
+    )
+    with pytest.raises(ValueError, match="Seed node count"):
+        graph.neighborhood(
+            ("a", "b", "c", "d"),
+            hops=1,
+            max_nodes=3,
+        )
+
+
+def test_static_explorer_export_contains_bounded_parquet_snapshot(tmp_path: Path) -> None:
+    out = _write_graph(tmp_path / "source")
+    destination = tmp_path / "export"
+    manifest = export_explorer(
+        out,
+        destination,
+        scope="event",
+        identifier="e",
+        max_nodes=4,
+        max_edges=5,
+    )
+    assert manifest["data_format"] == "duckdb-wasm-parquet"
+    assert set(manifest["snapshot_files"]) == {
+        "snapshot_nodes.parquet",
+        "snapshot_edges.parquet",
+    }
+    for relative in (
+        "index.html",
+        "static_manifest.json",
+        "snapshot_nodes.parquet",
+        "snapshot_edges.parquet",
+    ):
+        assert (destination / relative).is_file()
+    db = DuckDB()
+    try:
+        assert db.rows(
+            f"SELECT count(*) AS count FROM read_parquet('{q(destination / 'snapshot_nodes.parquet')}')"
+        )[0]["count"] == 4
+    finally:
+        db.close()
+
+    component_destination = tmp_path / "component-export"
+    export_explorer(
+        out,
+        component_destination,
+        scope="component",
+        identifier="component-one",
+        max_nodes=4,
+        max_edges=5,
+    )
+    with pytest.raises(KeyError, match="Unknown event_key"):
+        export_explorer(
+            out,
+            tmp_path / "missing-export",
+            scope="event",
+            identifier="missing",
+        )
+    with pytest.raises(ValueError, match="must not overlap"):
+        export_explorer(
+            out,
+            out / "static-export",
+            scope="event",
+            identifier="e",
+        )
 
 
 def test_release_fixture_validates_hashes_profiles_and_baselines(
@@ -193,7 +323,7 @@ def test_release_fixture_validates_hashes_profiles_and_baselines(
     for relative, content in required.items():
         (root / relative).write_text(json.dumps(content), encoding="utf-8")
     expected_hashes: dict[str, dict[str, str]] = {}
-    for envelope in ("5000", "20000"):
+    for envelope in ("5000", "20000", "all"):
         baseline = root / "baselines" / envelope
         baseline.mkdir(parents=True)
         hashes = {"nodes.parquet": f"hash-{envelope}"}
@@ -209,6 +339,25 @@ def test_release_fixture_validates_hashes_profiles_and_baselines(
             ),
             encoding="utf-8",
         )
+        if envelope == "all":
+            (baseline / "coverage_summary.json").write_text(
+                json.dumps(
+                    {
+                        "all_market_selection": True,
+                        "markets": 94_777,
+                        "propositions": 189_570,
+                        "input_selection": {
+                            "input_market_rows": 94_781,
+                            "invalid_market_rows": 4,
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (baseline / "viewer_manifest.json").write_text(
+                json.dumps({"graph_content_fingerprint": "fixture"}),
+                encoding="utf-8",
+            )
     (root / "expected_artifact_hashes.json").write_text(
         json.dumps(expected_hashes), encoding="utf-8"
     )
@@ -227,6 +376,9 @@ def test_release_fixture_validates_hashes_profiles_and_baselines(
         "expected_artifact_hashes.json",
         "baselines/5000/build_manifest.json",
         "baselines/20000/build_manifest.json",
+        "baselines/all/build_manifest.json",
+        "baselines/all/viewer_manifest.json",
+        "baselines/all/coverage_summary.json",
     ]
     fixture = {
         "schema_version": RELEASE_FIXTURE_SCHEMA_VERSION,
@@ -235,7 +387,7 @@ def test_release_fixture_validates_hashes_profiles_and_baselines(
         "files": {name: sha256_file(root / name) for name in bound},
         "trees": {
             name: _tree_binding(root / name)
-            for name in ("cache", "baselines/5000", "baselines/20000")
+            for name in ("cache", "baselines/5000", "baselines/20000", "baselines/all")
         },
     }
     (root / "release-fixture.json").write_text(json.dumps(fixture), encoding="utf-8")
@@ -333,7 +485,7 @@ def _write_graph(
 ) -> Path:
     out = tmp_path / "out"
     out.mkdir(parents=True)
-    db = DuckDB()
+    db = DuckDB(out / "oddsfox_graph.duckdb")
     try:
         db.execute(
             """
@@ -375,11 +527,131 @@ def _write_graph(
             "'diagnostic fixture' AS explanation"
         )
         db.execute("CREATE TABLE candidates AS SELECT 'a' AS proposition_a_id, 'c' AS proposition_b_id, ['semantic']::VARCHAR[] AS candidate_reasons")
+        db.execute("CREATE VIEW nodes_table AS SELECT * FROM nodes")
+        db.execute("CREATE VIEW logic_edges_v AS SELECT * FROM edges")
+        db.execute("CREATE VIEW rejected_edges_v AS SELECT * FROM rejected")
+        db.execute("CREATE VIEW quarantined_pairs_v AS SELECT * FROM quarantine")
+        db.execute("CREATE VIEW relation_candidates_v AS SELECT * FROM candidates")
+        db.execute(
+            """
+            CREATE TABLE explorer_propositions_v AS
+            SELECT node_id AS proposition_id, market_id, question,
+                   NULL::VARCHAR AS event_id, event_slug,
+                   NULL::VARCHAR AS description, NULL::VARCHAR AS category,
+                   []::VARCHAR[] AS tags, canonical_proposition,
+                   'parsed'::VARCHAR AS parse_status,
+                   'e'::VARCHAR AS event_key, 'sports'::VARCHAR AS primary_domain,
+                   'component-one'::VARCHAR AS component_id,
+                   'component-fingerprint'::VARCHAR AS component_fingerprint
+            FROM nodes
+            """
+        )
+        db.execute(
+            """
+            CREATE TABLE event_summary_v AS SELECT
+                'e'::VARCHAR AS event_key, NULL::VARCHAR AS event_id,
+                'e'::VARCHAR AS event_slug, 'Fixture event'::VARCHAR AS label,
+                'sports'::VARCHAR AS primary_domain, NULL::VARCHAR AS category,
+                4::BIGINT AS market_count, 4::BIGINT AS proposition_count,
+                4::BIGINT AS active_market_count, 0::BIGINT AS closed_market_count,
+                5::BIGINT AS accepted_edge_count, 2::BIGINT AS rejected_edge_count,
+                1::BIGINT AS quarantined_pair_count, 0::BIGINT AS unclassified_pair_count,
+                1::BIGINT AS classification_eligible_count,
+                1::BIGINT AS classification_assessed_count,
+                1.0::DOUBLE AS classification_coverage,
+                1::BIGINT AS deterministic_edge_count, 4::BIGINT AS consensus_edge_count,
+                0::BIGINT AS complement_count, 1::BIGINT AS equivalent_count,
+                1::BIGINT AS mutually_exclusive_count, 3::BIGINT AS implies_count,
+                0::BIGINT AS compatible_count, 1::BIGINT AS component_count,
+                NULL::TIMESTAMPTZ AS first_seen_ts, NULL::TIMESTAMPTZ AS last_seen_ts
+            """
+        )
+        db.execute(
+            """
+            CREATE TABLE event_relation_summary_v AS SELECT
+                'e'::VARCHAR AS src_event_key, 'e'::VARCHAR AS dst_event_key,
+                'implies'::VARCHAR AS edge_type, 3::BIGINT AS edge_count,
+                0.8::DOUBLE AS min_confidence, 0.95::DOUBLE AS max_confidence,
+                0.883::DOUBLE AS mean_confidence, 0::BIGINT AS deterministic_count,
+                3::BIGINT AS consensus_count, 3::BIGINT AS source_market_count,
+                3::BIGINT AS destination_market_count, true AS aggregation_only
+            """
+        )
+        db.execute(
+            """
+            CREATE TABLE component_summary_v AS SELECT
+                'component-one'::VARCHAR AS component_id,
+                'component-fingerprint'::VARCHAR AS component_fingerprint,
+                4::BIGINT AS proposition_count, 4::BIGINT AS market_count,
+                1::BIGINT AS event_count, 5::BIGINT AS edge_count,
+                1::BIGINT AS deterministic_edge_count, 4::BIGINT AS consensus_edge_count,
+                1::BIGINT AS quarantined_pair_count, 0::BIGINT AS unclassified_pair_count,
+                1.0::DOUBLE AS classification_coverage,
+                ['a','b','c','d']::VARCHAR[] AS representative_node_ids,
+                -10.0::DOUBLE AS layout_min_x, -10.0::DOUBLE AS layout_min_y,
+                10.0::DOUBLE AS layout_max_x, 10.0::DOUBLE AS layout_max_y
+            """
+        )
+        db.execute(
+            """
+            CREATE TABLE node_metrics_v AS
+            SELECT node_id, market_id, 'e'::VARCHAR AS event_key,
+                   'component-one'::VARCHAR AS component_id,
+                   1::BIGINT AS total_degree, 1::BIGINT AS incoming_degree,
+                   1::BIGINT AS outgoing_degree, 0::BIGINT AS complement_degree,
+                   0::BIGINT AS equivalent_degree,
+                   0::BIGINT AS mutually_exclusive_degree,
+                   1::BIGINT AS implies_degree, 0::BIGINT AS compatible_degree,
+                   0::BIGINT AS rejected_count, 0::BIGINT AS quarantine_count,
+                   'parsed'::VARCHAR AS parse_status,
+                   'complete'::VARCHAR AS classification_state,
+                   1::BIGINT AS classification_eligible_count,
+                   1::BIGINT AS classification_assessed_count,
+                   0::BIGINT AS unclassified_pair_count,
+                   1.0::DOUBLE AS classification_coverage
+            FROM nodes
+            """
+        )
+        db.execute(
+            """
+            CREATE TABLE visualization_layout_v AS SELECT * FROM (VALUES
+                ('component','component-one',NULL::VARCHAR,0.0,0.0,20.0,0::BIGINT,'v','f'),
+                ('event','e','component-one',0.0,0.0,10.0,0::BIGINT,'v','f')
+            ) t(layout_level,object_id,parent_id,x,y,radius,layout_rank,layout_version,graph_fingerprint)
+            """
+        )
         for table, filename in (("nodes", "nodes.parquet"), ("edges", "logic_edges.parquet"), ("conditionals", "conditional_edges.parquet"), ("rejected", "rejected_edges.parquet"), ("quarantine", "quarantined_pairs.parquet"), ("candidates", "relation_candidates.parquet")):
+            db.execute(f"COPY {table} TO '{q(out / filename)}' (FORMAT PARQUET)")
+        for table, filename in (
+            ("event_summary_v", "event_summary.parquet"),
+            ("event_relation_summary_v", "event_relation_summary.parquet"),
+            ("component_summary_v", "component_summary.parquet"),
+            ("node_metrics_v", "node_metrics.parquet"),
+            ("visualization_layout_v", "visualization_layout.parquet"),
+        ):
             db.execute(f"COPY {table} TO '{q(out / filename)}' (FORMAT PARQUET)")
     finally:
         db.close()
+    coverage = {
+        "classification_coverage": 1.0,
+        "classification_gap": 0.0,
+        "all_market_selection": True,
+        "markets": 4,
+        "propositions": 4,
+    }
+    (out / "coverage_summary.json").write_text(json.dumps(coverage), encoding="utf-8")
+    (out / "viewer_manifest.json").write_text(
+        json.dumps({"graph_content_fingerprint": "fixture", "versions": {}}),
+        encoding="utf-8",
+    )
     artifacts = [path.name for path in out.glob("*.parquet")]
+    artifacts.extend(
+        (
+            "oddsfox_graph.duckdb",
+            "coverage_summary.json",
+            "viewer_manifest.json",
+        )
+    )
     (out / "build_manifest.json").write_text(
         json.dumps(
             {

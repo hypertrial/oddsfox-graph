@@ -1,31 +1,39 @@
 # Architecture
 
-The pipeline has one path:
+The repository has one discovery path and one read-only exploration layer.
 
-1. validate and normalize a compact market snapshot;
-2. qualify the exact primary/verifier runtime pair on deterministic cases;
-3. parse each market independently with both models and merge exact normalized
-   agreement, while authoritative source extraction wins conflicts;
-4. retrieve bounded structured and blockwise-cosine candidate neighborhoods;
-5. score local NLI for prioritization and vetoes;
-6. classify unresolved pairs independently with both generative models;
-7. quarantine disagreement, assumptions, invalid citations, failures, vetoes,
-   and low confidence;
-8. solve deterministic and consensus proposals with RC2;
-9. publish a DuckDB database, sorted Parquet artifacts, reports, snapshot, state,
-   provenance, and the manifest completion marker.
+## Discovery
 
-The primary and verifier use the same typed request/response contracts, but each
-has its own manifest, endpoint, runtime identity, cache namespace, prompt/schema
-fingerprint, and observed-model provenance. A consensus fingerprint binds both
-roles and NLI. Candidate reasons affect retrieval order only and are never model
-evidence.
+1. Validate and normalize the compact snapshot.
+2. Qualify the exact primary/verifier runtime pair on deterministic cases.
+3. Parse each market with both models and merge exact normalized agreement.
+4. Retrieve structured and exact blockwise-cosine candidate neighborhoods.
+5. Balance the bounded inference queue across event-pair scopes.
+6. Apply NLI vetoes and dual generative classification.
+7. Quarantine disagreement, assumptions, invalid citations, failures, vetoes,
+   and low confidence.
+8. Solve deterministic and consensus proposals with RC2.
+9. Aggregate events and connected components, compute node metrics and stable
+   layouts, then publish DuckDB, sorted Parquet, reports, state, and the final
+   manifest completion marker.
 
-SQLite owns inference caching. DuckDB owns candidate, neighborhood, component,
-solver, and publication state. Both are transactional; publication stages a new
-directory and writes `build_manifest.json` only after validation and the atomic
-directory swap.
+SQLite owns transactional inference caching. DuckDB owns candidates, metrics,
+components, solver state, exploration tables, and public graph tables. Clean,
+cached, offline, and equivalent incremental runs preserve logical artifact hashes.
 
-`prove` traverses implication arcs and both directions of equivalence at query
-time. It never traverses complements, exclusions, or compatibility and does not
-materialize transitive closure.
+## Exploration
+
+`Graph` opens only a manifest-complete current output. `ExplorerStore` creates
+short-lived read-only DuckDB connections and exposes parameterized, cursor-based,
+bounded queries. The FastAPI service binds only to loopback and applies hard
+node/edge limits; it offers no arbitrary SQL endpoint and never mutates the graph.
+
+The React/Sigma client requests component or event summaries before proposition
+details. Search and neighborhood expansion avoid loading the entire graph in the
+browser. Static exports contain only a selected bounded subgraph and use
+DuckDB-Wasm to read the exported Parquet files.
+
+`prove` expands implication and bidirectional equivalence arcs on demand. It
+never traverses complement, exclusion, or compatibility, never materializes a
+transitive closure, and enforces hop, path, generated-state, and per-node
+expansion limits.

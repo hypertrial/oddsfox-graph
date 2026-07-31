@@ -146,6 +146,9 @@ from .versions import (
     RULE_VERSION,
     SOLVER_VERSION,
     QUALIFICATION_GENERATOR_VERSION,
+    VIEWER_API_VERSION,
+    VIEWER_ARTIFACT_VERSION,
+    VISUALIZATION_LAYOUT_VERSION,
 )
 from ..qualification import (
     QUALIFICATION_CASE_COLUMNS,
@@ -156,6 +159,14 @@ from ..qualification import (
     qualification_retrieval_fingerprint,
     qualification_retrieved_case_ids,
     qualification_case_set_hash,
+)
+from .._explorer.aggregation import (
+    COMPONENT_SUMMARY_COLUMNS,
+    EVENT_RELATION_SUMMARY_COLUMNS,
+    EVENT_SUMMARY_COLUMNS,
+    NODE_METRIC_COLUMNS,
+    VISUALIZATION_LAYOUT_COLUMNS,
+    build_explorer_tables,
 )
 from .workspace import (
     CANDIDATE_BLOCK_COLUMNS,
@@ -185,6 +196,15 @@ DISCOVERY_PARQUET_ARTIFACTS = (
     "qualification_cases.parquet",
     "rejected_edges.parquet",
     "parse_errors.parquet",
+    "event_summary.parquet",
+    "event_relation_summary.parquet",
+    "component_summary.parquet",
+    "node_metrics.parquet",
+    "visualization_layout.parquet",
+)
+DISCOVERY_JSON_ARTIFACTS = (
+    "coverage_summary.json",
+    "viewer_manifest.json",
 )
 GRAPH_DATABASE_ARTIFACT = "oddsfox_graph.duckdb"
 _ACTIVE_PROGRESS: ContextVar[StageRecorder | None] = ContextVar(
@@ -1644,6 +1664,12 @@ def _discover_impl(
             if row.get("parse_status") == "parsed"
         ]
     )
+    proposition_scopes = {
+        str(row["proposition_id"]): str(
+            row.get("event_id") or row.get("event_slug") or row["market_id"]
+        )
+        for row in propositions
+    }
     nli_pool_limit = min(
         config.max_candidates,
         config.max_llm_pairs * 4,
@@ -1661,6 +1687,7 @@ def _discover_impl(
                 _primary_client is not None or _verifier_client is not None
             ),
             limit=nli_pool_limit,
+            proposition_scopes=proposition_scopes,
         ),
     )
     classification_result = recorder.run(
@@ -1674,11 +1701,28 @@ def _discover_impl(
             incremental_stats,
             incremental_resources,
             inference,
+            proposition_scopes,
         ),
     )
     generated_edges = classification_result.edges
     model_assessments = classification_result.model_assessments
     model_quarantines = classification_result.quarantines
+    classification_coverage = candidate_store.classification_coverage()
+    observed_coverage = float(classification_coverage["coverage"])
+    recorder.event("classification_coverage", **classification_coverage)
+    if observed_coverage < config.classification_coverage_target:
+        raise RuntimeError(
+            "Classification coverage target was not met: "
+            f"observed={observed_coverage:.6f}, "
+            f"required={config.classification_coverage_target:.6f}, "
+            f"remaining={classification_coverage['unclassified']}"
+        )
+    if 1.0 - observed_coverage > config.max_visible_coverage_gap:
+        raise RuntimeError(
+            "Visible classification coverage gap exceeds the configured maximum: "
+            f"observed_gap={1.0 - observed_coverage:.6f}, "
+            f"maximum={config.max_visible_coverage_gap:.6f}"
+        )
     _require_model_role_coverage(model_assessments, task="classification")
     recorder.event(
         "batch_progress",
@@ -1828,6 +1872,7 @@ def _discover_impl(
                 name: _sha256(staging / name)
                 for name in (
                     *DISCOVERY_PARQUET_ARTIFACTS,
+                    *DISCOVERY_JSON_ARTIFACTS,
                     "primary_model_manifest.json",
                     "verifier_model_manifest.json",
                     "automation_profile.json",
@@ -2870,8 +2915,9 @@ def _score_nli_candidate_batches(
     *,
     injected_client: bool,
     limit: int,
+    proposition_scopes: dict[str, str],
 ) -> ConsensusStageResult:
-    candidate_store.prepare_inference_queue(limit)
+    candidate_store.prepare_inference_queue(limit, proposition_scopes)
     effective_scorer = scorer
     if (
         effective_scorer is None
@@ -2905,8 +2951,12 @@ def _classify_candidate_batches(
     incremental_stats: IncrementalStats,
     incremental_resources: IncrementalResources,
     inference: _InferenceContext,
+    proposition_scopes: dict[str, str],
 ) -> ConsensusStageResult:
-    candidate_store.prepare_inference_queue(config.max_llm_pairs)
+    candidate_store.prepare_inference_queue(
+        config.max_llm_pairs,
+        proposition_scopes,
+    )
     edges: list[dict[str, Any]] = []
     assessments: list[dict[str, Any]] = []
     quarantines: list[dict[str, Any]] = []
@@ -3890,6 +3940,10 @@ def _write_discovery_artifacts(
             f"SET temp_directory = '{q(directory / '.duckdb-spill')}'"
         )
         CandidateStore.promote_public_tables(db)
+        coverage = build_explorer_tables(
+            db,
+            input_selection=input_selection,
+        )
         record_publication_stage("promote_workspace")
 
         _copy_table(
@@ -3969,6 +4023,41 @@ def _write_discovery_artifacts(
             list(QUALIFICATION_CASE_COLUMNS),
             "case_id",
         )
+        _copy_table(
+            db,
+            "event_summary_v",
+            directory / "event_summary.parquet",
+            list(EVENT_SUMMARY_COLUMNS),
+            "event_key",
+        )
+        _copy_table(
+            db,
+            "event_relation_summary_v",
+            directory / "event_relation_summary.parquet",
+            list(EVENT_RELATION_SUMMARY_COLUMNS),
+            "src_event_key, dst_event_key, edge_type",
+        )
+        _copy_table(
+            db,
+            "component_summary_v",
+            directory / "component_summary.parquet",
+            list(COMPONENT_SUMMARY_COLUMNS),
+            "component_id",
+        )
+        _copy_table(
+            db,
+            "node_metrics_v",
+            directory / "node_metrics.parquet",
+            list(NODE_METRIC_COLUMNS),
+            "node_id",
+        )
+        _copy_table(
+            db,
+            "visualization_layout_v",
+            directory / "visualization_layout.parquet",
+            list(VISUALIZATION_LAYOUT_COLUMNS),
+            "layout_level, object_id",
+        )
         state_directory = directory / "state"
         state_directory.mkdir(parents=True, exist_ok=True)
         _copy_table(
@@ -4038,6 +4127,42 @@ def _write_discovery_artifacts(
         write_conditionals(db, directory)
         write_graph_snapshot(db, directory)
         record_publication_stage("derived_artifacts")
+        _write_json_atomic(directory / "coverage_summary.json", coverage)
+        source_watermark = db.scalar(
+            "SELECT max(last_seen_ts) FROM nodes_table"
+        )
+        viewer_content_artifacts = (
+            "nodes.parquet",
+            "propositions.parquet",
+            "relation_candidates.parquet",
+            "logic_edges.parquet",
+            "rejected_edges.parquet",
+            "quarantined_pairs.parquet",
+            "event_summary.parquet",
+            "event_relation_summary.parquet",
+            "component_summary.parquet",
+            "node_metrics.parquet",
+            "visualization_layout.parquet",
+        )
+        _write_json_atomic(
+            directory / "viewer_manifest.json",
+            {
+                "schema_version": VIEWER_ARTIFACT_VERSION,
+                "api_version": VIEWER_API_VERSION,
+                "layout_version": VISUALIZATION_LAYOUT_VERSION,
+                "source_watermark": source_watermark,
+                "graph_content_fingerprint": canonical_json_sha256(
+                    {
+                        "coverage": coverage,
+                        "artifacts": {
+                            name: _sha256(directory / name)
+                            for name in viewer_content_artifacts
+                        },
+                    }
+                ),
+                "response_limits": {"nodes": 5_000, "edges": 10_000},
+            },
+        )
         candidate_stats = {
             key: int(
                 db.scalar(
@@ -4088,6 +4213,7 @@ def _write_discovery_artifacts(
             "parse_failures": sum(
                 1 for row in propositions if row["parse_status"] != "parsed"
             ),
+            "coverage": coverage,
             "solver": solver_stats,
             "rules": rule_support,
             "candidate_workspace": {
@@ -4321,6 +4447,11 @@ def _validate_discovery_artifacts(db: DuckDB, directory: Path) -> None:
         "model_assessments.parquet": MODEL_ASSESSMENT_COLUMNS,
         "quarantined_pairs.parquet": QUARANTINE_COLUMNS,
         "qualification_cases.parquet": QUALIFICATION_CASE_COLUMNS,
+        "event_summary.parquet": EVENT_SUMMARY_COLUMNS,
+        "event_relation_summary.parquet": EVENT_RELATION_SUMMARY_COLUMNS,
+        "component_summary.parquet": COMPONENT_SUMMARY_COLUMNS,
+        "node_metrics.parquet": NODE_METRIC_COLUMNS,
+        "visualization_layout.parquet": VISUALIZATION_LAYOUT_COLUMNS,
         "state/market_state.parquet": MARKET_STATE_COLUMNS,
         "state/proposition_fingerprints.parquet": PROPOSITION_FINGERPRINT_COLUMNS,
         "state/proposition_embeddings.parquet": EMBEDDING_STATE_COLUMNS,
@@ -4412,6 +4543,7 @@ def _discovery_manifest(
     compute = _compute_accounting(config, state, timings)
     artifact_names = [
         *DISCOVERY_PARQUET_ARTIFACTS,
+        *DISCOVERY_JSON_ARTIFACTS,
         *STATE_ARTIFACTS,
         GRAPH_DATABASE_ARTIFACT,
         GRAPH_SNAPSHOT_ARTIFACT,
@@ -4509,6 +4641,9 @@ def _discovery_manifest(
             "candidate_state": CANDIDATE_STATE_VERSION,
             "execution_plan": EXECUTION_PLAN_VERSION,
             "publication": PUBLICATION_VERSION,
+            "viewer_api": VIEWER_API_VERSION,
+            "viewer_artifacts": VIEWER_ARTIFACT_VERSION,
+            "visualization_layout": VISUALIZATION_LAYOUT_VERSION,
             "cache": CACHE_ENTRY_VERSION,
             "rule_registry_hash": _text_hash(
                 json.dumps(RULE_REGISTRY, sort_keys=True)
@@ -4523,8 +4658,13 @@ def _discovery_manifest(
             "top_k": config.top_k,
             "embedding_block_size": config.embedding_block_size,
             "max_propositions": config.max_propositions,
+            "all_propositions": config.max_propositions is None,
             "max_candidates": config.max_candidates,
             "max_llm_pairs": config.max_llm_pairs,
+            "classification_coverage_target": (
+                config.classification_coverage_target
+            ),
+            "max_visible_coverage_gap": config.max_visible_coverage_gap,
             "nli_candidate_pool": min(
                 config.max_candidates,
                 config.max_llm_pairs * 4,

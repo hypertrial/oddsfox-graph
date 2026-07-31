@@ -226,9 +226,11 @@ class DiscoveryConfig:
     parse_confidence: float = 0.95
     top_k: int = 20
     embedding_block_size: int = 512
-    max_propositions: int = 5_000
+    max_propositions: int | None = 5_000
     max_candidates: int = 400_000
     max_llm_pairs: int = 5_000
+    classification_coverage_target: float = 0.0
+    max_visible_coverage_gap: float = 1.0
     llm_concurrency: int = 2
     output_format: Literal["table", "json", "jsonl"] = "table"
     progress_format: Literal["auto", "plain", "json", "quiet"] = "auto"
@@ -238,6 +240,12 @@ class DiscoveryConfig:
             raise ValueError("accept_confidence must be between 0 and 1")
         if not 0.0 <= self.parse_confidence <= 1.0:
             raise ValueError("parse_confidence must be between 0 and 1")
+        if not 0.0 <= self.classification_coverage_target <= 1.0:
+            raise ValueError(
+                "classification_coverage_target must be between 0 and 1"
+            )
+        if not 0.0 <= self.max_visible_coverage_gap <= 1.0:
+            raise ValueError("max_visible_coverage_gap must be between 0 and 1")
         if not 0.0 <= self.temperature <= 2.0:
             raise ValueError("temperature must be between 0 and 2")
         if not 0.0 < self.generation_top_p <= 1.0:
@@ -262,7 +270,6 @@ class DiscoveryConfig:
         for name in (
             "top_k",
             "embedding_block_size",
-            "max_propositions",
             "max_candidates",
             "max_llm_pairs",
             "llm_concurrency",
@@ -271,6 +278,8 @@ class DiscoveryConfig:
         ):
             if int(getattr(self, name)) < 1:
                 raise ValueError(f"{name} must be positive")
+        if self.max_propositions is not None and self.max_propositions < 1:
+            raise ValueError("max_propositions must be positive when supplied")
 
     def threshold_for(self, relation: str) -> float:
         normalized = "implies" if relation in {"A_implies_B", "B_implies_A"} else relation
