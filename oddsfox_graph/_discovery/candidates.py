@@ -89,12 +89,8 @@ def generate_candidate_store(
     embedding_text: Callable[[dict[str, Any]], str],
     stage_rank: Callable[[dict[str, Any]], int | None],
     is_winner: Callable[[dict[str, Any]], bool],
-    baseline_embeddings: dict[str, list[float]] | None = None,
-    baseline_neighbors: Sequence[dict[str, Any]] | None = None,
     baseline_embedding_path: Path | None = None,
     baseline_neighbor_path: Path | None = None,
-    embedding_state_sink: list[dict[str, Any]] | None = None,
-    neighbor_state_sink: list[dict[str, Any]] | None = None,
     neighborhood_execution_sink: list[dict[str, Any]] | None = None,
     baseline_candidate_blocks: Any | None = None,
     baseline_candidate_reasons: Any | None = None,
@@ -285,19 +281,13 @@ def generate_candidate_store(
             embedding_path=baseline_embedding_path,
             neighbor_path=baseline_neighbor_path,
         )
-    effective_neighbor_sink = neighbor_state_sink
     _embedding_reason_rows(
         ids,
         proposition_by_id,
         config,
         embedder,
         embedding_text,
-        baseline_embeddings=baseline_embeddings,
-        baseline_neighbors=baseline_neighbors,
         baseline_state_available=baseline_embedding_path is not None,
-        embedding_state_sink=embedding_state_sink,
-        neighbor_state_sink=effective_neighbor_sink,
-        include_reason_rows=False,
         neighborhood_execution_sink=neighborhood_execution_sink,
         baseline_neighborhood_fingerprints=baseline_neighborhood_fingerprints,
         state_store=store,
@@ -426,16 +416,11 @@ def _embedding_reason_rows(
     embedder: Callable[[list[str], Any], Any],
     embedding_text: Callable[[dict[str, Any]], str],
     *,
-    baseline_embeddings: dict[str, list[float]] | None = None,
-    baseline_neighbors: Sequence[dict[str, Any]] | None = None,
     baseline_state_available: bool = False,
-    embedding_state_sink: list[dict[str, Any]] | None = None,
-    neighbor_state_sink: list[dict[str, Any]] | None = None,
-    include_reason_rows: bool = True,
     neighborhood_execution_sink: list[dict[str, Any]] | None = None,
     baseline_neighborhood_fingerprints: dict[str, str] | None = None,
     state_store: CandidateStore | None = None,
-) -> list[dict[str, Any]]:
+) -> None:
     try:
         import numpy as np
     except ImportError as exc:  # pragma: no cover - installation guard
@@ -453,7 +438,6 @@ def _embedding_reason_rows(
     text_hashes = [
         text_sha256(text) for text in texts
     ]
-    legacy_embeddings = baseline_embeddings or {}
     encode_block_size = 512
     matrix_path = state_store.directory / "embedding-matrix.f32"
     matrix: Any | None = None
@@ -463,11 +447,7 @@ def _embedding_reason_rows(
     for block_start in range(0, len(ids), encode_block_size):
         block_end = min(block_start + encode_block_size, len(ids))
         block_hashes = text_hashes[block_start:block_end]
-        reused_by_hash: dict[str, Any] = {
-            text_hash: legacy_embeddings[text_hash]
-            for text_hash in block_hashes
-            if text_hash in legacy_embeddings
-        }
+        reused_by_hash: dict[str, Any] = {}
         if baseline_state_available:
             reused_by_hash.update(
                 {
@@ -550,23 +530,15 @@ def _embedding_reason_rows(
             }
             for index in range(block_start, block_end)
         ]
-        if embedding_state_sink is not None:
-            embedding_state_sink.extend(block_rows)
         state_store.append_embedding_state(block_rows)
 
     if matrix is None:
-        return []
+        return
     matrix.flush()
     state_store.embedding_vectors_reused = len(reused_indices)
     state_store.embedding_vectors_recomputed = len(ids) - len(reused_indices)
 
-    legacy_neighbors_by_source: dict[str, list[dict[str, Any]]] = {}
-    for row in baseline_neighbors or []:
-        legacy_neighbors_by_source.setdefault(
-            str(row["proposition_id"]),
-            [],
-        ).append(row)
-    baseline_source_ids = set(legacy_neighbors_by_source)
+    baseline_source_ids: set[str] = set()
     changed_source_text_ids: set[str] = set()
     if baseline_state_available:
         baseline_source_ids.update(
@@ -596,7 +568,6 @@ def _embedding_reason_rows(
         for index in range(len(ids))
         if index not in reused_indices
     } | (set(ids) - baseline_source_ids) | changed_source_text_ids
-    rows: list[dict[str, Any]] = []
     block_size = int(getattr(config, "embedding_block_size", 512))
     neighbor_count = min(int(config.top_k), len(ids) - 1)
     neighbor_buffer: list[dict[str, Any]] = []
@@ -604,8 +575,6 @@ def _embedding_reason_rows(
     reusable_boundaries: dict[str, tuple[float, str]] = {}
     if (
         baseline_state_available
-        and not baseline_neighbors
-        and neighbor_state_sink is None
         and baseline_neighborhood_fingerprints is not None
         and (set(ids) - changed_ids) <= set(baseline_neighborhood_fingerprints)
     ):
@@ -638,16 +607,6 @@ def _embedding_reason_rows(
             ranked_neighbors,
             start=1,
         ):
-            a_id, b_id = sorted((proposition_id, other_id))
-            if include_reason_rows:
-                rows.append(
-                    {
-                        "proposition_a_id": a_id,
-                        "proposition_b_id": b_id,
-                        "embedding_similarity": similarity,
-                        "embedding_rank": rank,
-                    }
-                )
             neighbor_row = {
                 "proposition_id": proposition_id,
                 "neighbor_id": other_id,
@@ -660,8 +619,6 @@ def _embedding_reason_rows(
                 "embedding_model": str(config.embedding_model),
                 "embedding_revision": str(config.embedding_revision),
             }
-            if neighbor_state_sink is not None:
-                neighbor_state_sink.append(neighbor_row)
             neighbor_buffer.append(neighbor_row)
             if len(neighbor_buffer) >= 10_000:
                 flush_neighbors()
@@ -750,10 +707,8 @@ def _embedding_reason_rows(
                 for proposition_id in block_ids
                 if proposition_id not in reusable_block_ids
             ]
-            prior_by_source = {
-                proposition_id: list(
-                    legacy_neighbors_by_source.get(proposition_id, [])
-                )
+            prior_by_source: dict[str, list[dict[str, Any]]] = {
+                proposition_id: []
                 for proposition_id in affected_block_ids
             }
             if baseline_state_available and affected_block_ids:
@@ -892,7 +847,6 @@ def _embedding_reason_rows(
     matrix.flush()
     del matrix
     matrix_path.unlink(missing_ok=True)
-    return rows
 
 
 def _top_k_indices(scores: Any, count: int, np: Any) -> Any:

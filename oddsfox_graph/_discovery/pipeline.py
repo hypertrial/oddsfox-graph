@@ -11,7 +11,6 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Literal, TypeVar, cast
 
-from .._diagnostic_stages import write_conditionals
 from . import publication as discovery_publication
 from .bulk import create_and_fill as _create_and_fill
 from .cache import (
@@ -25,14 +24,11 @@ from .candidates import (
     structural_member_limit as _structural_member_limit,
 )
 from .contracts import (
-    DEFAULT_EMBEDDING_REVISION,
     AtomicPairAssessment,
     DiscoveryConfig,
     ParsedMarket,
     ParsedOutcome,
-    PropositionRecord,
     SourceMarket,
-    SourceOutcome,
 )
 from .inference import (
     LocalStructuredClient,
@@ -68,7 +64,6 @@ from .provenance import (
     text_sha256 as _text_hash,
 )
 from .input import (
-    datetime_or_none as _datetime_or_none,
     load_source_markets as _load_source_markets,
     str_or_none as _str_or_none,
 )
@@ -95,6 +90,7 @@ from .incremental import EXECUTION_PLAN_COLUMNS, ExecutionPlan
 from .publication import (
     copy_sorted_parquet as _copy_table,
     publish_directory_atomically,
+    write_conditionals,
 )
 from .types import (
     AdjudicationStageResult,
@@ -145,22 +141,6 @@ from ..artifacts import ARTIFACT_COLUMNS, reports
 from ..graph_snapshot import GRAPH_SNAPSHOT_ARTIFACT, write_graph_snapshot
 from ..queries import DuckDB, q
 from ..reports import write_reports, write_summary_report
-
-
-__all__ = [
-    "DEFAULT_EMBEDDING_REVISION",
-    "AtomicPairAssessment",
-    "DiscoveryConfig",
-    "InferenceCache",
-    "ParsedMarket",
-    "ParsedOutcome",
-    "PropositionRecord",
-    "SourceMarket",
-    "SourceOutcome",
-    "discover",
-    "_datetime_or_none",
-    "_load_source_markets",
-]
 
 
 DISCOVERY_PARQUET_ARTIFACTS = (
@@ -4146,14 +4126,3 @@ def _run_async(
     awaitable: Coroutine[Any, Any, _AsyncResult],
 ) -> _AsyncResult:
     return asyncio.run(awaitable)
-
-
-def _validate_returned_ids(
-    expected: Sequence[str],
-    actual: Sequence[str],
-    kind: str,
-) -> None:
-    if len(actual) != len(set(actual)) or set(actual) != set(expected):
-        raise ValueError(
-            f"Structured output {kind} IDs do not match the requested batch"
-        )

@@ -443,19 +443,6 @@ def _same_authoritative_scope(
     return bool(a_scope and a_scope == b_scope)
 
 
-def times_overlap(a: dict[str, Any], b: dict[str, Any]) -> bool:
-    a_start, a_end = a.get("time_start"), a.get("time_end")
-    b_start, b_end = b.get("time_start"), b.get("time_end")
-    return bool(
-        a_start
-        and a_end
-        and b_start
-        and b_end
-        and a_start <= b_end
-        and b_start <= a_end
-    )
-
-
 def hashable(value: object) -> object:
     if isinstance(value, list):
         return tuple(value)

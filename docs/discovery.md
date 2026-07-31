@@ -55,8 +55,7 @@ and baselines are rejected; regenerate them with a clean run.
 `--cache-dir` is a dedicated directory containing
 `inference-cache-v6.sqlite3`. The cache is transactional, integrity checked,
 bulk-read and bulk-written, and opened read-only during offline discovery.
-Existing JSON caches and v0.7 profiles or baselines are intentionally
-incompatible.
+Incompatible caches, profiles, or baselines must be regenerated.
 
 Candidate reasons select and prioritize pairs, but are not sent to the
 generative model and cannot serve as supporting-field citations. Model

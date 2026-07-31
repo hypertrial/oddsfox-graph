@@ -715,14 +715,14 @@ def test_model_tree_hash_and_incompatible_cache_rejection(
     second, _ = sha256_path(model)
     assert first != second
 
-    legacy = tmp_path / "legacy-cache"
-    legacy.mkdir()
-    (legacy / "legacy.json").write_text(
+    incompatible = tmp_path / "incompatible-cache"
+    incompatible.mkdir()
+    (incompatible / "entry.json").write_text(
         json.dumps({"version": 3, "state": "success"}),
         encoding="utf-8",
     )
     with pytest.raises(ValueError, match="Incompatible discovery cache"):
-        InferenceCache(legacy)
+        InferenceCache(incompatible)
 
 
 def test_sqlite_cache_bulk_states_offline_and_immutable_success(
@@ -852,7 +852,7 @@ def test_sqlite_cache_rejects_schema_mismatch_and_invalid_entry_json(
 
     mixed_directory = tmp_path / "mixed-cache"
     InferenceCache(mixed_directory).close()
-    (mixed_directory / "legacy-entry.json").write_text("{}", encoding="utf-8")
+    (mixed_directory / "stale-entry.json").write_text("{}", encoding="utf-8")
     with pytest.raises(ValueError, match="empty cache directory"):
         InferenceCache(mixed_directory)
 

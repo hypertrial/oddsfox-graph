@@ -65,10 +65,10 @@ incremental execution uses a distinct completed directory with
 `--incremental-from`.
 
 The cache directory contains one transactional
-`inference-cache-v6.sqlite3` database. v0.7 JSON caches, profiles, and
-incremental baselines are intentionally incompatible. Candidate reasons are
-used only for retrieval and scheduling; classification receives the two
-canonical proposition records and never treats retrieval metadata as evidence.
+`inference-cache-v6.sqlite3` database. Incompatible caches, profiles, and
+incremental baselines must be regenerated. Candidate reasons are used only for
+retrieval and scheduling; classification receives the two canonical
+proposition records and never treats retrieval metadata as evidence.
 
 See [documentation](docs/index.md), [CLI reference](docs/cli.md),
 [discovery workflow](docs/discovery.md), [artifacts](docs/artifacts.md), and

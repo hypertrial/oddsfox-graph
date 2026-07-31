@@ -2,34 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, NotRequired, TypedDict
+from typing import TYPE_CHECKING, Any, TypedDict
 
 if TYPE_CHECKING:
     from .workspace import CandidateStore
-
-
-class CandidateRow(TypedDict):
-    proposition_a_id: str
-    proposition_b_id: str
-    candidate_reasons: list[str]
-    embedding_similarity: float | None
-    embedding_rank: int | None
-    deterministic_relation: str | None
-    rule_id: str | None
-    rule_status: str | None
-    classification_relation: str | None
-    classification_confidence: float | None
-    supporting_fields: str | None
-    a_implies_b: bool | None
-    b_implies_a: bool | None
-    explanation: str | None
-    assumptions: list[str]
-    requires_review: bool
-    status: str
-    discovery_method: str | None
-    model_version: str | None
-    prompt_version: str | None
-    _deterministic: NotRequired[dict[str, object]]
 
 
 class IncrementalStats(TypedDict, total=False):

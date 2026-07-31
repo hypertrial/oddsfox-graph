@@ -273,7 +273,9 @@ def test_time_stage_and_single_winner_rules_require_matching_scope() -> None:
     )
 
 
-def test_blockwise_embeddings_are_stable_and_reusable() -> None:
+def test_blockwise_embeddings_are_stable_and_reusable(
+    tmp_path: Path,
+) -> None:
     propositions = [
         _proposition(str(index), market_id=f"m-{index}")
         for index in range(6)
@@ -290,40 +292,59 @@ def test_blockwise_embeddings_are_stable_and_reusable() -> None:
             dtype=np.float32,
         )
 
-    state: list[dict[str, Any]] = []
     config = DiscoveryConfig(
         top_k=2,
         embedding_block_size=2,
         max_candidates=100,
     )
-    first = _candidate_rows(
+    first_store = generate_candidate_workspace(
         propositions,
         config,
         embed,
-        embedding_state_sink=state,
     )
+    embedding_path = tmp_path / "embeddings.parquet"
+    neighbor_path = tmp_path / "neighbors.parquet"
+    try:
+        first = first_store.db.rows(
+            "SELECT * FROM relation_candidates_work "
+            "ORDER BY proposition_a_id, proposition_b_id"
+        )
+        first_store.db.execute(
+            f"COPY proposition_embeddings_work TO '{q(embedding_path)}' "
+            "(FORMAT PARQUET)"
+        )
+        first_store.db.execute(
+            f"COPY semantic_neighbors_work TO '{q(neighbor_path)}' "
+            "(FORMAT PARQUET)"
+        )
+    finally:
+        first_store.close()
+
     assert len(calls) == 1
-    assert len(state) == len(propositions)
     assert max(
         int(row["embedding_rank"])
         for row in first
         if row["embedding_rank"] is not None
     ) <= 2
-    baseline = {
-        str(row["text_hash"]): list(row["embedding"]) for row in state
-    }
 
     def unexpected(_: list[str], __: DiscoveryConfig) -> np.ndarray:
         raise AssertionError("unchanged vectors must be reused")
 
-    replay_state: list[dict[str, Any]] = []
-    replay = _candidate_rows(
+    replay_store = generate_candidate_workspace(
         propositions,
         config,
         unexpected,
-        baseline_embeddings=baseline,
-        embedding_state_sink=replay_state,
+        baseline_embedding_path=embedding_path,
+        baseline_neighbor_path=neighbor_path,
     )
+    try:
+        replay = replay_store.db.rows(
+            "SELECT * FROM relation_candidates_work "
+            "ORDER BY proposition_a_id, proposition_b_id"
+        )
+        assert replay_store.embedding_vectors_reused == len(propositions)
+    finally:
+        replay_store.close()
     assert [
         (row["proposition_a_id"], row["proposition_b_id"])
         for row in replay
@@ -331,7 +352,6 @@ def test_blockwise_embeddings_are_stable_and_reusable() -> None:
         (row["proposition_a_id"], row["proposition_b_id"])
         for row in first
     ]
-    assert all(row["reused"] for row in replay_state)
 
 
 def test_bounded_candidate_store_applies_stable_global_cap() -> None:
