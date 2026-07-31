@@ -2,13 +2,19 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sqlite3
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
 import httpx
 import pytest
 
-from oddsfox_graph._discovery.cache import JsonCache
+from oddsfox_graph._discovery.cache import (
+    CACHE_FILENAME,
+    InferenceCache,
+    cache_entry,
+)
 from oddsfox_graph._discovery.candidates import candidate_sort_key
 from oddsfox_graph._discovery.contracts import (
     AtomicPairAssessment,
@@ -30,12 +36,17 @@ from oddsfox_graph._discovery.inference import (
     sha256_path,
     validate_profile_match,
 )
-from oddsfox_graph._discovery.nli import nli_inference_fingerprint
-from oddsfox_graph.discovery import (
-    _derive_atomic_relation,
-    _prepare_inference_context,
-    _profiled_nli_action,
+from oddsfox_graph._discovery.nli import (
+    nli_inference_fingerprint,
+    profiled_nli_action,
 )
+from oddsfox_graph._discovery.protocol import (
+    PairRequest,
+    classify_request_hash,
+    conformance_pair_request,
+    protocol_metadata,
+)
+from oddsfox_graph._discovery.adjudication import derive_atomic_relation
 from oddsfox_graph.model_tools import (
     _contains_each_outcome_once,
     _profile_from_predictions,
@@ -137,7 +148,7 @@ def test_generation_settings_reject_invalid_values(
         DiscoveryConfig(**changes).validate()
 
 
-def test_offline_context_reuses_saved_remote_vllm_identity(
+def test_saved_remote_vllm_manifest_preserves_runtime_identity(
     tmp_path: Path,
 ) -> None:
     out_dir = tmp_path / "output"
@@ -163,18 +174,13 @@ def test_offline_context_reuses_saved_remote_vllm_identity(
         encoding="utf-8",
     )
 
-    context = _prepare_inference_context(
-        DiscoveryConfig(offline=True),
-        out_dir,
-        None,
-    )
+    loaded = load_model_manifest(out_dir / "model_manifest.json")
 
-    assert context.manifest.runtime == "vllm"
+    assert loaded.runtime == "vllm"
     assert (
-        context.manifest.inference_origin
+        loaded.inference_origin
         == "https://self-hosted.example/v1"
     )
-    assert context.client is None
 
 
 def test_parse_conformance_accepts_each_outcome_in_any_order() -> None:
@@ -516,7 +522,7 @@ def test_every_atomic_relation_mapping(
     assessment: AtomicPairAssessment,
     relation: str,
 ) -> None:
-    assert _derive_atomic_relation(assessment) == (relation, None)
+    assert derive_atomic_relation(assessment) == (relation, None)
 
 
 def test_atomic_contradiction_cannot_map_to_relation() -> None:
@@ -525,7 +531,7 @@ def test_atomic_contradiction_cannot_map_to_relation() -> None:
         can_both_be_true="no",
         logically_related="yes",
     )
-    relation, error = _derive_atomic_relation(assessment)
+    relation, error = derive_atomic_relation(assessment)
     assert relation is None
     assert "contradicts" in str(error)
 
@@ -538,6 +544,7 @@ def test_manifest_profile_and_fingerprint_bind_every_inference_field() -> None:
         requested_model=MODEL_ID,
         prompt_version="atomic-v1",
         prompt_hash="a" * 64,
+        request_schema_hash="9" * 64,
         schema_hash="b" * 64,
         settings=_settings(),
     )
@@ -547,6 +554,7 @@ def test_manifest_profile_and_fingerprint_bind_every_inference_field() -> None:
         requested_model=MODEL_ID,
         prompt_version="atomic-v1",
         prompt_hash="a" * 64,
+        request_schema_hash="9" * 64,
         schema_hash="b" * 64,
         settings=_settings(max_tokens=129),
     )
@@ -563,15 +571,34 @@ def test_manifest_profile_and_fingerprint_bind_every_inference_field() -> None:
         parse_schema_hash="f" * 64,
         classify_prompt_hash="1" * 64,
         classify_schema_hash="2" * 64,
+        request_contract_hashes={"classify": "9" * 64},
         inference_fingerprints={"classify": first},
         relations={},
         nli_actions={},
         structured_output_validity=1.0,
         metrics={},
     )
-    validate_profile_match(profile, manifest, {"classify": first})
+    validate_profile_match(
+        profile,
+        manifest,
+        {"classify": first},
+        {"classify": "9" * 64},
+        parse_prompt_hash="e" * 64,
+        parse_schema_hash="f" * 64,
+        classify_prompt_hash="1" * 64,
+        classify_schema_hash="2" * 64,
+    )
     with pytest.raises(ValueError, match="fingerprints"):
-        validate_profile_match(profile, manifest, {"classify": changed})
+        validate_profile_match(
+            profile,
+            manifest,
+            {"classify": changed},
+            {"classify": "9" * 64},
+            parse_prompt_hash="e" * 64,
+            parse_schema_hash="f" * 64,
+            classify_prompt_hash="1" * 64,
+            classify_schema_hash="2" * 64,
+        )
     with pytest.raises(ValueError, match="fingerprints"):
         validate_profile_match(
             profile,
@@ -580,7 +607,43 @@ def test_manifest_profile_and_fingerprint_bind_every_inference_field() -> None:
                 "classify": first,
                 "nli": nli_inference_fingerprint("different-nli", "revision"),
             },
+            {"classify": "9" * 64},
+            parse_prompt_hash="e" * 64,
+            parse_schema_hash="f" * 64,
+            classify_prompt_hash="1" * 64,
+            classify_schema_hash="2" * 64,
         )
+    with pytest.raises(ValueError, match="prompt or response schema"):
+        validate_profile_match(
+            profile,
+            manifest,
+            {"classify": first},
+            {"classify": "9" * 64},
+            parse_prompt_hash="0" * 64,
+            parse_schema_hash="f" * 64,
+            classify_prompt_hash="1" * 64,
+            classify_schema_hash="2" * 64,
+        )
+
+
+def test_pair_request_contract_is_canonical_and_excludes_retrieval_metadata() -> None:
+    request = conformance_pair_request(MODEL_ID)
+    payload = request.model_dump(mode="json")
+
+    assert set(payload) == {"pair_id", "proposition_A", "proposition_B"}
+    assert "candidate_reasons" not in json.dumps(payload)
+    assert (
+        protocol_metadata()["classify"]["request_schema_hash"]
+        == classify_request_hash()
+    )
+
+    changed_schema = PairRequest.model_json_schema()
+    changed_schema["required"] = [
+        field
+        for field in changed_schema["required"]
+        if field != "pair_id"
+    ]
+    assert canonical_json_sha256(changed_schema) != classify_request_hash()
 
 
 def test_nli_signal_prioritizes_otherwise_equal_candidates() -> None:
@@ -612,6 +675,7 @@ def test_profiled_nli_never_proposes_complement_exclusion_or_compatibility() -> 
         parse_schema_hash="f" * 64,
         classify_prompt_hash="1" * 64,
         classify_schema_hash="2" * 64,
+        request_contract_hashes={},
         inference_fingerprints={},
         relations={},
         nli_actions={
@@ -625,7 +689,7 @@ def test_profiled_nli_never_proposes_complement_exclusion_or_compatibility() -> 
         structured_output_validity=1.0,
         metrics={},
     )
-    action, relation, _ = _profiled_nli_action(
+    action, relation, _ = profiled_nli_action(
         {
             "nli_a_to_b_entailment": 0.99,
             "nli_b_to_a_entailment": 0.99,
@@ -651,13 +715,173 @@ def test_model_tree_hash_and_incompatible_cache_rejection(
     second, _ = sha256_path(model)
     assert first != second
 
-    cache = JsonCache(tmp_path / "cache")
-    (cache.directory / "legacy.json").write_text(
+    legacy = tmp_path / "legacy-cache"
+    legacy.mkdir()
+    (legacy / "legacy.json").write_text(
         json.dumps({"version": 3, "state": "success"}),
         encoding="utf-8",
     )
     with pytest.raises(ValueError, match="Incompatible discovery cache"):
-        cache.get("legacy")
+        InferenceCache(legacy)
+
+
+def test_sqlite_cache_bulk_states_offline_and_immutable_success(
+    tmp_path: Path,
+) -> None:
+    directory = tmp_path / "cache"
+    cache = InferenceCache(directory)
+    success = cache_entry(
+        task="classify",
+        parsed={"pair_id": "pair"},
+        error=None,
+        observed_model=MODEL_ID,
+        usage={"input_tokens": 2, "output_tokens": 1, "total_tokens": 3},
+        usage_scope="scope",
+        state="success",
+    )
+    transient = cache_entry(
+        task="classify",
+        parsed=None,
+        error="timeout",
+        observed_model=MODEL_ID,
+        usage={},
+        usage_scope=None,
+        state="transient_failure",
+    )
+    cache.put_many({"a": success, "b": transient})
+    assert cache.get_many(["a", "b"]) == {"a": success}
+    assert cache.get_many(["a", "b"], offline=True) == {
+        "a": success,
+        "b": transient,
+    }
+    cache.put("b", success)
+    assert cache.get("b") == success
+    with pytest.raises(ValueError, match="Conflicting immutable"):
+        cache.put(
+            "a",
+            cache_entry(
+                task="classify",
+                parsed={"pair_id": "different"},
+                error=None,
+                observed_model=MODEL_ID,
+                usage={},
+                usage_scope=None,
+                state="success",
+            ),
+        )
+    cache.checkpoint()
+    assert cache.integrity_check() == "ok"
+    assert cache.stats()["entry_count"] == 2
+    cache.close()
+
+    offline = InferenceCache(directory, offline=True)
+    assert offline.get("a") == success
+    with pytest.raises(ValueError, match="read-only"):
+        offline.put("c", success)
+    offline.close()
+    assert (directory / CACHE_FILENAME).is_file()
+
+
+def test_sqlite_cache_bulk_chunks_and_concurrent_writers(
+    tmp_path: Path,
+) -> None:
+    directory = tmp_path / "cache"
+    InferenceCache(directory).close()
+    entry = cache_entry(
+        task="parse",
+        parsed={"market_id": "fixture", "propositions": []},
+        error=None,
+        observed_model=MODEL_ID,
+        usage={"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+        usage_scope="scope",
+        state="success",
+    )
+
+    def write(prefix: str) -> None:
+        with InferenceCache(directory) as cache:
+            cache.put_many(
+                {
+                    f"{prefix}-{index:03d}": entry
+                    for index in range(300)
+                }
+            )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [
+            executor.submit(write, prefix)
+            for prefix in ("a", "b")
+        ]
+        for future in futures:
+            future.result()
+
+    with InferenceCache(directory) as cache:
+        keys = [
+            f"{prefix}-{index:03d}"
+            for prefix in ("a", "b")
+            for index in range(300)
+        ]
+        assert cache.contains_many(keys) == set(keys)
+        stats = cache.stats()
+        assert stats["entry_count"] == 600
+        assert int(stats["file_bytes"]) > 0
+        assert int(stats["storage_bytes"]) >= int(stats["file_bytes"])
+        assert len(str(stats["database_hash"])) == 64
+
+
+def test_sqlite_cache_rejects_schema_mismatch_and_invalid_entry_json(
+    tmp_path: Path,
+) -> None:
+    schema_directory = tmp_path / "schema-cache"
+    InferenceCache(schema_directory).close()
+    database = schema_directory / CACHE_FILENAME
+    with sqlite3.connect(database) as connection:
+        connection.execute(
+            "UPDATE cache_metadata SET value = '5' WHERE key = 'entry_version'"
+        )
+    with pytest.raises(ValueError, match="empty cache directory"):
+        InferenceCache(schema_directory)
+
+    columns_directory = tmp_path / "columns-cache"
+    InferenceCache(columns_directory).close()
+    with sqlite3.connect(columns_directory / CACHE_FILENAME) as connection:
+        connection.execute(
+            "ALTER TABLE cache_entries RENAME COLUMN task TO invalid_task"
+        )
+    with pytest.raises(ValueError, match="empty cache directory"):
+        InferenceCache(columns_directory)
+
+    mixed_directory = tmp_path / "mixed-cache"
+    InferenceCache(mixed_directory).close()
+    (mixed_directory / "legacy-entry.json").write_text("{}", encoding="utf-8")
+    with pytest.raises(ValueError, match="empty cache directory"):
+        InferenceCache(mixed_directory)
+
+    invalid_directory = tmp_path / "invalid-cache"
+    cache = InferenceCache(invalid_directory)
+    cache.put(
+        "invalid",
+        cache_entry(
+            task="parse",
+            parsed={"market_id": "fixture"},
+            error=None,
+            observed_model=MODEL_ID,
+            usage={},
+            usage_scope=None,
+            state="success",
+        ),
+    )
+    cache.close()
+    with sqlite3.connect(invalid_directory / CACHE_FILENAME) as connection:
+        connection.execute(
+            "UPDATE cache_entries SET parsed_json = '{' "
+            "WHERE cache_key = 'invalid'"
+        )
+    reopened = InferenceCache(invalid_directory)
+    try:
+        with pytest.raises(json.JSONDecodeError):
+            reopened.get("invalid")
+    finally:
+        reopened.close()
 
 
 def test_manifest_creation_and_canonical_id_validation(
@@ -749,3 +973,75 @@ def test_profile_never_calibrates_unsupported_positive_truth(
     profile_path = tmp_path / "model-profile.json"
     profile_path.write_text(profile.model_dump_json(), encoding="utf-8")
     assert load_model_profile(profile_path).profile_id == profile.profile_id
+
+
+def test_nli_profile_uses_parse_valid_pairs_when_generative_output_is_invalid(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from oddsfox_graph._discovery.nli import BidirectionalNliScores, NliScores
+
+    benchmark = tmp_path / "benchmark.parquet"
+    benchmark.write_bytes(b"calibration-fixture")
+    predictions = [
+        {
+            "record_id": f"pair-{index}",
+            "record_type": "pair",
+            "expected_relation": "unrelated",
+            "expected_unsupported_assumption": False,
+            "predicted_relation": None,
+            "confidence": 0.0,
+            "valid": False,
+            "error": "malformed generative output",
+            "prediction_json": None,
+            "nli_text_a": f"proposition a {index}",
+            "nli_text_b": f"proposition b {index}",
+            "input_tokens": 0,
+            "output_tokens": 0,
+        }
+        for index in range(10)
+    ]
+    truth = [
+        {
+            "record_id": row["record_id"],
+            "record_type": "pair",
+            "expected_relation": "unrelated",
+            "unsupported_assumption": False,
+        }
+        for row in predictions
+    ]
+    observed_pairs: list[tuple[str, str]] = []
+
+    def fake_score_bidirectional(
+        _scorer: object,
+        pairs: list[tuple[str, str]],
+        *,
+        batch_size: int,
+    ) -> list[BidirectionalNliScores]:
+        assert batch_size == 32
+        observed_pairs.extend(pairs)
+        neutral = NliScores(entailment=0.0, contradiction=0.0, neutral=1.0)
+        return [
+            BidirectionalNliScores(a_to_b=neutral, b_to_a=neutral)
+            for _ in pairs
+        ]
+
+    monkeypatch.setattr(
+        "oddsfox_graph.model_tools.ModernBertNliScorer",
+        lambda: object(),
+    )
+    monkeypatch.setattr(
+        "oddsfox_graph.model_tools.score_bidirectional",
+        fake_score_bidirectional,
+    )
+
+    profile, _ = _profile_from_predictions(
+        predictions,
+        truth,
+        benchmark,
+        _manifest(),
+    )
+
+    assert len(observed_pairs) == 10
+    assert profile.nli_actions["unrelated"].enabled
+    assert profile.nli_actions["unrelated"].support == 10

@@ -4,16 +4,20 @@ import hashlib
 import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, Protocol
 from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
 
+from .provenance import canonical_json_sha256, sha256_file
+from .versions import (
+    INFERENCE_FINGERPRINT_VERSION,
+    MODEL_MANIFEST_SCHEMA_VERSION,
+    MODEL_PROFILE_SCHEMA_VERSION,
+)
 
-MODEL_MANIFEST_SCHEMA_VERSION: Literal["model-manifest-v1"] = "model-manifest-v1"
-MODEL_PROFILE_SCHEMA_VERSION: Literal["model-profile-v1"] = "model-profile-v1"
-INFERENCE_FINGERPRINT_VERSION = "inference-fingerprint-v1"
+
 APPROVED_OPEN_LICENSES = frozenset({"Apache-2.0"})
 
 
@@ -74,7 +78,7 @@ class NliProfileAction(BaseModel):
 class ModelProfile(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal["model-profile-v1"] = MODEL_PROFILE_SCHEMA_VERSION
+    schema_version: Literal["model-profile-v2"] = MODEL_PROFILE_SCHEMA_VERSION
     profile_id: str
     model_manifest_id: str
     model_manifest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -86,6 +90,7 @@ class ModelProfile(BaseModel):
     parse_schema_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     classify_prompt_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     classify_schema_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    request_contract_hashes: dict[str, str]
     inference_fingerprints: dict[str, str]
     relations: dict[str, ProfileRelation]
     nli_actions: dict[str, NliProfileAction]
@@ -118,6 +123,27 @@ class StructuredResult:
     observed_model: str
     usage: dict[str, int]
     finish_reason: str
+
+
+class StructuredClient(Protocol):
+    async def aclose(self) -> None: ...
+
+    async def preflight(
+        self,
+        *,
+        expected_model: str,
+        expected_runtime: str,
+    ) -> dict[str, Any]: ...
+
+    async def generate(
+        self,
+        *,
+        model: str,
+        system_prompt: str,
+        payload: object,
+        response_model: type[BaseModel],
+        settings: GenerationSettings,
+    ) -> StructuredResult: ...
 
 
 def normalize_inference_base_url(
@@ -155,14 +181,6 @@ def normalize_inference_base_url(
     )
 
 
-def sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
 def sha256_path(path: Path) -> tuple[str, str]:
     resolved = path.resolve()
     if resolved.is_file():
@@ -182,16 +200,6 @@ def sha256_path(path: Path) -> tuple[str, str]:
     return digest.hexdigest(), "tree"
 
 
-def canonical_json_sha256(value: object) -> str:
-    raw = json.dumps(
-        value,
-        sort_keys=True,
-        separators=(",", ":"),
-        default=str,
-    )
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
-
-
 def manifest_sha256(manifest: ModelManifest) -> str:
     return canonical_json_sha256(manifest.model_dump(mode="json"))
 
@@ -203,6 +211,7 @@ def inference_fingerprint(
     requested_model: str,
     prompt_version: str,
     prompt_hash: str,
+    request_schema_hash: str,
     schema_hash: str,
     settings: GenerationSettings,
 ) -> str:
@@ -214,6 +223,7 @@ def inference_fingerprint(
             "requested_model": requested_model,
             "prompt_version": prompt_version,
             "prompt_hash": prompt_hash,
+            "request_schema_hash": request_schema_hash,
             "schema_hash": schema_hash,
             "sampling": asdict(settings),
             "runtime": manifest.runtime,
@@ -275,6 +285,12 @@ def validate_profile_match(
     profile: ModelProfile,
     manifest: ModelManifest,
     fingerprints: dict[str, str],
+    request_contract_hashes: dict[str, str],
+    *,
+    parse_prompt_hash: str,
+    parse_schema_hash: str,
+    classify_prompt_hash: str,
+    classify_schema_hash: str,
 ) -> None:
     if profile.model_manifest_id != manifest.manifest_id:
         raise ValueError("Model profile does not match the model manifest ID")
@@ -287,6 +303,25 @@ def validate_profile_match(
     if profile.inference_fingerprints != fingerprints:
         raise ValueError(
             "Model profile inference fingerprints do not match this run"
+        )
+    if profile.request_contract_hashes != request_contract_hashes:
+        raise ValueError(
+            "Model profile request contracts do not match this run"
+        )
+    expected_protocol_hashes = {
+        "parse_prompt_hash": parse_prompt_hash,
+        "parse_schema_hash": parse_schema_hash,
+        "classify_prompt_hash": classify_prompt_hash,
+        "classify_schema_hash": classify_schema_hash,
+    }
+    actual_protocol_hashes = {
+        field: str(getattr(profile, field))
+        for field in expected_protocol_hashes
+    }
+    if actual_protocol_hashes != expected_protocol_hashes:
+        raise ValueError(
+            "Model profile prompt or response schema contracts do not match "
+            "this run"
         )
 
 

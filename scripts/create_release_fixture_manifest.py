@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import argparse
-import json
 from pathlib import Path
 
+from oddsfox_graph._discovery.provenance import atomic_write_json
 from validate_discovery_release import (
     CANONICAL_SOURCE_SHA256,
     FIXTURE_SCHEMA_VERSION,
@@ -53,10 +53,7 @@ def main() -> int:
     }
     output = (args.output or root / "fixture-manifest.json").resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(
-        json.dumps(payload, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
+    atomic_write_json(output, payload)
     return 0
 
 

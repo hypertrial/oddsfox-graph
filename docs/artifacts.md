@@ -60,9 +60,13 @@ present even when their value is null.
   `market_source_hash`, `parser_model`, `prompt_version`, `schema_version`,
   `normalization_version`.
 
-`graph_snapshot.json`, `model_manifest.json`, optional `model_profile.json`,
-optional `compute_profile.json`, optional `benchmark.parquet`, and optional
-`evaluation_report.json` accompany the Parquet files.
+`oddsfox_graph.duckdb` is the promoted, checkpointed discovery workspace and
+contains the public graph plus retained state tables. `graph_snapshot.json`,
+`model_manifest.json`, optional `model_profile.json`, optional
+`compute_profile.json`, optional `benchmark.parquet`, and optional
+`evaluation_report.json` accompany the Parquet files. The snapshot `built_at`
+value is the latest source-data watermark (or the Unix epoch when the input has
+no timestamps), keeping equivalent replays byte-stable.
 
 ## State, reports, and manifest
 
@@ -73,5 +77,7 @@ Incremental state is stored under `state/`. Reports are `summary.md`,
 `build_manifest.json` records `command`, `version`, `input`, `input_hash`,
 `input_schema`, `models`, `prompts`, `inference`, `versions`, `limits`,
 `incremental`, `benchmark`, `compute`, `solver`, `rules`, `cache`, `usage`,
-`artifacts`, `artifact_hashes`, `state_hashes`, `reports`, `stats`, and
-`stage_timings`. It is written last.
+`artifacts`, `artifact_hashes`, `state_hashes`, `reports`, `stats`,
+`stage_timings`, and `stage_metrics`. Cache metadata includes its SQLite
+format, integrity result, database hash, entry/state counts, file bytes, and
+bulk transaction statistics. The manifest is written last.

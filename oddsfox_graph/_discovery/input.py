@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import hashlib
-import json
 from collections.abc import Sequence
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import cast
 
 from .contracts import SourceMarket, SourceOutcome
+from .provenance import canonical_json_sha256
 from .versions import SOURCE_SCHEMA
 from ..queries import DuckDB, q
 
@@ -108,9 +108,9 @@ def load_source_markets(
     _validate_source_markets(markets)
     eligible_markets = len(eligible_summaries)
     eligible_propositions = sum(
-        int(row["outcome_count"]) for row in eligible_summaries
+        int(cast(int, row["outcome_count"])) for row in eligible_summaries
     )
-    selection = {
+    selection: dict[str, object] = {
         "strategy": (
             "volume_desc_then_market_id"
             if max_propositions is not None
@@ -169,8 +169,8 @@ def _load_compact_markets(
     )
     markets = []
     for row in rows:
-        outcomes = list(row["outcomes"] or [])
-        tokens = list(row["clob_token_ids"] or [])
+        outcomes = list(cast(Sequence[object], row["outcomes"] or []))
+        tokens = list(cast(Sequence[object], row["clob_token_ids"] or []))
         if (
             row["market_id"] is None
             or row["question"] is None
@@ -201,7 +201,10 @@ def _load_compact_markets(
             "event_id": str_or_none(row.get("event_id")),
             "event_slug": str_or_none(row.get("event_slug")),
             "category": str_or_none(row.get("category")),
-            "tags": [str(tag) for tag in (row.get("tags") or [])],
+            "tags": [
+                str(tag)
+                for tag in cast(Sequence[object], row.get("tags") or [])
+            ],
             "time_start": datetime_or_none(row.get("time_start")),
             "time_end": datetime_or_none(row.get("time_end")),
             "outcomes": [
@@ -222,11 +225,14 @@ def _load_compact_markets(
                 event_id=str_or_none(row.get("event_id")),
                 event_slug=str_or_none(row.get("event_slug")),
                 category=str_or_none(row.get("category")),
-                tags=tuple(str(tag) for tag in (row.get("tags") or [])),
+                tags=tuple(
+                    str(tag)
+                    for tag in cast(Sequence[object], row.get("tags") or [])
+                ),
                 time_start=datetime_or_none(row.get("time_start")),
                 time_end=datetime_or_none(row.get("time_end")),
                 volume=(
-                    float(row["volume"])
+                    float(cast(float, row["volume"]))
                     if row.get("volume") is not None
                     else None
                 ),
@@ -274,7 +280,7 @@ def _select_market_summaries(
         summaries,
         key=lambda row: (
             -(
-                float(row["volume"])
+                float(cast(float, row["volume"]))
                 if row.get("volume") is not None
                 else float("-inf")
             ),
@@ -282,7 +288,9 @@ def _select_market_summaries(
         ),
     )
     for row in ordered:
-        next_count = selected_propositions + int(row["outcome_count"])
+        next_count = selected_propositions + int(
+            cast(int, row["outcome_count"])
+        )
         if next_count > max_propositions:
             continue
         selected.append(str(row["market_id"]))
@@ -422,13 +430,7 @@ def _validate_source_markets(markets: Sequence[SourceMarket]) -> None:
 
 
 def source_market_hash(fields: object) -> str:
-    raw = json.dumps(
-        fields,
-        sort_keys=True,
-        separators=(",", ":"),
-        default=str,
-    )
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+    return canonical_json_sha256(fields)
 
 
 def str_or_none(value: object) -> str | None:

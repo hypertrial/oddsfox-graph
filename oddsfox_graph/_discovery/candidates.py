@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-import hashlib
 import math
 from collections.abc import Callable, Sequence
+from pathlib import Path
 from typing import Any
 
 from .bulk import create_and_fill
+from .provenance import text_sha256
 from .workspace import CandidateStore
 from .versions import CANDIDATE_STATE_VERSION
 from ..queries import q
@@ -90,11 +91,14 @@ def generate_candidate_store(
     is_winner: Callable[[dict[str, Any]], bool],
     baseline_embeddings: dict[str, list[float]] | None = None,
     baseline_neighbors: Sequence[dict[str, Any]] | None = None,
+    baseline_embedding_path: Path | None = None,
+    baseline_neighbor_path: Path | None = None,
     embedding_state_sink: list[dict[str, Any]] | None = None,
     neighbor_state_sink: list[dict[str, Any]] | None = None,
     neighborhood_execution_sink: list[dict[str, Any]] | None = None,
     baseline_candidate_blocks: Any | None = None,
     baseline_candidate_reasons: Any | None = None,
+    baseline_neighborhood_fingerprints: dict[str, str] | None = None,
     enabled_rule_ids: set[str] | None = None,
 ) -> CandidateStore:
     """Generate candidates into a disk-backed relational working set."""
@@ -272,9 +276,16 @@ def generate_candidate_store(
                     proposition,
                 )
 
-    effective_neighbor_sink = (
-        neighbor_state_sink if neighbor_state_sink is not None else []
-    )
+    store = CandidateStore()
+    store.initialize_semantic_state()
+    if baseline_embedding_path is not None or baseline_neighbor_path is not None:
+        if baseline_embedding_path is None or baseline_neighbor_path is None:
+            raise ValueError("Incremental semantic state requires both baseline paths")
+        store.load_baseline_semantic_state(
+            embedding_path=baseline_embedding_path,
+            neighbor_path=baseline_neighbor_path,
+        )
+    effective_neighbor_sink = neighbor_state_sink
     _embedding_reason_rows(
         ids,
         proposition_by_id,
@@ -283,10 +294,13 @@ def generate_candidate_store(
         embedding_text,
         baseline_embeddings=baseline_embeddings,
         baseline_neighbors=baseline_neighbors,
+        baseline_state_available=baseline_embedding_path is not None,
         embedding_state_sink=embedding_state_sink,
         neighbor_state_sink=effective_neighbor_sink,
         include_reason_rows=False,
         neighborhood_execution_sink=neighborhood_execution_sink,
+        baseline_neighborhood_fingerprints=baseline_neighborhood_fingerprints,
+        state_store=store,
     )
     feature_rows = [
         {
@@ -299,7 +313,6 @@ def generate_candidate_store(
         for proposition_id in ids
     ]
 
-    store = CandidateStore()
     db = store.db
     try:
         create_and_fill(
@@ -318,16 +331,12 @@ def generate_candidate_store(
             _DETERMINISTIC_MEMBERSHIP_COLUMNS,
             deterministic_memberships,
         )
-        create_and_fill(
-            db,
-            "directed_embedding_neighbors",
-            {
-                "proposition_id": "VARCHAR",
-                "neighbor_id": "VARCHAR",
-                "similarity": "DOUBLE",
-                "neighbor_rank": "INTEGER",
-            },
-            effective_neighbor_sink,
+        db.execute(
+            """
+            CREATE TABLE directed_embedding_neighbors AS
+            SELECT proposition_id, neighbor_id, similarity, neighbor_rank
+            FROM semantic_neighbors_work
+            """
         )
         db.execute(
             """
@@ -419,83 +428,205 @@ def _embedding_reason_rows(
     *,
     baseline_embeddings: dict[str, list[float]] | None = None,
     baseline_neighbors: Sequence[dict[str, Any]] | None = None,
+    baseline_state_available: bool = False,
     embedding_state_sink: list[dict[str, Any]] | None = None,
     neighbor_state_sink: list[dict[str, Any]] | None = None,
     include_reason_rows: bool = True,
     neighborhood_execution_sink: list[dict[str, Any]] | None = None,
+    baseline_neighborhood_fingerprints: dict[str, str] | None = None,
+    state_store: CandidateStore | None = None,
 ) -> list[dict[str, Any]]:
     try:
         import numpy as np
-    except ImportError as exc:  # pragma: no cover - dependency installation guard
+    except ImportError as exc:  # pragma: no cover - installation guard
         raise ImportError(
-            "Automated discovery dependencies are missing; reinstall oddsfox-graph."
+            "Automated discovery dependencies are missing; "
+            "reinstall oddsfox-graph."
         ) from exc
+    if state_store is None:
+        raise ValueError("Embedding retrieval requires a candidate workspace")
 
-    texts = [embedding_text(proposition_by_id[proposition_id]) for proposition_id in ids]
+    texts = [
+        embedding_text(proposition_by_id[proposition_id])
+        for proposition_id in ids
+    ]
     text_hashes = [
-        hashlib.sha256(text.encode("utf-8")).hexdigest() for text in texts
+        text_sha256(text) for text in texts
     ]
-    baseline_embeddings = baseline_embeddings or {}
-    vectors: list[Any | None] = [
-        baseline_embeddings.get(text_hash) for text_hash in text_hashes
-    ]
-    missing_indices = [
-        index for index, vector in enumerate(vectors) if vector is None
-    ]
-    if missing_indices:
-        encoded = np.asarray(
-            embedder([texts[index] for index in missing_indices], config),
-            dtype=np.float32,
-        )
+    legacy_embeddings = baseline_embeddings or {}
+    encode_block_size = 512
+    matrix_path = state_store.directory / "embedding-matrix.f32"
+    matrix: Any | None = None
+    dimension: int | None = None
+    reused_indices: set[int] = set()
+
+    for block_start in range(0, len(ids), encode_block_size):
+        block_end = min(block_start + encode_block_size, len(ids))
+        block_hashes = text_hashes[block_start:block_end]
+        reused_by_hash: dict[str, Any] = {
+            text_hash: legacy_embeddings[text_hash]
+            for text_hash in block_hashes
+            if text_hash in legacy_embeddings
+        }
+        if baseline_state_available:
+            reused_by_hash.update(
+                {
+                    str(row["text_hash"]): row["embedding"]
+                    for row in state_store.baseline_embeddings(
+                        block_hashes,
+                        model=str(config.embedding_model),
+                        revision=str(config.embedding_revision),
+                    )
+                }
+            )
+        block_vectors: list[Any | None] = [
+            reused_by_hash.get(text_hash) for text_hash in block_hashes
+        ]
+        missing_offsets = [
+            offset
+            for offset, vector in enumerate(block_vectors)
+            if vector is None
+        ]
+        if missing_offsets:
+            encoded = np.asarray(
+                embedder(
+                    [texts[block_start + offset] for offset in missing_offsets],
+                    config,
+                ),
+                dtype=np.float32,
+            )
+            if (
+                encoded.ndim != 2
+                or encoded.shape[0] != len(missing_offsets)
+                or encoded.shape[1] == 0
+            ):
+                raise ValueError(
+                    "Embedding model returned an invalid matrix shape"
+                )
+            encoded_norms = np.linalg.norm(
+                encoded,
+                axis=1,
+                keepdims=True,
+            )
+            encoded = encoded / np.maximum(encoded_norms, 1e-12)
+            for encoded_index, offset in enumerate(missing_offsets):
+                block_vectors[offset] = encoded[encoded_index]
+        block_matrix = np.asarray(block_vectors, dtype=np.float32)
         if (
-            encoded.ndim != 2
-            or encoded.shape[0] != len(missing_indices)
-            or encoded.shape[1] == 0
+            block_matrix.ndim != 2
+            or block_matrix.shape[0] != block_end - block_start
+            or block_matrix.shape[1] == 0
+            or not np.isfinite(block_matrix).all()
         ):
             raise ValueError("Embedding model returned an invalid matrix shape")
-        encoded_norms = np.linalg.norm(encoded, axis=1, keepdims=True)
-        encoded = encoded / np.maximum(encoded_norms, 1e-12)
-        for encoded_index, proposition_index in enumerate(missing_indices):
-            vectors[proposition_index] = encoded[encoded_index]
-    matrix = np.asarray(vectors, dtype=np.float32)
-    if (
-        matrix.ndim != 2
-        or matrix.shape[0] != len(ids)
-        or matrix.shape[1] == 0
-        or not np.isfinite(matrix).all()
-    ):
-        raise ValueError("Embedding model returned an invalid matrix shape")
-    if embedding_state_sink is not None:
-        missing_index_set = set(missing_indices)
-        embedding_state_sink.extend(
+        if dimension is None:
+            dimension = int(block_matrix.shape[1])
+            matrix = np.memmap(
+                matrix_path,
+                mode="w+",
+                dtype=np.float32,
+                shape=(len(ids), dimension),
+            )
+        elif int(block_matrix.shape[1]) != dimension:
+            raise ValueError("Embedding dimensions changed within one run")
+        assert matrix is not None
+        matrix[block_start:block_end] = block_matrix
+        reused_offsets = set(range(block_end - block_start)) - set(
+            missing_offsets
+        )
+        reused_indices.update(
+            block_start + offset for offset in reused_offsets
+        )
+        block_rows = [
             {
-                "proposition_id": proposition_id,
-                "text_hash": text_hash,
+                "proposition_id": ids[index],
+                "text_hash": text_hashes[index],
                 "embedding_model": str(config.embedding_model),
                 "embedding_revision": str(config.embedding_revision),
-                "embedding": matrix[index].astype(float).tolist(),
-                "reused": index not in missing_index_set,
+                "embedding": block_matrix[index - block_start]
+                .astype(float)
+                .tolist(),
+                "reused": index in reused_indices,
             }
-            for index, (proposition_id, text_hash) in enumerate(
-                zip(ids, text_hashes, strict=True)
-            )
-        )
-    rows = []
-    block_size = int(getattr(config, "embedding_block_size", 512))
-    neighbor_count = min(int(config.top_k), len(ids) - 1)
-    baseline_by_source: dict[str, list[dict[str, Any]]] = {}
+            for index in range(block_start, block_end)
+        ]
+        if embedding_state_sink is not None:
+            embedding_state_sink.extend(block_rows)
+        state_store.append_embedding_state(block_rows)
+
+    if matrix is None:
+        return []
+    matrix.flush()
+    state_store.embedding_vectors_reused = len(reused_indices)
+    state_store.embedding_vectors_recomputed = len(ids) - len(reused_indices)
+
+    legacy_neighbors_by_source: dict[str, list[dict[str, Any]]] = {}
     for row in baseline_neighbors or []:
-        baseline_by_source.setdefault(
+        legacy_neighbors_by_source.setdefault(
             str(row["proposition_id"]),
             [],
         ).append(row)
-    can_reuse_neighbors = bool(baseline_by_source)
+    baseline_source_ids = set(legacy_neighbors_by_source)
+    changed_source_text_ids: set[str] = set()
+    if baseline_state_available:
+        baseline_source_ids.update(
+            state_store.baseline_neighbor_source_ids(
+                ids,
+                model=str(config.embedding_model),
+                revision=str(config.embedding_revision),
+            )
+        )
+        changed_source_text_ids = state_store.changed_embedding_source_ids(
+            [
+                {
+                    "proposition_id": proposition_id,
+                    "text_hash": text_hashes[index],
+                }
+                for index, proposition_id in enumerate(ids)
+            ],
+            model=str(config.embedding_model),
+            revision=str(config.embedding_revision),
+        )
+    can_reuse_neighbors = bool(baseline_source_ids)
     id_to_index = {
         proposition_id: index for index, proposition_id in enumerate(ids)
     }
     changed_ids = {
-        ids[index] for index in missing_indices
-    } | (set(ids) - set(baseline_by_source))
+        ids[index]
+        for index in range(len(ids))
+        if index not in reused_indices
+    } | (set(ids) - baseline_source_ids) | changed_source_text_ids
+    rows: list[dict[str, Any]] = []
+    block_size = int(getattr(config, "embedding_block_size", 512))
+    neighbor_count = min(int(config.top_k), len(ids) - 1)
+    neighbor_buffer: list[dict[str, Any]] = []
+    reusable_source_ids: set[str] = set()
+    reusable_boundaries: dict[str, tuple[float, str]] = {}
+    if (
+        baseline_state_available
+        and not baseline_neighbors
+        and neighbor_state_sink is None
+        and baseline_neighborhood_fingerprints is not None
+        and (set(ids) - changed_ids) <= set(baseline_neighborhood_fingerprints)
+    ):
+        reusable_boundaries = state_store.valid_baseline_neighbor_boundaries(
+            [
+                {
+                    "proposition_id": proposition_id,
+                    "text_hash": text_hashes[index],
+                }
+                for index, proposition_id in enumerate(ids)
+            ],
+            changed_ids,
+            neighbor_count=neighbor_count,
+            model=str(config.embedding_model),
+            revision=str(config.embedding_revision),
+        )
+
+    def flush_neighbors() -> None:
+        if neighbor_buffer:
+            state_store.append_semantic_neighbors(neighbor_buffer)
+            neighbor_buffer.clear()
 
     def emit(
         proposition_id: str,
@@ -517,102 +648,222 @@ def _embedding_reason_rows(
                         "embedding_rank": rank,
                     }
                 )
+            neighbor_row = {
+                "proposition_id": proposition_id,
+                "neighbor_id": other_id,
+                "similarity": similarity,
+                "neighbor_rank": rank,
+                "proposition_text_hash": text_hashes[
+                    id_to_index[proposition_id]
+                ],
+                "neighbor_text_hash": text_hashes[id_to_index[other_id]],
+                "embedding_model": str(config.embedding_model),
+                "embedding_revision": str(config.embedding_revision),
+            }
             if neighbor_state_sink is not None:
-                neighbor_state_sink.append(
-                    {
-                        "proposition_id": proposition_id,
-                        "neighbor_id": other_id,
-                        "similarity": similarity,
-                        "neighbor_rank": rank,
-                        "proposition_text_hash": text_hashes[
-                            id_to_index[proposition_id]
-                        ],
-                        "neighbor_text_hash": text_hashes[
-                            id_to_index[other_id]
-                        ],
-                        "embedding_model": str(config.embedding_model),
-                        "embedding_revision": str(config.embedding_revision),
-                    }
-                )
+                neighbor_state_sink.append(neighbor_row)
+            neighbor_buffer.append(neighbor_row)
+            if len(neighbor_buffer) >= 10_000:
+                flush_neighbors()
         if neighborhood_execution_sink is not None:
+            fingerprint_payload = "|".join(
+                f"{neighbor_id}:{similarity}:{rank}"
+                for rank, (neighbor_id, similarity) in sorted(
+                    enumerate(ranked_neighbors, start=1),
+                    key=lambda item: (
+                        item[1][0],
+                        item[1][1],
+                        item[0],
+                    ),
+                )
+            )
             neighborhood_execution_sink.append(
                 {
                     "proposition_id": proposition_id,
                     "status": status,
+                    "neighborhood_fingerprint": text_sha256(
+                        fingerprint_payload
+                    ),
                 }
             )
 
     if can_reuse_neighbors:
-        for proposition_id in ids:
-            index = id_to_index[proposition_id]
-            prior = sorted(
-                baseline_by_source.get(proposition_id, []),
-                key=lambda row: int(row["neighbor_rank"]),
-            )
-            prior_valid = (
-                len(prior) == neighbor_count
-                and all(
-                    str(row["neighbor_id"]) in id_to_index
-                    and str(row["proposition_text_hash"])
-                    == text_hashes[index]
-                    and str(row["neighbor_text_hash"])
-                    == text_hashes[
-                        id_to_index[str(row["neighbor_id"])]
+        changed_id_order = sorted(changed_ids)
+        changed_indices = [
+            id_to_index[changed_id]
+            for changed_id in changed_id_order
+        ]
+        for block_start in range(0, len(ids), block_size):
+            block_ids = ids[block_start : block_start + block_size]
+            changed_scores = (
+                np.round(
+                    matrix[
+                        block_start : block_start + len(block_ids)
                     ]
-                    for row in prior
-                )
-            )
-            must_recompute_full = (
-                proposition_id in changed_ids
-                or not prior_valid
-                or any(
-                    str(row["neighbor_id"]) in changed_ids for row in prior
-                )
-            )
-            if must_recompute_full:
-                scores = np.round(
-                    matrix[index] @ matrix.T,
+                    @ matrix[changed_indices].T,
                     decimals=SIMILARITY_DECIMALS,
                 )
-                scores[index] = -np.inf
-                ranked_indices = _top_k_indices(scores, neighbor_count, np)
-                ranked_neighbors = [
-                    (ids[int(other_index)], float(scores[int(other_index)]))
-                    for other_index in ranked_indices
-                ]
-                execution_status = "recomputed"
-            else:
-                prior_neighbors = [
-                    (str(row["neighbor_id"]), float(row["similarity"]))
-                    for row in prior
-                ]
-                options = {
-                    str(row["neighbor_id"]): float(row["similarity"])
-                    for row in prior
-                }
-                for changed_id in changed_ids:
-                    if changed_id == proposition_id:
-                        continue
-                    options[changed_id] = float(
-                        np.round(
-                            matrix[index] @ matrix[id_to_index[changed_id]],
-                            decimals=SIMILARITY_DECIMALS,
-                        )
-                    )
-                ranked_neighbors = sorted(
-                    options.items(),
-                    key=lambda item: (-item[1], item[0]),
-                )[:neighbor_count]
-                execution_status = (
-                    "reused"
-                    if ranked_neighbors == prior_neighbors
-                    else "recomputed"
-                )
-            emit(
-                proposition_id,
-                ranked_neighbors,
-                status=execution_status,
+                if changed_indices and len(changed_indices) < len(ids)
+                else None
             )
+            reusable_block_ids: set[str] = set()
+            for proposition_id in block_ids:
+                boundary = reusable_boundaries.get(proposition_id)
+                can_reuse = boundary is not None
+                if can_reuse and changed_id_order:
+                    assert changed_scores is not None
+                    index = id_to_index[proposition_id]
+                    changed_options = [
+                        (
+                            changed_id,
+                            float(
+                                changed_scores[
+                                    index - block_start,
+                                    changed_offset,
+                                ]
+                            ),
+                        )
+                        for changed_offset, changed_id in enumerate(
+                            changed_id_order
+                        )
+                        if changed_id != proposition_id
+                    ]
+                    if changed_options:
+                        best_changed_id, best_changed_score = min(
+                            changed_options,
+                            key=lambda item: (-item[1], item[0]),
+                        )
+                        assert boundary is not None
+                        boundary_score, boundary_id = boundary
+                        can_reuse = (
+                            best_changed_score < boundary_score
+                            or (
+                                best_changed_score == boundary_score
+                                and best_changed_id >= boundary_id
+                            )
+                        )
+                if can_reuse:
+                    reusable_block_ids.add(proposition_id)
+            reusable_source_ids.update(reusable_block_ids)
+            affected_block_ids = [
+                proposition_id
+                for proposition_id in block_ids
+                if proposition_id not in reusable_block_ids
+            ]
+            prior_by_source = {
+                proposition_id: list(
+                    legacy_neighbors_by_source.get(proposition_id, [])
+                )
+                for proposition_id in affected_block_ids
+            }
+            if baseline_state_available and affected_block_ids:
+                for row in state_store.baseline_neighbors(
+                    affected_block_ids,
+                    model=str(config.embedding_model),
+                    revision=str(config.embedding_revision),
+                ):
+                    prior_by_source.setdefault(
+                        str(row["proposition_id"]),
+                        [],
+                    ).append(row)
+            for proposition_id in block_ids:
+                if proposition_id in reusable_block_ids:
+                    if neighborhood_execution_sink is not None:
+                        assert baseline_neighborhood_fingerprints is not None
+                        neighborhood_execution_sink.append(
+                            {
+                                "proposition_id": proposition_id,
+                                "status": "reused",
+                                "neighborhood_fingerprint": (
+                                    baseline_neighborhood_fingerprints[
+                                        proposition_id
+                                    ]
+                                ),
+                            }
+                        )
+                    continue
+                index = id_to_index[proposition_id]
+                prior = sorted(
+                    prior_by_source.get(proposition_id, []),
+                    key=lambda row: int(row["neighbor_rank"]),
+                )
+                prior_valid = (
+                    len(prior) == neighbor_count
+                    and all(
+                        str(row["neighbor_id"]) in id_to_index
+                        and str(row["proposition_text_hash"])
+                        == text_hashes[index]
+                        and str(row["neighbor_text_hash"])
+                        == text_hashes[
+                            id_to_index[str(row["neighbor_id"])]
+                        ]
+                        for row in prior
+                    )
+                )
+                recompute_full = (
+                    proposition_id in changed_ids
+                    or not prior_valid
+                    or any(
+                        str(row["neighbor_id"]) in changed_ids
+                        for row in prior
+                    )
+                )
+                if recompute_full:
+                    scores = np.round(
+                        matrix[index] @ matrix.T,
+                        decimals=SIMILARITY_DECIMALS,
+                    )
+                    scores[index] = -np.inf
+                    ranked_indices = _top_k_indices(
+                        scores,
+                        neighbor_count,
+                        np,
+                    )
+                    ranked_neighbors = [
+                        (
+                            ids[int(other_index)],
+                            float(scores[int(other_index)]),
+                        )
+                        for other_index in ranked_indices
+                    ]
+                    status = "recomputed"
+                else:
+                    prior_neighbors = [
+                        (str(row["neighbor_id"]), float(row["similarity"]))
+                        for row in prior
+                    ]
+                    options = dict(prior_neighbors)
+                    for changed_offset, changed_id in enumerate(
+                        changed_id_order
+                    ):
+                        if changed_id == proposition_id:
+                            continue
+                        assert changed_scores is not None
+                        options[changed_id] = float(
+                            changed_scores[
+                                index - block_start,
+                                changed_offset,
+                            ]
+                        )
+                    ranked_neighbors = sorted(
+                        options.items(),
+                        key=lambda item: (-item[1], item[0]),
+                    )[:neighbor_count]
+                    status = (
+                        "reused"
+                        if ranked_neighbors == prior_neighbors
+                        else "recomputed"
+                    )
+                emit(
+                    proposition_id,
+                    ranked_neighbors,
+                    status=status,
+                )
+        state_store.copy_baseline_neighbors(
+            reusable_source_ids,
+            model=str(config.embedding_model),
+            revision=str(config.embedding_revision),
+        )
     else:
         for block_start in range(0, len(ids), block_size):
             block_end = min(block_start + block_size, len(ids))
@@ -623,12 +874,11 @@ def _embedding_reason_rows(
             for block_offset, index in enumerate(
                 range(block_start, block_end)
             ):
-                proposition_id = ids[index]
                 scores = similarities[block_offset]
                 scores[index] = -np.inf
                 ranked = _top_k_indices(scores, neighbor_count, np)
                 emit(
-                    proposition_id,
+                    ids[index],
                     [
                         (
                             ids[int(other_index)],
@@ -638,6 +888,10 @@ def _embedding_reason_rows(
                     ],
                     status="recomputed",
                 )
+    flush_neighbors()
+    matrix.flush()
+    del matrix
+    matrix_path.unlink(missing_ok=True)
     return rows
 
 

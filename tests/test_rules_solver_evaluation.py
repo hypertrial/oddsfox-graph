@@ -20,17 +20,17 @@ from oddsfox_graph._discovery.input import (
     datetime_or_none,
     load_source_markets,
 )
-from oddsfox_graph._discovery.solver import solve_proposals
-from oddsfox_graph.discovery import (
-    DiscoveryConfig,
-    _canonical_entity,
-    _canonical_unit,
-    _classification_validation_error,
-    _deterministic_relation,
-    _generate_candidate_store,
-    _is_winner_proposition,
-    _validate_logic_edges,
+from oddsfox_graph._discovery.adjudication import (
+    classification_validation_error,
 )
+from oddsfox_graph._discovery.parsing import canonical_entity, canonical_unit
+from oddsfox_graph._discovery.retrieval import generate_candidate_workspace
+from oddsfox_graph._discovery.relations import (
+    deterministic_relation,
+    is_winner_proposition,
+)
+from oddsfox_graph._discovery.solver import solve_proposals
+from oddsfox_graph.discovery import DiscoveryConfig
 from oddsfox_graph.evaluation import (
     BENCHMARK_COLUMNS,
     REVIEW_FIELDS,
@@ -54,14 +54,20 @@ def _candidate_rows(
     embedder: Any,
     **kwargs: Any,
 ) -> list[dict[str, Any]]:
-    store = _generate_candidate_store(
+    store = generate_candidate_workspace(
         propositions,
         config,
         embedder,
         **kwargs,
     )
     try:
-        return store.rows(order_by="proposition_a_id, proposition_b_id")
+        return store.db.rows(
+            """
+            SELECT *
+            FROM relation_candidates_work
+            ORDER BY proposition_a_id, proposition_b_id
+            """
+        )
     finally:
         store.close()
 
@@ -76,10 +82,10 @@ def test_domain_taxonomy_uses_word_boundaries_and_precedence() -> None:
 
 
 def test_alias_unit_and_datetime_normalization() -> None:
-    assert _canonical_entity(" ＢＴＣ ") == "Bitcoin"
-    assert _canonical_entity("Manchester Utd") == "Manchester Utd"
-    assert _canonical_unit("US dollars") == "USD"
-    assert _canonical_unit("%") == "percent"
+    assert canonical_entity(" ＢＴＣ ") == "Bitcoin"
+    assert canonical_entity("Manchester Utd") == "Manchester Utd"
+    assert canonical_unit("US dollars") == "USD"
+    assert canonical_unit("%") == "percent"
     assert datetime_or_none("2026-07-30T09:00:00Z") == datetime(
         2026,
         7,
@@ -140,7 +146,7 @@ def test_numeric_interval_implication_handles_mixed_operators_and_polarity() -> 
         operator="greater_than_or_equal",
         threshold=100.0,
     )
-    relation = _deterministic_relation(strict, inclusive, 0.95)
+    relation = deterministic_relation(strict, inclusive, 0.95)
     assert relation is not None
     assert relation["edge_type"] == "implies"
     assert (relation["src_node_id"], relation["dst_node_id"]) == (
@@ -168,7 +174,7 @@ def test_numeric_interval_implication_handles_mixed_operators_and_polarity() -> 
         threshold=150.0,
         polarity="negative",
     )
-    negative = _deterministic_relation(no_low, no_high, 0.95)
+    negative = deterministic_relation(no_low, no_high, 0.95)
     assert negative is not None
     assert (negative["src_node_id"], negative["dst_node_id"]) == (
         "no-low",
@@ -176,7 +182,7 @@ def test_numeric_interval_implication_handles_mixed_operators_and_polarity() -> 
     )
 
     below = _proposition("below", operator="less_than", threshold=200.0)
-    assert _deterministic_relation(strict, below, 0.95) is None
+    assert deterministic_relation(strict, below, 0.95) is None
 
     unrelated_event = {
         **inclusive,
@@ -184,7 +190,7 @@ def test_numeric_interval_implication_handles_mixed_operators_and_polarity() -> 
         "event_id": "other-event",
         "event_slug": "other-event",
     }
-    assert _deterministic_relation(strict, unrelated_event, 0.95) is None
+    assert deterministic_relation(strict, unrelated_event, 0.95) is None
     cross_event_duplicate = {
         **strict,
         "proposition_id": "cross-event-duplicate",
@@ -192,7 +198,7 @@ def test_numeric_interval_implication_handles_mixed_operators_and_polarity() -> 
         "event_id": "other-event",
         "event_slug": "other-event",
     }
-    assert _deterministic_relation(strict, cross_event_duplicate, 0.95) is None
+    assert deterministic_relation(strict, cross_event_duplicate, 0.95) is None
 
 
 def test_time_stage_and_single_winner_rules_require_matching_scope() -> None:
@@ -204,7 +210,7 @@ def test_time_stage_and_single_winner_rules_require_matching_scope() -> None:
         "time_start": datetime(2026, 3, 1, tzinfo=timezone.utc),
         "time_end": datetime(2026, 4, 1, tzinfo=timezone.utc),
     }
-    time_relation = _deterministic_relation(narrow, broad, 0.95)
+    time_relation = deterministic_relation(narrow, broad, 0.95)
     assert time_relation is not None
     assert (
         time_relation["src_node_id"],
@@ -227,7 +233,7 @@ def test_time_stage_and_single_winner_rules_require_matching_scope() -> None:
         "market_id": "market-semifinal",
         "object": "semifinal",
     }
-    stage_relation = _deterministic_relation(final, semifinal, 0.95)
+    stage_relation = deterministic_relation(final, semifinal, 0.95)
     assert stage_relation is not None
     assert (
         stage_relation["src_node_id"],
@@ -251,18 +257,18 @@ def test_time_stage_and_single_winner_rules_require_matching_scope() -> None:
         "market_id": "market-bob",
         "subject": ["Bob"],
     }
-    winner_relation = _deterministic_relation(alice, bob, 0.95)
+    winner_relation = deterministic_relation(alice, bob, 0.95)
     assert winner_relation is not None
     assert winner_relation["edge_type"] == "mutually_exclusive"
     assert (
-        _deterministic_relation(
+        deterministic_relation(
             {**alice, "event_scope": "multi_winner"},
             {**bob, "event_scope": "multi_winner"},
             0.95,
         )
         is None
     )
-    assert not _is_winner_proposition(
+    assert not is_winner_proposition(
         {**alice, "predicate": "wind speed", "object": None}
     )
 
@@ -409,14 +415,14 @@ def test_classifier_direction_and_supporting_field_validation() -> None:
         unsupported_assumption=False,
         requires_review=False,
     )
-    assert _classification_validation_error(valid, a, b) is None
+    assert classification_validation_error(valid, a, b) is None
     invalid = valid.model_copy(
         update={
             "can_both_be_true": "no",
         }
     )
     assert "contradicts" in str(
-        _classification_validation_error(invalid, a, b)
+        classification_validation_error(invalid, a, b)
     )
     unsupported = valid.model_copy(
         update={
@@ -425,11 +431,11 @@ def test_classifier_direction_and_supporting_field_validation() -> None:
         }
     )
     assert "without supporting-field" in str(
-        _classification_validation_error(unsupported, a, b)
+        classification_validation_error(unsupported, a, b)
     )
     uncited_positive = valid.model_copy(update={"supporting_fields": []})
     assert "require supporting-field" in str(
-        _classification_validation_error(uncited_positive, a, b)
+        classification_validation_error(uncited_positive, a, b)
     )
 def test_rc2_preserves_same_market_fact_and_records_rejection() -> None:
     complement = _edge(
@@ -641,8 +647,8 @@ def test_model_provenance_methods_are_current(method: str) -> None:
         method=method,
         basis=f"{method}_test",
     )
-    accepted, reviews = _validate_logic_edges([edge])
-    assert reviews == []
+    accepted, rejected, _ = solve_proposals([edge])
+    assert rejected == []
     assert accepted[0]["discovery_method"] == method
 
 
@@ -682,7 +688,7 @@ def test_benchmark_compile_requires_adjudication_and_preserves_reviewers(
     sampling.write_text(
         json.dumps(
             {
-                "benchmark_version": "v0.7.0",
+                    "benchmark_version": "v0.8.0",
                 "source_sha256": hashlib.sha256(
                     REAL_INPUT.read_bytes()
                 ).hexdigest(),

@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-import oddsfox_graph.discovery as discovery_module
+from oddsfox_graph._discovery import publication
 from oddsfox_graph._discovery.contracts import (
     AtomicPairAssessment,
     DiscoveryConfig,
@@ -85,6 +85,8 @@ class _FakeClient:
                 )
             )
         assert isinstance(payload, dict)
+        assert "candidate_reasons" not in payload
+        assert set(payload) == {"pair_id", "proposition_A", "proposition_B"}
         return _Response(
             AtomicPairAssessment(
                 pair_id=str(payload["pair_id"]),
@@ -300,6 +302,9 @@ def test_discovery_online_offline_and_query_interfaces(tmp_path: Path) -> None:
         (out / "build_manifest.json").read_text(encoding="utf-8")
     )
     first_hashes = dict(first_manifest["artifact_hashes"])
+    first_snapshot_hash = hashlib.sha256(
+        (out / "graph_snapshot.json").read_bytes()
+    ).hexdigest()
 
     second = discover(
         REAL_INPUT,
@@ -356,22 +361,26 @@ def test_discovery_online_offline_and_query_interfaces(tmp_path: Path) -> None:
     assert first["tokens"] == 6
     assert first["input_rows"] == 94_781
     assert first_hashes == second_manifest["artifact_hashes"]
+    assert first_snapshot_hash == hashlib.sha256(
+        (out / "graph_snapshot.json").read_bytes()
+    ).hexdigest()
     assert first_hashes == incremental_manifest["artifact_hashes"]
     assert first_hashes == threshold_manifest["artifact_hashes"]
     assert second["incremental"]["offline_state_replay"] is True
     assert incremental["incremental"]["candidate_generation_reused"] is True
+    assert incremental["incremental"]["candidate_components_recomputed"] == 0
     assert threshold_stats["incremental"]["candidate_generation_reused"] is True
     assert "relation_thresholds" in (
         threshold_stats["incremental"]["invalidation_reasons"]
     )
     assert threshold_manifest["cache"]["hits"] > 0
-    assert first_manifest["version"] == "0.7.0"
+    assert first_manifest["version"] == "0.8.0"
     assert first_manifest["input_schema"] == SOURCE_SCHEMA
-    assert first_manifest["versions"]["cache"] == 5
+    assert first_manifest["versions"]["cache"] == 6
     assert first_manifest["versions"]["candidate_state"] == (
-        "candidate-components-v4"
+        "candidate-components-v5"
     )
-    assert first_manifest["versions"]["execution_plan"] == "execution-plan-v3"
+    assert first_manifest["versions"]["execution_plan"] == "execution-plan-v4"
     assert "input_format" not in first_manifest
     assert "input_granularity_seconds" not in first_manifest
     assert "pricing" not in first_manifest
@@ -379,7 +388,14 @@ def test_discovery_online_offline_and_query_interfaces(tmp_path: Path) -> None:
         path.name for path in out.glob("*.parquet")
     }
     assert (out / "graph_snapshot.json").is_file()
+    assert (out / "oddsfox_graph.duckdb").is_file()
     assert (out / "reports" / "coverage.md").is_file()
+
+    graph_db = DuckDB(out / "oddsfox_graph.duckdb")
+    try:
+        assert int(graph_db.scalar("SELECT count(*) FROM nodes_v") or 0) == 6
+    finally:
+        graph_db.close()
 
     db = DuckDB()
     try:
@@ -529,13 +545,19 @@ def test_manifest_is_only_written_after_success(
     catalog = tmp_path / "catalog.parquet"
     out = tmp_path / "out"
     _write_catalog(catalog)
+    out.mkdir()
+    (out / "build_manifest.json").write_text(
+        '{"completed": true}\n',
+        encoding="utf-8",
+    )
+    (out / "previous-artifact").write_text("previous", encoding="utf-8")
 
     def fail_manifest(*_: object, **__: object) -> None:
         raise OSError("simulated manifest failure")
 
     monkeypatch.setattr(
-        discovery_module,
-        "_write_manifest_last",
+        publication,
+        "write_manifest_last",
         fail_manifest,
     )
     with pytest.raises(OSError, match="simulated manifest failure"):
@@ -552,4 +574,7 @@ def test_manifest_is_only_written_after_success(
             _client=_FakeClient(),
             _embedder=_embeddings,
         )
-    assert not (out / "build_manifest.json").exists()
+    assert json.loads((out / "build_manifest.json").read_text(encoding="utf-8")) == {
+        "completed": True
+    }
+    assert (out / "previous-artifact").read_text(encoding="utf-8") == "previous"

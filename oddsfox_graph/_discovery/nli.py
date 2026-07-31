@@ -6,10 +6,9 @@ from typing import Any, Protocol
 import numpy as np
 
 from .contracts import DEFAULT_NLI_MODEL, DEFAULT_NLI_REVISION
-from .inference import canonical_json_sha256
-
-
-NLI_INFERENCE_VERSION = "bidirectional-nli-v1"
+from .inference import ModelProfile
+from .provenance import canonical_json_sha256
+from .versions import NLI_INFERENCE_VERSION
 
 
 def nli_inference_fingerprint(model: str, revision: str) -> str:
@@ -20,6 +19,53 @@ def nli_inference_fingerprint(model: str, revision: str) -> str:
             "revision": revision,
         }
     )
+
+
+def profiled_nli_action(
+    scores: dict[str, float],
+    profile: ModelProfile | None,
+) -> tuple[str, str | None, float]:
+    if profile is None:
+        return "advisory_unprofiled", None, 0.0
+    candidates = (
+        (
+            "equivalent",
+            "equivalent",
+            min(
+                scores["nli_a_to_b_entailment"],
+                scores["nli_b_to_a_entailment"],
+            ),
+        ),
+        (
+            "implies_a_to_b",
+            "A_implies_B",
+            min(
+                scores["nli_a_to_b_entailment"],
+                1.0 - scores["nli_b_to_a_entailment"],
+            ),
+        ),
+        (
+            "implies_b_to_a",
+            "B_implies_A",
+            min(
+                scores["nli_b_to_a_entailment"],
+                1.0 - scores["nli_a_to_b_entailment"],
+            ),
+        ),
+        (
+            "unrelated",
+            "unrelated",
+            min(
+                scores["nli_a_to_b_neutral"],
+                scores["nli_b_to_a_neutral"],
+            ),
+        ),
+    )
+    for action, relation, score in candidates:
+        gate = profile.nli_actions.get(action)
+        if gate is not None and gate.enabled and score >= gate.threshold:
+            return action, relation, score
+    return "advisory_below_profile_threshold", None, 0.0
 
 
 @dataclass(frozen=True)

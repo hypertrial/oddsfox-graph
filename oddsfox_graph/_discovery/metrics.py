@@ -5,6 +5,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from .provenance import peak_rss_mb
 
 _ZERO_USAGE = {
     "input_tokens": 0,
@@ -95,11 +96,24 @@ class StageRecorder:
     def __init__(self) -> None:
         self.started = time.perf_counter()
         self.timings: dict[str, float] = {}
+        self.stage_metrics: dict[str, dict[str, float]] = {}
+        self._last_peak_rss_mb = peak_rss_mb()
 
     def run(self, name: str, fn: Callable[[], Any]) -> Any:
         stage_started = time.perf_counter()
         value = fn()
-        self.timings[name] = round(time.perf_counter() - stage_started, 3)
+        wall_seconds = round(time.perf_counter() - stage_started, 3)
+        current_peak_rss = peak_rss_mb()
+        self.timings[name] = wall_seconds
+        self.stage_metrics[name] = {
+            "wall_seconds": wall_seconds,
+            "peak_rss_mb": current_peak_rss,
+            "rss_high_water_delta_mb": round(
+                max(0.0, current_peak_rss - self._last_peak_rss_mb),
+                3,
+            ),
+        }
+        self._last_peak_rss_mb = current_peak_rss
         return value
 
     def runtime_seconds(self) -> float:

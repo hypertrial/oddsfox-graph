@@ -18,7 +18,12 @@ COUNT_KEYS = (
 
 
 def load_manifest(out_dir: Path) -> dict[str, Any]:
-    return json.loads((out_dir / "build_manifest.json").read_text(encoding="utf-8"))
+    value = json.loads(
+        (out_dir / "build_manifest.json").read_text(encoding="utf-8")
+    )
+    if not isinstance(value, dict):
+        raise ValueError("build_manifest.json must contain a JSON object")
+    return {str(key): item for key, item in value.items()}
 
 
 def benchmark_summary(out_dir: Path, *, top_stages: int = 8) -> str:

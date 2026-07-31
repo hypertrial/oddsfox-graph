@@ -12,11 +12,18 @@ weighted soft clauses. Publication validates canonical direction, incompatible
 relations, provenance, state fingerprints, schemas, and artifact counts before
 atomically replacing the output. `build_manifest.json` is written last.
 
-Inference fingerprints bind weights, runtime family/version, prompt and schema
-versions, sampling settings, and output limits. Cache entries use fingerprinted
-keys. Incremental invalidation tracks market, parse, normalization, embedding,
-candidate, classification, threshold, and solver-component changes under
-`state/`.
+Inference fingerprints bind weights, runtime family/version, prompt, typed
+request and response schemas, sampling settings, and output limits. Discovery,
+model conformance, and calibration share the same canonical request builders.
+Candidate reasons stay outside model evidence. Cache entries use fingerprinted
+keys in a transactional SQLite database. Incremental invalidation tracks
+market, parse, normalization, embedding, candidate, classification, threshold,
+and solver-component changes under `state/`.
+
+Candidate, embedding, semantic-neighbor, and component state stays in the
+staged DuckDB workspace. Bounded rows are streamed into inference, and the
+workspace is promoted directly into the final graph database rather than
+copied during publication.
 
 `discovery_method` is `deterministic`, `generative_model`, or `nli`. Embedding
 similarity only retrieves candidates and never publishes an edge.

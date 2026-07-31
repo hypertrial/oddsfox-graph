@@ -47,6 +47,7 @@ jobs:
           test -d fixture/baselines/20000/state
           test -f fixture/expected-artifact-hashes.json
           test -f fixture/benchmark.parquet
+          test -f fixture/performance-report.json
           test -f fixture/compute-profile.json
           test -f fixture/model-manifest.json
           test -f fixture/model-profile.json
@@ -70,6 +71,7 @@ jobs:
             --work-dir output/release-validation \
             --expected-hashes fixture/expected-artifact-hashes.json \
             --benchmark fixture/benchmark.parquet \
+            --performance-report fixture/performance-report.json \
             --compute-profile fixture/compute-profile.json \
             --model-manifest fixture/model-manifest.json \
             --model-profile fixture/model-profile.json \

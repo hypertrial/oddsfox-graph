@@ -6,7 +6,7 @@ from typing import Any
 from ..queries import DuckDB
 
 
-BULK_INSERT_CHUNK_SIZE = 10_000
+BULK_INSERT_CHUNK_SIZE = 512
 
 
 def create_and_fill(
@@ -21,6 +21,18 @@ def create_and_fill(
 
     ddl = ", ".join(f"{name} {sql_type}" for name, sql_type in columns.items())
     db.execute(f"CREATE TABLE {table} ({ddl})")
+    insert_rows(db, table, columns, rows, chunk_size=chunk_size)
+
+
+def insert_rows(
+    db: DuckDB,
+    table: str,
+    columns: dict[str, str],
+    rows: Sequence[dict[str, Any]],
+    *,
+    chunk_size: int = BULK_INSERT_CHUNK_SIZE,
+) -> None:
+    """Insert rows into an existing typed table in bounded chunks."""
     if not rows:
         return
     if chunk_size < 1:

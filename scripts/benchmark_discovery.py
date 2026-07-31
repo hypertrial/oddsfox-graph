@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import platform
 import statistics
 import subprocess
 import sys
@@ -18,15 +19,6 @@ CANONICAL_SOURCE_SHA256 = (
     "790bd1595b379472ad65ba0073105b4eb630974d04e7b44d58c8a4929f274aa2"
 )
 
-
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
-
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
@@ -38,6 +30,14 @@ from oddsfox_graph._discovery.contracts import (
     ParsedOutcome,
 )
 from oddsfox_graph._discovery.input import load_source_markets
+from oddsfox_graph._discovery.provenance import (
+    atomic_write_json,
+    sha256_file as _sha256,
+)
+from oddsfox_graph._discovery.versions import (
+    FAKE_RUNTIME_VERSION,
+    PERFORMANCE_BUDGET_VERSION,
+)
 from oddsfox_graph.discovery import DiscoveryConfig, discover
 from oddsfox_graph.queries import DuckDB, q
 
@@ -155,6 +155,14 @@ def _worker(args: argparse.Namespace) -> int:
                 "stage_timings": manifest["stage_timings"],
                 "incremental": stats["incremental"],
                 "artifact_hashes": manifest["artifact_hashes"],
+                "stage_metrics": manifest.get("stage_metrics") or {},
+                "cache": manifest["cache"],
+                "candidate_workspace": stats.get("candidate_workspace") or {},
+                "publication_bytes": stats.get("publication_bytes"),
+                "publication_stage_timings": stats.get(
+                    "publication_stage_timings"
+                )
+                or {},
             },
             sort_keys=True,
         )
@@ -237,8 +245,26 @@ def _summaries(samples: list[dict[str, Any]]) -> dict[str, Any]:
             (int(sample["size"]), str(sample["mode"])),
             [],
         ).append(sample)
-    return {
-        f"{size}:{mode}": {
+    summaries: dict[str, Any] = {}
+    for (size, mode), rows in sorted(grouped.items()):
+        stages = sorted(
+            {
+                stage
+                for row in rows
+                for stage in row.get("stage_metrics", {})
+            }
+        )
+        state_names = sorted(
+            {
+                state
+                for row in rows
+                for state in row["candidate_workspace"].get(
+                    "state_rows",
+                    {},
+                )
+            }
+        )
+        summaries[f"{size}:{mode}"] = {
             "runs": len(rows),
             "median_wall_seconds": statistics.median(
                 float(row["wall_seconds"]) for row in rows
@@ -258,16 +284,74 @@ def _summaries(samples: list[dict[str, Any]]) -> dict[str, Any]:
             "median_candidate_edges": statistics.median(
                 int(row["candidate_edges"]) for row in rows
             ),
+            "median_cache_entries": statistics.median(
+                int(row["cache"]["entry_count"]) for row in rows
+            ),
+            "median_cache_bytes": statistics.median(
+                int(row["cache"]["storage_bytes"]) for row in rows
+            ),
+            "median_workspace_bytes": statistics.median(
+                int(row["candidate_workspace"]["database_bytes"])
+                for row in rows
+            ),
+            "median_publication_bytes": statistics.median(
+                int(row["publication_bytes"]) for row in rows
+            ),
+            "median_duckdb_spill_bytes": statistics.median(
+                int(row["candidate_workspace"].get("spill_bytes", 0))
+                for row in rows
+            ),
+            "median_python_rows_materialized": statistics.median(
+                int(
+                    row["candidate_workspace"].get(
+                        "python_rows_materialized",
+                        0,
+                    )
+                )
+                for row in rows
+            ),
+            "median_max_materialized_batch_rows": statistics.median(
+                int(
+                    row["candidate_workspace"].get(
+                        "max_materialized_batch_rows",
+                        0,
+                    )
+                )
+                for row in rows
+            ),
+            "median_state_rows": {
+                state: statistics.median(
+                    int(
+                        row["candidate_workspace"]
+                        .get("state_rows", {})
+                        .get(state, 0)
+                    )
+                    for row in rows
+                )
+                for state in state_names
+            },
+            "median_stage_peak_rss_mb": {
+                stage: statistics.median(
+                    float(
+                        row.get("stage_metrics", {})
+                        .get(stage, {})
+                        .get("peak_rss_mb", 0.0)
+                    )
+                    for row in rows
+                )
+                for stage in stages
+            },
         }
-        for (size, mode), rows in sorted(grouped.items())
-    }
+    return summaries
 
 
 def _acceptance(
     summary: dict[str, Any],
+    budget: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     gates: dict[str, bool] = {}
     ratios: dict[str, float] = {}
+    comparisons: dict[str, dict[str, float | bool | str | None]] = {}
     sizes = sorted(
         {
             int(key.split(":", 1)[0])
@@ -284,19 +368,137 @@ def _acceptance(
                 / float(clean["median_candidate_seconds"])
             )
             ratios[f"{size}:incremental_candidate_ratio"] = ratio
-            gates[f"{size}:incremental_candidate_faster"] = ratio <= 0.95
+            gate_name = f"{size}:incremental_candidate_faster"
+            gates[gate_name] = ratio <= 0.95
+            comparisons[gate_name] = {
+                "before": None,
+                "after": ratio,
+                "budget": 0.95,
+                "unit": "ratio",
+                "passed": gates[gate_name],
+            }
         if clean and offline:
             ratio = (
                 float(offline["median_candidate_seconds"])
                 / float(clean["median_candidate_seconds"])
             )
             ratios[f"{size}:offline_candidate_ratio"] = ratio
-            gates[f"{size}:offline_candidate_reuse"] = ratio <= 0.25
+            gate_name = f"{size}:offline_candidate_reuse"
+            gates[gate_name] = ratio <= 0.25
+            comparisons[gate_name] = {
+                "before": None,
+                "after": ratio,
+                "budget": 0.25,
+                "unit": "ratio",
+                "passed": gates[gate_name],
+            }
+    if budget is not None:
+        limits = budget["gates"]
+        clean_5k = summary.get("5000:clean")
+        clean_20k = summary.get("20000:clean")
+        if clean_5k is None or clean_20k is None:
+            raise ValueError(
+                "Performance budget requires clean 5,000 and 20,000 summaries"
+            )
+        budget_gates = {
+            "5000:clean_wall_seconds": (
+                float(clean_5k["median_wall_seconds"]),
+                float(limits["max_5000_clean_wall_seconds"]),
+                "seconds",
+                "5000_clean_wall_seconds",
+            ),
+            "20000:clean_peak_rss_mb": (
+                float(clean_20k["median_peak_rss_mb"]),
+                float(limits["max_20000_clean_peak_rss_mb"]),
+                "MiB",
+                "20000_clean_peak_rss_mb",
+            ),
+            "20000:publication_seconds": (
+                float(clean_20k["median_publication_seconds"]),
+                float(limits["max_20000_publication_seconds"]),
+                "seconds",
+                "20000_publication_seconds",
+            ),
+        }
+        baseline = budget.get("before") or {}
+        for gate_name, (
+            actual,
+            limit,
+            unit,
+            baseline_name,
+        ) in budget_gates.items():
+            gates[gate_name] = actual <= limit
+            before = baseline.get(baseline_name)
+            comparisons[gate_name] = {
+                "before": float(before) if before is not None else None,
+                "after": actual,
+                "budget": limit,
+                "unit": unit,
+                "passed": gates[gate_name],
+            }
     return {
         "passed": bool(gates) and all(gates.values()),
         "gates": gates,
         "ratios": ratios,
+        "performance_comparison": comparisons,
     }
+
+
+def _hardware() -> dict[str, str]:
+    hardware = platform.processor()
+    if sys.platform == "darwin":
+        completed = subprocess.run(
+            ["sysctl", "-n", "machdep.cpu.brand_string"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        hardware = completed.stdout.strip() or hardware
+        if "Apple" not in hardware:
+            completed = subprocess.run(
+                [
+                    "system_profiler",
+                    "SPHardwareDataType",
+                    "-detailLevel",
+                    "mini",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            for line in completed.stdout.splitlines():
+                label, separator, value = line.strip().partition(":")
+                if separator and label == "Chip" and value.strip():
+                    hardware = value.strip()
+                    break
+    return {
+        "system": platform.system(),
+        "machine": platform.machine(),
+        "processor": hardware,
+    }
+
+
+def _load_budget(
+    path: Path,
+    *,
+    repetitions: int,
+    hardware: dict[str, str],
+) -> dict[str, Any]:
+    budget = json.loads(path.resolve().read_text(encoding="utf-8"))
+    if (
+        budget.get("schema_version") != PERFORMANCE_BUDGET_VERSION
+        or budget.get("input_sha256") != CANONICAL_SOURCE_SHA256
+        or budget.get("fake_runtime_version") != FAKE_RUNTIME_VERSION
+        or int(budget.get("repetitions") or 0) != repetitions
+        or budget.get("system") != hardware["system"]
+        or budget.get("machine") != hardware["machine"]
+        or str(budget.get("processor_contains") or "") not in hardware["processor"]
+    ):
+        raise ValueError(
+            "Performance budget does not match the input, runtime, platform, "
+            "hardware, or repetition count"
+        )
+    return budget
 
 
 def _collect_samples(
@@ -365,6 +567,9 @@ def _collect_samples(
                     raise RuntimeError(
                         "One-market incremental logical hashes differ from clean"
                     )
+                incremental["equivalent_full_artifact_hashes"] = changed_clean[
+                    "artifact_hashes"
+                ]
                 incremental.update(
                     {
                         "mode": "one-market-incremental",
@@ -391,7 +596,8 @@ def main() -> int:
     parser.add_argument("--top-k", type=int, default=20)
     parser.add_argument("--max-candidates", type=int, default=400_000)
     parser.add_argument("--max-llm-pairs", type=int, default=5_000)
-    parser.add_argument("--require-pass", action="store_true")
+    parser.add_argument("--performance-budget", type=Path)
+    parser.add_argument("--require-gates", action="store_true")
     parser.add_argument("--worker", action="store_true")
     parser.add_argument("--out", type=Path)
     parser.add_argument("--cache-dir", type=Path)
@@ -413,6 +619,18 @@ def main() -> int:
     supported = {"clean", "offline", "one-market-incremental"}
     if not sizes or args.repetitions < 1 or set(modes) - supported:
         raise ValueError("Invalid sizes, modes, or repetitions")
+    hardware = _hardware()
+    budget = (
+        _load_budget(
+            args.performance_budget,
+            repetitions=args.repetitions,
+            hardware=hardware,
+        )
+        if args.performance_budget is not None
+        else None
+    )
+    if args.require_gates and budget is None:
+        raise ValueError("--require-gates requires --performance-budget")
     root = args.output.resolve()
     root.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(
@@ -439,15 +657,15 @@ def main() -> int:
         "modes": modes,
         "repetitions": args.repetitions,
         "configuration": configuration,
+        "fake_runtime_version": FAKE_RUNTIME_VERSION,
+        "hardware": hardware,
         "samples": samples,
         "summary": summary,
-        "acceptance": _acceptance(summary),
+        "performance_budget": budget,
+        "acceptance": _acceptance(summary, budget),
     }
-    root.write_text(
-        json.dumps(result, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
-    return int(args.require_pass and not result["acceptance"]["passed"])
+    atomic_write_json(root, result)
+    return int(args.require_gates and not result["acceptance"]["passed"])
 
 
 if __name__ == "__main__":

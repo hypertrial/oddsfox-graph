@@ -3,9 +3,10 @@ from __future__ import annotations
 import shutil
 import tempfile
 from pathlib import Path
+from collections.abc import Iterator
 from typing import Any, cast
 
-from .bulk import create_and_fill
+from .bulk import create_and_fill, insert_rows
 from ..queries import DuckDB, q
 
 
@@ -66,13 +67,32 @@ CANDIDATE_REASON_COLUMNS = {
     "candidate_version": "VARCHAR",
 }
 
+EMBEDDING_STATE_COLUMNS = {
+    "proposition_id": "VARCHAR",
+    "text_hash": "VARCHAR",
+    "embedding_model": "VARCHAR",
+    "embedding_revision": "VARCHAR",
+    "embedding": "FLOAT[]",
+}
+
+SEMANTIC_NEIGHBOR_STATE_COLUMNS = {
+    "proposition_id": "VARCHAR",
+    "neighbor_id": "VARCHAR",
+    "similarity": "DOUBLE",
+    "neighbor_rank": "INTEGER",
+    "proposition_text_hash": "VARCHAR",
+    "neighbor_text_hash": "VARCHAR",
+    "embedding_model": "VARCHAR",
+    "embedding_revision": "VARCHAR",
+}
+
 
 class CandidateStore:
     """Disk-backed working set for bounded candidate access and publication."""
 
     def __init__(self) -> None:
         self.directory = Path(tempfile.mkdtemp(prefix="oddsfox-candidates-"))
-        self.path = self.directory / "candidates.duckdb"
+        self.path = self.directory / "oddsfox_graph.duckdb"
         self.db = DuckDB(self.path)
         self.db.execute("SET TimeZone = 'UTC'")
         self.db.execute(
@@ -80,6 +100,13 @@ class CandidateStore:
         )
         self._closed = False
         self.structural_member_limit: int | None = None
+        self.embedding_vectors_reused = 0
+        self.embedding_vectors_recomputed = 0
+        self.embedding_write_batches = 0
+        self.semantic_neighbor_write_batches = 0
+        self.candidate_update_batches = 0
+        self.python_rows_materialized = 0
+        self.max_materialized_batch_rows = 0
 
     @classmethod
     def from_parquet(
@@ -88,6 +115,8 @@ class CandidateStore:
         *,
         block_path: Path,
         reason_path: Path,
+        embedding_path: Path,
+        neighbor_path: Path,
     ) -> CandidateStore:
         store = cls()
         columns = ", ".join(CANDIDATE_COLUMNS)
@@ -122,39 +151,32 @@ class CandidateStore:
                 FROM candidate_blocks_work
                 """
             )
+            store.load_semantic_state(
+                embedding_path=embedding_path,
+                neighbor_path=neighbor_path,
+            )
+            store.embedding_vectors_reused = int(
+                store.db.scalar(
+                    "SELECT count(*) FROM proposition_embeddings_work"
+                )
+                or 0
+            )
             return store
         except Exception:
             store.close()
             raise
 
-    def rows(self, where: str = "", order_by: str = "") -> list[dict[str, Any]]:
-        suffix = f" WHERE {where}" if where else ""
-        ordering = f" ORDER BY {order_by}" if order_by else ""
-        return self.db.rows(
-            f"SELECT * FROM relation_candidates_work{suffix}{ordering}"
-        )
-
     def deterministic_rows(self) -> list[dict[str, Any]]:
-        return self.rows(
-            "deterministic_relation IS NOT NULL",
-            "proposition_a_id, proposition_b_id",
-        )
-
-    def classification_rows(self, limit: int) -> list[dict[str, Any]]:
-        return self.db.rows(
+        rows = self.db.rows(
             """
-            SELECT *
+            SELECT proposition_a_id, proposition_b_id, rule_id
             FROM relation_candidates_work
-            WHERE discovery_method IS NULL
-            ORDER BY
-                len(candidate_reasons) DESC,
-                coalesce(embedding_similarity, -1.0) DESC,
-                proposition_a_id,
-                proposition_b_id
-            LIMIT ?
-            """,
-            [int(limit)],
+            WHERE deterministic_relation IS NOT NULL
+            ORDER BY proposition_a_id, proposition_b_id
+            """
         )
+        self._record_materialization(rows)
+        return rows
 
     def mark_classification_budget(self) -> None:
         self.db.execute(
@@ -164,6 +186,65 @@ class CandidateStore:
             WHERE discovery_method IS NULL
             """
         )
+
+    def prepare_inference_queue(self, limit: int) -> None:
+        self.db.execute("DROP TABLE IF EXISTS inference_candidate_queue")
+        self.db.execute(
+            """
+            CREATE TABLE inference_candidate_queue AS
+            SELECT
+                row_number() OVER (
+                    ORDER BY
+                        len(candidate_reasons) DESC,
+                        coalesce(embedding_similarity, -1.0) DESC,
+                        proposition_a_id,
+                        proposition_b_id
+                )::INTEGER AS queue_index,
+                proposition_a_id,
+                proposition_b_id
+            FROM relation_candidates_work
+            WHERE discovery_method IS NULL
+            ORDER BY queue_index
+            LIMIT ?
+            """,
+            [int(limit)],
+        )
+
+    def inference_batches(
+        self,
+        *,
+        batch_size: int = 512,
+    ) -> Iterator[list[dict[str, Any]]]:
+        if batch_size < 1:
+            raise ValueError("batch_size must be positive")
+        total = int(
+            self.db.scalar("SELECT count(*) FROM inference_candidate_queue")
+            or 0
+        )
+        for start in range(0, total, batch_size):
+            rows = self.db.rows(
+                """
+                SELECT
+                    c.proposition_a_id,
+                    c.proposition_b_id,
+                    c.candidate_reasons,
+                    c.embedding_similarity,
+                    c.embedding_rank,
+                    c.status,
+                    c.discovery_method
+                FROM inference_candidate_queue q
+                JOIN relation_candidates_work c USING (
+                    proposition_a_id,
+                    proposition_b_id
+                )
+                WHERE q.queue_index > ?
+                  AND q.queue_index <= ?
+                ORDER BY q.queue_index
+                """,
+                [start, start + batch_size],
+            )
+            self._record_materialization(rows)
+            yield rows
 
     def reset_for_run(self) -> None:
         self.db.execute(
@@ -209,20 +290,393 @@ class CandidateStore:
             """
         )
 
-    def update_rows(self, rows: list[dict[str, Any]]) -> None:
+    def initialize_semantic_state(self) -> None:
+        create_and_fill(
+            self.db,
+            "proposition_embeddings_work",
+            EMBEDDING_STATE_COLUMNS,
+            [],
+        )
+        create_and_fill(
+            self.db,
+            "semantic_neighbors_work",
+            SEMANTIC_NEIGHBOR_STATE_COLUMNS,
+            [],
+        )
+
+    def load_baseline_semantic_state(
+        self,
+        *,
+        embedding_path: Path,
+        neighbor_path: Path,
+    ) -> None:
+        self.db.execute(
+            f"""
+            CREATE TABLE baseline_proposition_embeddings AS
+            SELECT {", ".join(EMBEDDING_STATE_COLUMNS)}
+            FROM read_parquet('{q(embedding_path)}')
+            """
+        )
+        self.db.execute(
+            f"""
+            CREATE TABLE baseline_semantic_neighbors AS
+            SELECT {", ".join(SEMANTIC_NEIGHBOR_STATE_COLUMNS)}
+            FROM read_parquet('{q(neighbor_path)}')
+            """
+        )
+
+    def baseline_embeddings(
+        self,
+        text_hashes: list[str],
+        *,
+        model: str,
+        revision: str,
+    ) -> list[dict[str, Any]]:
+        if not text_hashes:
+            return []
+        rows = self.db.rows(
+            """
+            SELECT text_hash, embedding
+            FROM baseline_proposition_embeddings
+            WHERE text_hash IN (SELECT unnest(?))
+              AND embedding_model = ?
+              AND embedding_revision = ?
+            ORDER BY text_hash
+            """,
+            [text_hashes, model, revision],
+        )
+        self._record_materialization(rows)
+        return rows
+
+    def baseline_neighbor_source_ids(
+        self,
+        proposition_ids: list[str],
+        *,
+        model: str,
+        revision: str,
+    ) -> set[str]:
+        if not proposition_ids:
+            return set()
+        rows = self.db.rows(
+            """
+            SELECT DISTINCT proposition_id
+            FROM baseline_semantic_neighbors
+            WHERE proposition_id IN (SELECT unnest(?))
+              AND embedding_model = ?
+              AND embedding_revision = ?
+            ORDER BY proposition_id
+            """,
+            [proposition_ids, model, revision],
+        )
+        self._record_materialization(rows)
+        return {
+            str(row["proposition_id"])
+            for row in rows
+        }
+
+    def changed_embedding_source_ids(
+        self,
+        current_text_hashes: list[dict[str, str]],
+        *,
+        model: str,
+        revision: str,
+    ) -> set[str]:
+        """Find IDs whose proposition-bound embedding input changed.
+
+        Vector reuse is keyed by normalized text hash and can legitimately use
+        a vector first produced for another proposition. Incremental neighbor
+        invalidation must instead compare each proposition ID with its own
+        prior text hash so a newly introduced vector is scored against every
+        potentially affected top-k boundary.
+        """
+
+        create_and_fill(
+            self.db,
+            "current_embedding_sources",
+            {
+                "proposition_id": "VARCHAR",
+                "text_hash": "VARCHAR",
+            },
+            current_text_hashes,
+        )
+        rows = self.db.rows(
+            """
+            SELECT c.proposition_id
+            FROM current_embedding_sources c
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM baseline_proposition_embeddings b
+                WHERE b.proposition_id = c.proposition_id
+                  AND b.text_hash = c.text_hash
+                  AND b.embedding_model = ?
+                  AND b.embedding_revision = ?
+            )
+            ORDER BY c.proposition_id
+            """,
+            [model, revision],
+        )
+        self._record_materialization(rows)
+        return {str(row["proposition_id"]) for row in rows}
+
+    def baseline_neighbors(
+        self,
+        proposition_ids: list[str],
+        *,
+        model: str,
+        revision: str,
+    ) -> list[dict[str, Any]]:
+        if not proposition_ids:
+            return []
+        rows = self.db.rows(
+            """
+            SELECT *
+            FROM baseline_semantic_neighbors
+            WHERE proposition_id IN (SELECT unnest(?))
+              AND embedding_model = ?
+              AND embedding_revision = ?
+            ORDER BY proposition_id, neighbor_rank
+            """,
+            [proposition_ids, model, revision],
+        )
+        self._record_materialization(rows)
+        return rows
+
+    def valid_baseline_neighbor_boundaries(
+        self,
+        current_text_hashes: list[dict[str, str]],
+        changed_ids: set[str],
+        *,
+        neighbor_count: int,
+        model: str,
+        revision: str,
+    ) -> dict[str, tuple[float, str]]:
+        """Return the last valid prior top-k item for unchanged sources."""
+
+        create_and_fill(
+            self.db,
+            "current_semantic_propositions",
+            {
+                "proposition_id": "VARCHAR",
+                "text_hash": "VARCHAR",
+            },
+            current_text_hashes,
+        )
+        create_and_fill(
+            self.db,
+            "changed_semantic_propositions",
+            {"proposition_id": "VARCHAR"},
+            [
+                {"proposition_id": proposition_id}
+                for proposition_id in sorted(changed_ids)
+            ],
+        )
+        rows = self.db.rows(
+            """
+            WITH valid_sources AS (
+                SELECT b.proposition_id
+                FROM baseline_semantic_neighbors b
+                JOIN current_semantic_propositions source
+                  ON source.proposition_id = b.proposition_id
+                LEFT JOIN current_semantic_propositions neighbor
+                  ON neighbor.proposition_id = b.neighbor_id
+                LEFT JOIN changed_semantic_propositions changed_source
+                  ON changed_source.proposition_id = b.proposition_id
+                LEFT JOIN changed_semantic_propositions changed_neighbor
+                  ON changed_neighbor.proposition_id = b.neighbor_id
+                WHERE b.embedding_model = ?
+                  AND b.embedding_revision = ?
+                GROUP BY b.proposition_id
+                HAVING count(*) = ?
+                   AND count(DISTINCT b.neighbor_id) = ?
+                   AND min(b.neighbor_rank) = 1
+                   AND max(b.neighbor_rank) = ?
+                   AND count(*) FILTER (
+                        WHERE changed_source.proposition_id IS NOT NULL
+                           OR changed_neighbor.proposition_id IS NOT NULL
+                           OR neighbor.proposition_id IS NULL
+                           OR source.text_hash != b.proposition_text_hash
+                           OR neighbor.text_hash != b.neighbor_text_hash
+                   ) = 0
+            )
+            SELECT
+                b.proposition_id,
+                b.similarity AS boundary_similarity,
+                b.neighbor_id AS boundary_neighbor_id
+            FROM baseline_semantic_neighbors b
+            JOIN valid_sources v USING (proposition_id)
+            WHERE b.neighbor_rank = ?
+              AND b.embedding_model = ?
+              AND b.embedding_revision = ?
+            ORDER BY b.proposition_id
+            """,
+            [
+                model,
+                revision,
+                neighbor_count,
+                neighbor_count,
+                neighbor_count,
+                neighbor_count,
+                model,
+                revision,
+            ],
+        )
+        self._record_materialization(rows)
+        return {
+            str(row["proposition_id"]): (
+                float(cast(float, row["boundary_similarity"])),
+                str(row["boundary_neighbor_id"]),
+            )
+            for row in rows
+        }
+
+    def copy_baseline_neighbors(
+        self,
+        proposition_ids: set[str],
+        *,
+        model: str,
+        revision: str,
+    ) -> None:
+        create_and_fill(
+            self.db,
+            "reusable_neighbor_sources",
+            {"proposition_id": "VARCHAR"},
+            [
+                {"proposition_id": proposition_id}
+                for proposition_id in sorted(proposition_ids)
+            ],
+        )
+        self.db.execute(
+            """
+            INSERT INTO semantic_neighbors_work
+            SELECT b.*
+            FROM baseline_semantic_neighbors b
+            JOIN reusable_neighbor_sources r USING (proposition_id)
+            WHERE b.embedding_model = ?
+              AND b.embedding_revision = ?
+            """,
+            [model, revision],
+        )
+
+    def load_semantic_state(
+        self,
+        *,
+        embedding_path: Path,
+        neighbor_path: Path,
+    ) -> None:
+        self.db.execute(
+            f"""
+            CREATE TABLE proposition_embeddings_work AS
+            SELECT {", ".join(EMBEDDING_STATE_COLUMNS)}
+            FROM read_parquet('{q(embedding_path)}')
+            """
+        )
+        self.db.execute(
+            f"""
+            CREATE TABLE semantic_neighbors_work AS
+            SELECT {", ".join(SEMANTIC_NEIGHBOR_STATE_COLUMNS)}
+            FROM read_parquet('{q(neighbor_path)}')
+            """
+        )
+
+    def append_embedding_state(self, rows: list[dict[str, Any]]) -> None:
+        insert_rows(
+            self.db,
+            "proposition_embeddings_work",
+            EMBEDDING_STATE_COLUMNS,
+            rows,
+        )
+        self.embedding_write_batches += 1
+
+    def append_semantic_neighbors(self, rows: list[dict[str, Any]]) -> None:
+        insert_rows(
+            self.db,
+            "semantic_neighbors_work",
+            SEMANTIC_NEIGHBOR_STATE_COLUMNS,
+            rows,
+        )
+        self.semantic_neighbor_write_batches += 1
+
+    def update_nli_rows(self, rows: list[dict[str, Any]]) -> None:
+        self._update_columns(
+            rows,
+            (
+                "classification_relation",
+                "classification_confidence",
+                "supporting_fields",
+                "a_implies_b",
+                "b_implies_a",
+                "explanation",
+                "assumptions",
+                "requires_review",
+                "unsupported_assumption",
+                "nli_a_to_b_entailment",
+                "nli_a_to_b_contradiction",
+                "nli_a_to_b_neutral",
+                "nli_b_to_a_entailment",
+                "nli_b_to_a_contradiction",
+                "nli_b_to_a_neutral",
+                "nli_action",
+                "status",
+                "discovery_method",
+                "model_version",
+                "prompt_version",
+                "inference_fingerprint",
+                "model_profile_id",
+            ),
+        )
+
+    def update_generative_rows(self, rows: list[dict[str, Any]]) -> None:
+        self._update_columns(
+            rows,
+            (
+                "classification_relation",
+                "classification_confidence",
+                "atomic_a_implies_b",
+                "atomic_b_implies_a",
+                "atomic_can_both_be_true",
+                "atomic_must_one_be_true",
+                "atomic_logically_related",
+                "supporting_fields",
+                "a_implies_b",
+                "b_implies_a",
+                "explanation",
+                "assumptions",
+                "requires_review",
+                "unsupported_assumption",
+                "status",
+                "discovery_method",
+                "model_version",
+                "prompt_version",
+                "inference_fingerprint",
+                "model_profile_id",
+            ),
+        )
+
+    def _update_columns(
+        self,
+        rows: list[dict[str, Any]],
+        columns: tuple[str, ...],
+    ) -> None:
         if not rows:
             return
+        unknown = set(columns) - set(CANDIDATE_COLUMNS)
+        if unknown:
+            raise ValueError(f"Unknown candidate update columns: {sorted(unknown)}")
+        update_columns = {
+            "proposition_a_id": CANDIDATE_COLUMNS["proposition_a_id"],
+            "proposition_b_id": CANDIDATE_COLUMNS["proposition_b_id"],
+            **{column: CANDIDATE_COLUMNS[column] for column in columns},
+        }
         self.db.execute("DROP TABLE IF EXISTS candidate_updates")
         create_and_fill(
             self.db,
             "candidate_updates",
-            CANDIDATE_COLUMNS,
-            [{key: row.get(key) for key in CANDIDATE_COLUMNS} for row in rows],
+            update_columns,
+            [{key: row.get(key) for key in update_columns} for row in rows],
         )
         assignments = ", ".join(
             f"{column} = u.{column}"
-            for column in CANDIDATE_COLUMNS
-            if column not in {"proposition_a_id", "proposition_b_id"}
+            for column in columns
         )
         self.db.execute(
             f"""
@@ -234,66 +688,156 @@ class CandidateStore:
             """
         )
         self.db.execute("DROP TABLE candidate_updates")
+        self.candidate_update_batches += 1
 
-    def component_rows(self, proposition_ids: list[str], version: str) -> list[dict[str, Any]]:
+    def component_rows(
+        self,
+        proposition_ids: list[str],
+        version: str,
+    ) -> list[dict[str, Any]]:
         self.db.execute("DROP TABLE IF EXISTS component_propositions")
         create_and_fill(
             self.db,
             "component_propositions",
             {"component_id": "VARCHAR"},
-            [{"component_id": proposition_id} for proposition_id in proposition_ids],
+            [
+                {"component_id": proposition_id}
+                for proposition_id in proposition_ids
+            ],
         )
-
-        return self.db.rows(
+        rows = self.db.rows(
             """
-            WITH incident AS (
+            -- DuckDB sums unsigned 128-bit integers through DOUBLE. Convert
+            -- SHA-256 chunks to DECIMAL so parallel aggregation remains exact
+            -- and component fingerprints are stable across processes.
+            WITH left_fingerprints AS (
                 SELECT
                     proposition_a_id AS component_id,
-                    proposition_a_id || ':' || proposition_b_id || ':' ||
-                        coalesce(array_to_string(candidate_reasons, ','), '') || ':' ||
-                        coalesce(embedding_similarity::VARCHAR, '') || ':' ||
-                        coalesce(embedding_rank::VARCHAR, '') || ':' ||
-                        coalesce(rule_id, '') AS payload
+                    sha256(
+                        count(*)::VARCHAR || ':' ||
+                        sum((
+                            '0x' || substr(
+                                sha256(proposition_b_id),
+                                1,
+                                16
+                            )
+                        )::UBIGINT::DECIMAL(38, 0))::VARCHAR || ':' ||
+                        sum((
+                            '0x' || substr(
+                                sha256(proposition_b_id),
+                                17,
+                                16
+                            )
+                        )::UBIGINT::DECIMAL(38, 0))::VARCHAR || ':' ||
+                        sum((
+                            '0x' || substr(
+                                sha256(proposition_b_id),
+                                33,
+                                16
+                            )
+                        )::UBIGINT::DECIMAL(38, 0))::VARCHAR || ':' ||
+                        sum((
+                            '0x' || substr(
+                                sha256(proposition_b_id),
+                                49,
+                                16
+                            )
+                        )::UBIGINT::DECIMAL(38, 0))::VARCHAR
+                    ) AS side_fingerprint,
+                    count(*)::INTEGER AS pair_count
                 FROM relation_candidates_work
-                UNION ALL
+                GROUP BY proposition_a_id
+            ),
+            right_fingerprints AS (
                 SELECT
                     proposition_b_id AS component_id,
-                    proposition_a_id || ':' || proposition_b_id || ':' ||
-                        coalesce(array_to_string(candidate_reasons, ','), '') || ':' ||
-                        coalesce(embedding_similarity::VARCHAR, '') || ':' ||
-                        coalesce(embedding_rank::VARCHAR, '') || ':' ||
-                        coalesce(rule_id, '') AS payload
-                FROM relation_candidates_work
-            ),
-            fingerprints AS (
-                SELECT
-                    component_id,
-                    sha256(string_agg(payload, '|' ORDER BY payload))
-                        AS component_fingerprint,
+                    sha256(
+                        count(*)::VARCHAR || ':' ||
+                        sum((
+                            '0x' || substr(
+                                sha256(proposition_a_id),
+                                1,
+                                16
+                            )
+                        )::UBIGINT::DECIMAL(38, 0))::VARCHAR || ':' ||
+                        sum((
+                            '0x' || substr(
+                                sha256(proposition_a_id),
+                                17,
+                                16
+                            )
+                        )::UBIGINT::DECIMAL(38, 0))::VARCHAR || ':' ||
+                        sum((
+                            '0x' || substr(
+                                sha256(proposition_a_id),
+                                33,
+                                16
+                            )
+                        )::UBIGINT::DECIMAL(38, 0))::VARCHAR || ':' ||
+                        sum((
+                            '0x' || substr(
+                                sha256(proposition_a_id),
+                                49,
+                                16
+                            )
+                        )::UBIGINT::DECIMAL(38, 0))::VARCHAR
+                    ) AS side_fingerprint,
                     count(*)::INTEGER AS pair_count
-                FROM incident
-                GROUP BY component_id
+                FROM relation_candidates_work
+                GROUP BY proposition_b_id
             )
             SELECT
                 p.component_id,
-                coalesce(f.component_fingerprint, sha256(''))
-                    AS component_fingerprint,
-                coalesce(f.pair_count, 0)::INTEGER AS pair_count,
+                sha256(
+                    coalesce(l.side_fingerprint, '') || '|' ||
+                    coalesce(r.side_fingerprint, '')
+                ) AS component_fingerprint,
+                (
+                    coalesce(l.pair_count, 0) +
+                    coalesce(r.pair_count, 0)
+                )::INTEGER AS pair_count,
                 ?::VARCHAR AS candidate_version
             FROM component_propositions p
-            LEFT JOIN fingerprints f USING (component_id)
+            LEFT JOIN left_fingerprints l USING (component_id)
+            LEFT JOIN right_fingerprints r USING (component_id)
             ORDER BY p.component_id
             """,
             [version],
         )
+        self._record_materialization(rows)
+        return rows
 
     def block_execution_rows(self) -> list[dict[str, Any]]:
-        return self.db.rows(
+        rows = self.db.rows(
             """
             SELECT *
             FROM candidate_block_execution_work
             ORDER BY block_id
             """
+        )
+        self._record_materialization(rows)
+        return rows
+
+    def instrumentation(self) -> dict[str, int]:
+        return {
+            "embedding_write_batches": self.embedding_write_batches,
+            "semantic_neighbor_write_batches": (
+                self.semantic_neighbor_write_batches
+            ),
+            "candidate_update_batches": self.candidate_update_batches,
+            "python_rows_materialized": self.python_rows_materialized,
+            "max_materialized_batch_rows": self.max_materialized_batch_rows,
+        }
+
+    def _record_materialization(
+        self,
+        rows: list[dict[str, Any]],
+    ) -> None:
+        count = len(rows)
+        self.python_rows_materialized += count
+        self.max_materialized_batch_rows = max(
+            self.max_materialized_batch_rows,
+            count,
         )
 
     def stats(self) -> dict[str, int]:
@@ -320,30 +864,46 @@ class CandidateStore:
             self.db.close()
             self._closed = True
 
-    def attach_to(self, db: DuckDB, table: str = "relation_candidates_v") -> None:
+    def promote_to(self, path: Path) -> None:
+        """Move this workspace into the staged final graph database."""
+        target = path.resolve()
+        if target.exists():
+            raise ValueError(f"Candidate workspace target already exists: {target}")
+        target.parent.mkdir(parents=True, exist_ok=True)
         self.seal()
-        db.execute(f"ATTACH '{q(self.path)}' AS candidate_workspace (READ_ONLY)")
-        columns = ", ".join(CANDIDATE_COLUMNS)
-        db.execute(
-            f"""
-            CREATE TABLE {table} AS
-            SELECT {columns}
-            FROM candidate_workspace.relation_candidates_work
-            """
-        )
-        db.execute(
-            """
-            CREATE TABLE candidate_blocks_v AS
-            SELECT * FROM candidate_workspace.candidate_blocks_work
-            """
-        )
-        db.execute(
-            """
-            CREATE TABLE candidate_reason_rows_v AS
-            SELECT * FROM candidate_workspace.candidate_reason_rows_work
-            """
-        )
-        db.execute("DETACH candidate_workspace")
+        shutil.move(str(self.path), target)
+        self.path = target
+
+    @staticmethod
+    def promote_public_tables(db: DuckDB) -> None:
+        for current, public in (
+            ("relation_candidates_work", "relation_candidates_v"),
+            ("candidate_blocks_work", "candidate_blocks_v"),
+            ("candidate_reason_rows_work", "candidate_reason_rows_v"),
+            ("proposition_embeddings_work", "proposition_embeddings_v"),
+            ("semantic_neighbors_work", "semantic_neighbors_v"),
+        ):
+            db.execute(f"ALTER TABLE {current} RENAME TO {public}")
+        for table in (
+            "accepted_deterministic_pairs",
+            "baseline_proposition_embeddings",
+            "baseline_semantic_neighbors",
+            "candidate_block_execution_work",
+            "candidate_updates",
+            "component_propositions",
+            "current_embedding_sources",
+            "current_semantic_propositions",
+            "changed_semantic_propositions",
+            "deterministic_memberships",
+            "deterministic_pairs",
+            "directed_embedding_neighbors",
+            "embedding_reasons",
+            "inference_candidate_queue",
+            "proposition_features",
+            "reusable_neighbor_sources",
+            "structural_memberships",
+        ):
+            db.execute(f"DROP TABLE IF EXISTS {table}")
 
     def close(self) -> None:
         self.seal()

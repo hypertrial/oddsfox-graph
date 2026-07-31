@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import hashlib
-import json
 from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any
 
+from .provenance import canonical_json_sha256
 from .versions import EXECUTION_PLAN_VERSION
 
 
@@ -131,16 +130,10 @@ class ExecutionPlan:
             per_stage = stage_counts.setdefault(str(row["stage"]), {})
             status = str(row["status"])
             per_stage[status] = per_stage.get(status, 0) + 1
-        encoded = json.dumps(
-            rows,
-            sort_keys=True,
-            separators=(",", ":"),
-            default=str,
-        ).encode("utf-8")
         return {
             "version": EXECUTION_PLAN_VERSION,
             "row_count": len(rows),
-            "hash": hashlib.sha256(encoded).hexdigest(),
+            "hash": canonical_json_sha256(rows),
             "status_counts": dict(sorted(counts.items())),
             "stage_counts": {
                 stage: dict(sorted(values.items()))

@@ -49,8 +49,19 @@ oddsfox-graph discover \
 `--offline` performs no inference calls and requires complete cache and state
 coverage. A same-directory replay reuses the published model manifest/profile;
 a distinct output must receive those paths explicitly. `--incremental-from`
-must name a distinct, manifest-complete v0.7 output. Incompatible cache entries
+must name a distinct, manifest-complete v0.8 output. Incompatible cache entries
 and baselines are rejected; regenerate them with a clean run.
+
+`--cache-dir` is a dedicated directory containing
+`inference-cache-v6.sqlite3`. The cache is transactional, integrity checked,
+bulk-read and bulk-written, and opened read-only during offline discovery.
+Existing JSON caches and v0.7 profiles or baselines are intentionally
+incompatible.
+
+Candidate reasons select and prioritize pairs, but are not sent to the
+generative model and cannot serve as supporting-field citations. Model
+profiles bind the exact parse and classification request contracts in addition
+to prompts, response schemas, settings, weights, and runtime metadata.
 
 Defaults are 5,000 propositions, 400,000 candidates, 5,000 generative
 classifications, top 20 embedding neighbors, block size 512, and concurrency 2.
@@ -60,6 +71,7 @@ Per-relation CLI thresholds may tighten but never weaken profile thresholds.
 
 Artifacts and `state/` are staged, validated, sorted, hashed, and atomically
 published. The manifest records `input_schema`, input hash and selection,
-models, prompts, fingerprints, versions, limits, compute accounting, solver and
-rule statistics, cache statistics, hashes, and timings. Its presence is the
+models, request contracts, prompts, fingerprints, versions, limits, compute
+accounting, solver and rule statistics, transactional cache statistics,
+stage-level RSS, storage sizes, hashes, and timings. Its presence is the
 completion marker.

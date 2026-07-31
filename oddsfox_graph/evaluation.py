@@ -1,17 +1,16 @@
 from __future__ import annotations
 
 import csv
-import hashlib
 import json
 import math
-import os
 import re
 import shutil
-import tempfile
 from collections import Counter, defaultdict
+from collections.abc import Sequence
+from datetime import date
 from itertools import combinations
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from ._discovery.bulk import create_and_fill
 from ._discovery.evaluation_metrics import (
@@ -20,6 +19,13 @@ from ._discovery.evaluation_metrics import (
     precision as _precision,
 )
 from ._discovery.input import load_source_markets
+from ._discovery.inference import load_compute_profile
+from ._discovery.provenance import (
+    atomic_write_json as _write_json_atomic,
+    compute_accounting,
+    sha256_file as _sha256,
+    text_sha256,
+)
 from .queries import DuckDB, q
 from ._discovery.incremental import ExecutionPlan
 from ._discovery.versions import (
@@ -250,7 +256,10 @@ def export_benchmark_reviews(
             str(row.get("event_slug") or ""),
             str(row.get("category") or ""),
             str(row.get("event_id") or ""),
-            list(row.get("tags") or []),
+            [
+                str(tag)
+                for tag in cast(Sequence[object], row.get("tags") or [])
+            ],
         )
     selected = _stratified_propositions(propositions, parse_count, seed)
     by_id = {str(row["proposition_id"]): row for row in selected}
@@ -267,7 +276,7 @@ def export_benchmark_reviews(
         pair_count,
         seed=seed + 1,
     )
-    rows = [
+    rows: list[dict[str, str]] = [
         _parse_review_row(row)
         for row in sorted(selected, key=lambda item: str(item["proposition_id"]))
     ]
@@ -282,8 +291,8 @@ def export_benchmark_reviews(
         with destination.open("w", newline="", encoding="utf-8") as stream:
             writer = csv.DictWriter(stream, fieldnames=REVIEW_FIELDS)
             writer.writeheader()
-            for row in rows:
-                writer.writerow({**row, "reviewer_alias": alias})
+            for review_row in rows:
+                writer.writerow({**review_row, "reviewer_alias": alias})
     sampling = {
         "benchmark_version": BENCHMARK_VERSION,
         "domain_taxonomy_version": DOMAIN_TAXONOMY_VERSION,
@@ -306,22 +315,17 @@ def export_benchmark_reviews(
         ]
         + [
             {
-                "record_id": hashlib.sha256(
-                    (
-                        f"pair|{row['proposition_a_id']}|"
-                        f"{row['proposition_b_id']}"
-                    ).encode()
-                ).hexdigest(),
+                "record_id": text_sha256(
+                    f"pair|{row['proposition_a_id']}|"
+                    f"{row['proposition_b_id']}"
+                ),
                 "record_type": "pair",
                 "pair_source": str(row["sample_source"]),
             }
             for row in pairs
         ],
     }
-    (output_dir / "sampling_manifest.json").write_text(
-        json.dumps(sampling, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
+    _write_json_atomic(output_dir / "sampling_manifest.json", sampling)
     return {"parse_records": len(selected), "pair_records": len(pairs)}
 
 
@@ -500,9 +504,7 @@ def _validate_review_evidence(
                 raise ValueError(
                     f"Parse record {record_id} must not contain proposition B"
                 )
-            expected_record_id = hashlib.sha256(
-                f"parse|{a_id}".encode()
-            ).hexdigest()
+            expected_record_id = text_sha256(f"parse|{a_id}")
             expected_domain = source[a_id]["domain"]
         elif record_type == "pair":
             if (
@@ -514,9 +516,7 @@ def _validate_review_evidence(
                     f"Pair record {record_id} must contain two canonical, "
                     "stably ordered top-5,000 propositions"
                 )
-            expected_record_id = hashlib.sha256(
-                f"pair|{a_id}|{b_id}".encode()
-            ).hexdigest()
+            expected_record_id = text_sha256(f"pair|{a_id}|{b_id}")
             expected_domain = (
                 source[a_id]["domain"]
                 if source[a_id]["domain"] == source[b_id]["domain"]
@@ -893,7 +893,7 @@ def evaluate_build(
     else:
         decision = "NEEDS_RELATION_MODEL_WORK"
 
-    failure_categories = Counter()
+    failure_categories: Counter[str] = Counter()
     for row in failed_predictions:
         failure_categories[
             "false_positive" if row["expected"] in {"unrelated", "uncertain"} else "wrong_or_missing_relation"
@@ -938,10 +938,7 @@ def evaluate_build(
     }
     destination = (output_path or out_dir / "evaluation_report.json").resolve()
     destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_text(
-        json.dumps(report, indent=2, sort_keys=True, default=str) + "\n",
-        encoding="utf-8",
-    )
+    _write_json_atomic(destination, report)
     benchmark_destination = out_dir / "benchmark.parquet"
     if benchmark_destination.resolve() != benchmark_path:
         shutil.copyfile(benchmark_path, benchmark_destination)
@@ -1119,7 +1116,7 @@ def _parse_review_row(row: dict[str, Any]) -> dict[str, str]:
     proposition_id = str(row["proposition_id"])
     return {
         **{field: "" for field in REVIEW_FIELDS},
-        "record_id": hashlib.sha256(f"parse|{proposition_id}".encode()).hexdigest(),
+        "record_id": text_sha256(f"parse|{proposition_id}"),
         "record_type": "parse",
         "domain": str(row["domain"]),
         "proposition_a_id": proposition_id,
@@ -1143,7 +1140,7 @@ def _pair_review_row(
     )
     return {
         **{field: "" for field in REVIEW_FIELDS},
-        "record_id": hashlib.sha256(f"pair|{a_id}|{b_id}".encode()).hexdigest(),
+        "record_id": text_sha256(f"pair|{a_id}|{b_id}"),
         "record_type": "pair",
         "domain": domain,
         "proposition_a_id": a_id,
@@ -1340,7 +1337,7 @@ def _assign_benchmark_partitions(rows: list[dict[str, Any]]) -> None:
     strata: dict[tuple[str, ...], list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
         if row["record_type"] == "parse":
-            stratum = ("parse", str(row["domain"]))
+            stratum: tuple[str, ...] = ("parse", str(row["domain"]))
         else:
             stratum = (
                 "pair",
@@ -1351,15 +1348,13 @@ def _assign_benchmark_partitions(rows: list[dict[str, Any]]) -> None:
         strata[stratum].append(row)
     for stratum, members in sorted(strata.items()):
         members.sort(
-            key=lambda row: hashlib.sha256(
-                (
-                    BENCHMARK_VERSION
-                    + "|"
-                    + "|".join(stratum)
-                    + "|"
-                    + str(row["record_id"])
-                ).encode()
-            ).hexdigest()
+            key=lambda row: text_sha256(
+                BENCHMARK_VERSION
+                + "|"
+                + "|".join(stratum)
+                + "|"
+                + str(row["record_id"])
+            )
         )
         count = len(members)
         development_end = round(count * 0.4)
@@ -1528,8 +1523,8 @@ def _parser_metrics(
         "jurisdiction": ("expected_jurisdiction", "jurisdiction"),
         "polarity": ("expected_polarity", "polarity"),
     }
-    correct = Counter()
-    totals = Counter()
+    correct: Counter[str] = Counter()
+    totals: Counter[str] = Counter()
     entity_tp = entity_fp = entity_fn = 0
     for expected in benchmark:
         actual = propositions[str(expected["proposition_a_id"])]
@@ -1814,29 +1809,11 @@ def _compute_evaluation_metrics(
     )
     if compute_profile is None:
         return dict(existing) if isinstance(existing, dict) else None
-    profile = _read_optional_json(compute_profile.resolve())
-    hardware_rate = float(profile.get("hardware_hour_usd") or 0.0)
-    load_watts = profile.get("load_watts")
-    electricity_rate = profile.get("electricity_usd_per_kwh")
+    profile = load_compute_profile(compute_profile.resolve())
     timings = (
         (run_metadata or {}).get("stage_timings")
         or manifest.get("stage_timings")
         or {}
-    )
-    seconds = sum(
-        float(timings.get(stage, 0.0))
-        for stage in ("parse_propositions", "score_nli", "classify_pairs")
-    )
-    hours = seconds / 3600.0
-    energy = (
-        float(load_watts) * hours / 1000.0
-        if load_watts is not None
-        else None
-    )
-    electricity = (
-        energy * float(electricity_rate)
-        if energy is not None and electricity_rate is not None
-        else None
     )
     usage = (
         (run_metadata or {}).get("usage")
@@ -1848,27 +1825,13 @@ def _compute_evaluation_metrics(
         or manifest.get("stats")
         or {}
     )
-    input_tokens = int(usage.get("input_tokens") or 0)
-    output_tokens = int(usage.get("output_tokens") or 0)
-    total_tokens = int(
-        usage.get("total_tokens")
-        or input_tokens + output_tokens
+    return compute_accounting(
+        profile,
+        profile_hash=_sha256(compute_profile.resolve()),
+        timings=timings,
+        usage=usage,
+        peak_rss_mb=stats.get("peak_rss_mb"),
     )
-    return {
-        "profile_hash": _sha256(compute_profile.resolve()),
-        "currency": str(profile.get("currency") or "USD"),
-        "model_stage_seconds": seconds,
-        "model_stage_hours": hours,
-        "estimated_energy_kwh": energy,
-        "hardware_cost": hours * hardware_rate,
-        "electricity_cost": electricity,
-        "total_compute_cost": hours * hardware_rate + (electricity or 0.0),
-        "peak_rss_mb": stats.get("peak_rss_mb"),
-        "current_request_input_tokens": input_tokens,
-        "current_request_output_tokens": output_tokens,
-        "current_request_tokens": total_tokens,
-        "tokens_per_second": total_tokens / seconds if seconds > 0 else None,
-    }
 
 
 def _read_optional_json(path: Path) -> dict[str, Any]:
@@ -1885,11 +1848,16 @@ def _metric_equal(left: object, right: object) -> bool:
     if isinstance(left, float) or isinstance(right, float):
         if left is None or right is None:
             return left is right
-        return math.isclose(float(left), float(right), rel_tol=1e-9, abs_tol=1e-9)
-    if hasattr(left, "isoformat"):
-        left = left.isoformat()  # type: ignore[union-attr]
-    if hasattr(right, "isoformat"):
-        right = right.isoformat()  # type: ignore[union-attr]
+        return math.isclose(
+            float(cast(float | int | str, left)),
+            float(cast(float | int | str, right)),
+            rel_tol=1e-9,
+            abs_tol=1e-9,
+        )
+    if isinstance(left, date):
+        left = left.isoformat()
+    if isinstance(right, date):
+        right = right.isoformat()
     return str(left) == str(right) if left is not None and right is not None else left is right
 
 
@@ -1912,34 +1880,4 @@ def _ordered_pair(left: str, right: str) -> tuple[str, str]:
 
 
 def _stable_hash(seed: int, *parts: str) -> str:
-    return hashlib.sha256(
-        "|".join((str(seed), *parts)).encode("utf-8")
-    ).hexdigest()
-
-
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for block in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
-
-
-def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
-    descriptor, temporary_name = tempfile.mkstemp(
-        prefix=f".{path.name}.",
-        suffix=".tmp",
-        dir=path.parent,
-    )
-    try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
-            json.dump(payload, stream, indent=2, sort_keys=True, default=str)
-            stream.write("\n")
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(temporary_name, path)
-    finally:
-        try:
-            os.unlink(temporary_name)
-        except FileNotFoundError:
-            pass
+    return text_sha256("|".join((str(seed), *parts)))

@@ -3,10 +3,28 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import re
+import sqlite3
+import statistics
 from pathlib import Path
 from typing import Any
 
+from oddsfox_graph._discovery.provenance import (
+    atomic_write_json,
+    canonical_json_sha256 as _canonical_json_sha256,
+    sha256_file as _sha256,
+)
+from oddsfox_graph._discovery.versions import (
+    CACHE_ENTRY_VERSION,
+    CACHE_FILENAME,
+    CACHE_FORMAT,
+    FAKE_RUNTIME_VERSION,
+    MODEL_PROFILE_SCHEMA_VERSION,
+    PERFORMANCE_BUDGET_VERSION,
+    RELEASE_FIXTURE_SCHEMA_VERSION,
+)
+from oddsfox_graph import __version__
 
 CANONICAL_SOURCE_SHA256 = (
     "790bd1595b379472ad65ba0073105b4eb630974d04e7b44d58c8a4929f274aa2"
@@ -18,11 +36,12 @@ REQUIRED_SOURCE_COLUMNS = {
     "outcomes",
     "clob_token_ids",
 }
-FIXTURE_SCHEMA_VERSION = "discovery-release-fixture-v3"
-PACKAGE_VERSION = "0.7.0"
+FIXTURE_SCHEMA_VERSION = RELEASE_FIXTURE_SCHEMA_VERSION
+PACKAGE_VERSION = __version__
 REQUIRED_FILES = (
     "input.parquet",
     "benchmark.parquet",
+    "performance-report.json",
     "compute-profile.json",
     "model-manifest.json",
     "model-profile.json",
@@ -37,15 +56,26 @@ REQUIRED_TREES = (
     "baselines/20000",
 )
 _SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
-
-
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
-
+_PERFORMANCE_SIZES = (5_000, 20_000)
+_PERFORMANCE_MODES = (
+    "clean",
+    "offline",
+    "one-market-incremental",
+)
+_PERFORMANCE_GATES = {
+    "5000:clean_wall_seconds",
+    "5000:incremental_candidate_faster",
+    "5000:offline_candidate_reuse",
+    "20000:clean_peak_rss_mb",
+    "20000:incremental_candidate_faster",
+    "20000:offline_candidate_reuse",
+    "20000:publication_seconds",
+}
+_PERFORMANCE_BUDGET_PATH = (
+    Path(__file__).resolve().parents[1]
+    / "benchmarks"
+    / "m4-v0.8-performance-budget.json"
+)
 
 def _validate_canonical_catalog(path: Path) -> None:
     if _sha256(path) != CANONICAL_SOURCE_SHA256:
@@ -159,6 +189,7 @@ def _validate_fixture_argument_bindings(
     file_arguments = {
         "input.parquet": args.input,
         "benchmark.parquet": args.benchmark,
+        "performance-report.json": args.performance_report,
         "compute-profile.json": args.compute_profile,
         "model-manifest.json": args.model_manifest,
         "model-profile.json": args.model_profile,
@@ -200,16 +231,6 @@ def _validate_fixture_argument_bindings(
             )
 
 
-def _canonical_json_sha256(value: object) -> str:
-    return hashlib.sha256(
-        json.dumps(
-            value,
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode("utf-8")
-    ).hexdigest()
-
-
 def _baseline_requested_models(
     manifest: dict[str, Any],
 ) -> tuple[str, str]:
@@ -232,6 +253,217 @@ def _baseline_requested_models(
     return requested[0], requested[1]
 
 
+def _validate_performance_report(path: Path) -> None:
+    performance = json.loads(path.read_text(encoding="utf-8"))
+    performance_budget = performance.get("performance_budget")
+    expected_budget = json.loads(
+        _PERFORMANCE_BUDGET_PATH.read_text(encoding="utf-8")
+    )
+    performance_hardware = performance.get("hardware")
+    acceptance = performance.get("acceptance")
+    if (
+        performance.get("fake_runtime_version") != FAKE_RUNTIME_VERSION
+        or performance.get("repetitions") != 3
+        or performance.get("sizes") != list(_PERFORMANCE_SIZES)
+        or set(performance.get("modes") or [])
+        != set(_PERFORMANCE_MODES)
+        or not isinstance(performance_hardware, dict)
+        or performance_hardware.get("system") != "Darwin"
+        or performance_hardware.get("machine") != "arm64"
+        or performance_hardware.get("processor") != "Apple M4"
+        or not isinstance(performance_budget, dict)
+        or performance_budget != expected_budget
+        or expected_budget.get("schema_version") != PERFORMANCE_BUDGET_VERSION
+        or expected_budget.get("input_sha256") != CANONICAL_SOURCE_SHA256
+        or not isinstance(acceptance, dict)
+        or acceptance.get("passed") is not True
+    ):
+        raise ValueError("Release performance report did not pass the bound M4 gates")
+    expected_samples = {
+        (repetition, size, mode)
+        for repetition in range(1, 4)
+        for size in _PERFORMANCE_SIZES
+        for mode in _PERFORMANCE_MODES
+    }
+    samples = performance.get("samples")
+    if not isinstance(samples, list) or len(samples) != len(expected_samples):
+        raise ValueError("Release performance report has incomplete samples")
+    observed_samples: set[tuple[int, int, str]] = set()
+    clean_hashes: dict[tuple[int, int], dict[str, str]] = {}
+    offline_hashes: dict[tuple[int, int], dict[str, str]] = {}
+    samples_by_mode: dict[tuple[int, str], list[dict[str, Any]]] = {}
+    for sample in samples:
+        if not isinstance(sample, dict):
+            raise ValueError("Release performance report has malformed samples")
+        repetition = sample.get("repetition")
+        size = sample.get("size")
+        mode = sample.get("mode")
+        artifact_hashes = sample.get("artifact_hashes")
+        if (
+            not isinstance(repetition, int)
+            or isinstance(repetition, bool)
+            or not isinstance(size, int)
+            or isinstance(size, bool)
+            or not isinstance(mode, str)
+            or not isinstance(artifact_hashes, dict)
+            or not artifact_hashes
+            or any(
+                not isinstance(name, str)
+                or not isinstance(digest, str)
+                or not _SHA256_PATTERN.fullmatch(digest)
+                for name, digest in artifact_hashes.items()
+            )
+        ):
+            raise ValueError("Release performance report has malformed samples")
+        sample_id = (repetition, size, mode)
+        if sample_id in observed_samples:
+            raise ValueError("Release performance report has duplicate samples")
+        observed_samples.add(sample_id)
+        samples_by_mode.setdefault((size, mode), []).append(sample)
+        keyed_hashes = {
+            str(name): str(digest)
+            for name, digest in artifact_hashes.items()
+        }
+        if mode == "clean":
+            clean_hashes[(repetition, size)] = keyed_hashes
+        elif mode == "offline":
+            offline_hashes[(repetition, size)] = keyed_hashes
+        else:
+            equivalent_hashes = sample.get("equivalent_full_artifact_hashes")
+            if equivalent_hashes != artifact_hashes:
+                raise ValueError(
+                    "Release performance report does not prove incremental "
+                    "and clean-build equality"
+                )
+    if (
+        observed_samples != expected_samples
+        or clean_hashes != offline_hashes
+    ):
+        raise ValueError(
+            "Release performance report does not prove complete deterministic replay"
+        )
+
+    def median_metric(
+        size: int,
+        mode: str,
+        *path_parts: str,
+    ) -> float:
+        values: list[float] = []
+        for sample in samples_by_mode.get((size, mode), []):
+            value: object = sample
+            for part in path_parts:
+                if not isinstance(value, dict) or part not in value:
+                    raise ValueError(
+                        "Release performance report has incomplete measurements"
+                    )
+                value = value[part]
+            if (
+                not isinstance(value, (int, float))
+                or isinstance(value, bool)
+                or not math.isfinite(float(value))
+                or float(value) < 0.0
+            ):
+                raise ValueError(
+                    "Release performance report has invalid measurements"
+                )
+            values.append(float(value))
+        if len(values) != 3:
+            raise ValueError(
+                "Release performance report has incomplete measurements"
+            )
+        return float(statistics.median(values))
+
+    limits = expected_budget["gates"]
+    clean_candidate_seconds = {
+        size: median_metric(
+            size,
+            "clean",
+            "stage_timings",
+            "generate_candidates",
+        )
+        for size in _PERFORMANCE_SIZES
+    }
+    if any(value <= 0.0 for value in clean_candidate_seconds.values()):
+        raise ValueError(
+            "Release performance report has invalid candidate timings"
+        )
+    measured_gates = {
+        "5000:clean_wall_seconds": (
+            median_metric(5_000, "clean", "wall_seconds")
+            <= float(limits["max_5000_clean_wall_seconds"])
+        ),
+        "20000:clean_peak_rss_mb": (
+            median_metric(20_000, "clean", "peak_rss_mb")
+            <= float(limits["max_20000_clean_peak_rss_mb"])
+        ),
+        "20000:publication_seconds": (
+            median_metric(
+                20_000,
+                "clean",
+                "stage_timings",
+                "publish_artifacts",
+            )
+            <= float(limits["max_20000_publication_seconds"])
+        ),
+    }
+    for size in _PERFORMANCE_SIZES:
+        measured_gates[f"{size}:offline_candidate_reuse"] = (
+            median_metric(
+                size,
+                "offline",
+                "stage_timings",
+                "generate_candidates",
+            )
+            / clean_candidate_seconds[size]
+            <= 0.25
+        )
+        measured_gates[f"{size}:incremental_candidate_faster"] = (
+            median_metric(
+                size,
+                "one-market-incremental",
+                "stage_timings",
+                "generate_candidates",
+            )
+            / clean_candidate_seconds[size]
+            <= 0.95
+        )
+    if set(measured_gates) != _PERFORMANCE_GATES or not all(
+        measured_gates.values()
+    ):
+        raise ValueError(
+            "Release performance report measurements did not pass the bound M4 gates"
+        )
+    summary = performance.get("summary")
+    expected_summary = {
+        f"{size}:{mode}"
+        for size in _PERFORMANCE_SIZES
+        for mode in _PERFORMANCE_MODES
+    }
+    if (
+        not isinstance(summary, dict)
+        or set(summary) != expected_summary
+        or any(
+            not isinstance(value, dict) or value.get("runs") != 3
+            for value in summary.values()
+        )
+    ):
+        raise ValueError("Release performance report has incomplete summaries")
+    gates = acceptance.get("gates")
+    comparisons = acceptance.get("performance_comparison")
+    if (
+        not isinstance(gates, dict)
+        or set(gates) != _PERFORMANCE_GATES
+        or gates != measured_gates
+        or not isinstance(comparisons, dict)
+        or set(comparisons) != _PERFORMANCE_GATES
+        or any(
+            not isinstance(value, dict) or value.get("passed") is not True
+            for value in comparisons.values()
+        )
+    ):
+        raise ValueError("Release performance report has incomplete gate results")
+
+
 def _validate_content_bindings(
     args: argparse.Namespace,
     limits: list[int],
@@ -240,10 +472,17 @@ def _validate_content_bindings(
     model_profile = json.loads(args.model_profile.read_text(encoding="utf-8"))
     calibration = json.loads(args.calibration_report.read_text(encoding="utf-8"))
     compute = json.loads(args.compute_profile.read_text(encoding="utf-8"))
+    _validate_performance_report(args.performance_report)
     if model_manifest.get("license") != "Apache-2.0":
         raise ValueError("Release model manifest must use the approved Apache-2.0 license")
     if model_manifest.get("runtime") not in {"llama.cpp", "vllm"}:
         raise ValueError("Release model manifest has an unsupported runtime")
+    if (
+        model_profile.get("schema_version") != MODEL_PROFILE_SCHEMA_VERSION
+        or set(model_profile.get("request_contract_hashes") or {})
+        != {"parse", "classify"}
+    ):
+        raise ValueError("Release model profile has incompatible request contracts")
     if (
         model_profile.get("model_manifest_id") != model_manifest.get("manifest_id")
         or model_profile.get("model_manifest_sha256")
@@ -267,10 +506,54 @@ def _validate_content_bindings(
         or isinstance(compute.get("hardware_hour_usd"), bool)
     ):
         raise ValueError("Compute profile is missing hardware_hour_usd")
-    for cache_file in args.cache_dir.rglob("*.json"):
-        cache_entry = json.loads(cache_file.read_text(encoding="utf-8"))
-        if cache_entry.get("version") != 5:
-            raise ValueError("Release cache has incompatible inference lineage")
+    cache_path = args.cache_dir / CACHE_FILENAME
+    if not cache_path.is_file():
+        raise ValueError("Release cache has incompatible inference lineage")
+    allowed_cache_files = {
+        CACHE_FILENAME,
+        f"{CACHE_FILENAME}-wal",
+        f"{CACHE_FILENAME}-shm",
+    }
+    if any(
+        item.name not in allowed_cache_files
+        for item in args.cache_dir.iterdir()
+    ):
+        raise ValueError("Release cache has incompatible inference lineage")
+    cache_wal = args.cache_dir / f"{CACHE_FILENAME}-wal"
+    if cache_wal.is_file() and cache_wal.stat().st_size:
+        raise ValueError("Release cache must be checkpointed before validation")
+    cache_db = sqlite3.connect(f"file:{cache_path.as_posix()}?mode=ro", uri=True)
+    try:
+        metadata = dict(
+            cache_db.execute(
+                "SELECT key, value FROM cache_metadata"
+            ).fetchall()
+        )
+        integrity = cache_db.execute("PRAGMA integrity_check").fetchone()
+        incompatible = int(
+            cache_db.execute(
+                "SELECT count(*) FROM cache_entries WHERE entry_version != ?",
+                [CACHE_ENTRY_VERSION],
+            ).fetchone()[0]
+        )
+    except sqlite3.DatabaseError as exc:
+        raise ValueError(
+            "Release cache has incompatible inference lineage"
+        ) from exc
+    finally:
+        cache_db.close()
+    if (
+        metadata
+        != {
+            "format": CACHE_FORMAT,
+            "entry_version": str(CACHE_ENTRY_VERSION),
+            "lineage": "self-hosted-open-model",
+        }
+        or integrity is None
+        or integrity[0] != "ok"
+        or incompatible
+    ):
+        raise ValueError("Release cache has incompatible inference lineage")
     for limit in limits:
         manifest = json.loads(
             (
@@ -301,6 +584,7 @@ def main() -> int:
     parser.add_argument("--work-dir", required=True, type=Path)
     parser.add_argument("--expected-hashes", required=True, type=Path)
     parser.add_argument("--benchmark", required=True, type=Path)
+    parser.add_argument("--performance-report", required=True, type=Path)
     parser.add_argument("--compute-profile", required=True, type=Path)
     parser.add_argument("--model-manifest", required=True, type=Path)
     parser.add_argument("--model-profile", required=True, type=Path)
@@ -331,6 +615,9 @@ def main() -> int:
 
     results: dict[str, Any] = {}
     results["fixture"] = fixture_manifest
+    results["performance"] = json.loads(
+        args.performance_report.read_text(encoding="utf-8")
+    )
     for limit in limits:
         baseline_manifest = json.loads(
             (
@@ -384,10 +671,7 @@ def main() -> int:
         ).read_text(encoding="utf-8")
     )
     args.work_dir.mkdir(parents=True, exist_ok=True)
-    (args.work_dir / "release-validation.json").write_text(
-        json.dumps(results, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
+    atomic_write_json(args.work_dir / "release-validation.json", results)
     return 0
 
 

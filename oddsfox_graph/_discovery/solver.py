@@ -1,14 +1,13 @@
 from __future__ import annotations
 
-import hashlib
-import json
 from collections import defaultdict
 from collections.abc import Sequence
 from typing import Any
 
+from .provenance import canonical_json_sha256, text_sha256
+from .versions import CONSTRAINT_VERSION, SOLVER_VERSION
 
-SOLVER_VERSION = "pysat-rc2-1.9.dev7"
-CONSTRAINT_VERSION = "logic-constraints-v1"
+
 SYMMETRIC_RELATIONS = {
     "complement",
     "equivalent",
@@ -274,9 +273,7 @@ def proposal_set_hash(rows: Sequence[dict[str, Any]]) -> str:
         }
         for row in sorted(rows, key=lambda row: str(row["proposal_id"]))
     ]
-    return hashlib.sha256(
-        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
-    ).hexdigest()
+    return canonical_json_sha256(payload)
 
 
 def _normalize_proposal(row: dict[str, Any]) -> dict[str, Any]:
@@ -303,7 +300,7 @@ def _normalize_proposal(row: dict[str, Any]) -> dict[str, Any]:
                 str(normalized.get("prompt_version") or ""),
             )
         )
-        proposal_id = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+        proposal_id = text_sha256(raw)
     normalized["proposal_id"] = str(proposal_id)
     normalized.setdefault("rule_id", None)
     return normalized
@@ -349,7 +346,7 @@ def _component_id(rows: Sequence[dict[str, Any]]) -> str:
             for key in ("src_node_id", "dst_node_id")
         }
     )
-    return hashlib.sha256("|".join(nodes).encode("utf-8")).hexdigest()
+    return text_sha256("|".join(nodes))
 
 
 def _pair(row: dict[str, Any]) -> tuple[str, str]:
@@ -446,7 +443,7 @@ def _equivalence_conflict(
         left, right = find(str(row["src_node_id"])), find(str(row["dst_node_id"]))
         if left == right:
             continue
-        key = tuple(sorted((left, right)))
+        key = (min(left, right), max(left, right))
         collapsed[key][str(row["edge_type"])].append(str(row["proposal_id"]))
     for roots, relation_map in collapsed.items():
         if len(relation_map) > 1:

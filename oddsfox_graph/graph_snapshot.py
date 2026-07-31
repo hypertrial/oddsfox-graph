@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import json
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from . import __version__
+from ._discovery.provenance import atomic_write_json
 from .queries import DuckDB
 
 GRAPH_SNAPSHOT_ARTIFACT = "graph_snapshot.json"
@@ -54,9 +54,20 @@ def write_graph_snapshot(
         ORDER BY confidence DESC, a_node_id, b_node_id
         """
     )
+    source_watermark = db.scalar(
+        """
+        SELECT max(coalesce(last_seen_ts, first_seen_ts))
+        FROM nodes_table
+        """
+    )
+    built_at = (
+        source_watermark.isoformat()
+        if isinstance(source_watermark, datetime)
+        else "1970-01-01T00:00:00+00:00"
+    )
     snapshot = {
         "version": f"v{__version__}",
-        "built_at": datetime.now(timezone.utc).isoformat(),
+        "built_at": built_at,
         "source_manifest": source_manifest,
         "counts": {
             "nodes": len(nodes),
@@ -67,8 +78,5 @@ def write_graph_snapshot(
         "logic_edges": logic_edges,
         "conditionals": conditionals,
     }
-    (out_dir / GRAPH_SNAPSHOT_ARTIFACT).write_text(
-        json.dumps(snapshot, indent=2, sort_keys=True, default=str) + "\n",
-        encoding="utf-8",
-    )
+    atomic_write_json(out_dir / GRAPH_SNAPSHOT_ARTIFACT, snapshot)
     return snapshot

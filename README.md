@@ -22,9 +22,10 @@ download or start model weights.
 `discover` accepts Parquet using the
 `polymarket-market-snapshot-v1` contract. Required columns are `market_id`,
 `question`, `outcomes`, and `clob_token_ids`; the two list columns must be
-nonempty and equal length. Supported metadata columns are `event_id`,
-`event_slug`, `description`, `volume`, `start_time`, `end_time`, `category`,
-and `tags`. Each token ID must be unique.
+nonempty and equal length for a row to be eligible. Rows with missing or
+mismatched required values are counted and excluded. Supported metadata
+columns are `event_id`, `event_slug`, `description`, `volume`, `start_time`,
+`end_time`, `category`, and `tags`. Each token ID must be unique.
 
 The release catalog is
 `data/polymarket_all_markets_20260730T093857Z.parquet`, SHA-256
@@ -62,6 +63,12 @@ Without a model profile, model-positive proposals go to review. Use
 `model-profile` before a release run. A cache-complete replay uses `--offline`;
 incremental execution uses a distinct completed directory with
 `--incremental-from`.
+
+The cache directory contains one transactional
+`inference-cache-v6.sqlite3` database. v0.7 JSON caches, profiles, and
+incremental baselines are intentionally incompatible. Candidate reasons are
+used only for retrieval and scheduling; classification receives the two
+canonical proposition records and never treats retrieval metadata as evidence.
 
 See [documentation](docs/index.md), [CLI reference](docs/cli.md),
 [discovery workflow](docs/discovery.md), [artifacts](docs/artifacts.md), and

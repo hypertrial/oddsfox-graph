@@ -20,6 +20,10 @@ Sampling: `--sampling-seed`, `--temperature`, `--generation-top-p`,
 `--generation-top-k`, `--presence-penalty`, `--parse-max-output-tokens`,
 `--classify-max-output-tokens`.
 
+`--cache-dir` must be empty or contain the current
+`inference-cache-v6.sqlite3`; offline mode opens it read-only. Earlier cache,
+profile, and incremental formats are rejected.
+
 ## Benchmark commands
 
 - `benchmark-export`: `--input`, `--out`, `--output-dir`, `--parse-count`,

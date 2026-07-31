@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from ._discovery.bulk import create_and_fill
-from ._discovery.cache import JsonCache, cache_entry, cache_error
+from ._discovery.cache import InferenceCache, cache_entry, cache_error
 from ._discovery.contracts import (
     DEFAULT_NLI_MODEL,
     DEFAULT_NLI_REVISION,
@@ -20,13 +20,29 @@ from ._discovery.inference import (
     LocalStructuredClient,
     ModelManifest,
     ModelProfile,
-    canonical_json_sha256,
     inference_fingerprint,
     load_model_manifest,
     manifest_sha256,
     normalize_inference_base_url,
-    sha256_file,
     sha256_path,
+)
+from ._discovery.protocol import (
+    CLASSIFY_PROMPT,
+    PARSE_PROMPT,
+    classify_request_hash,
+    conformance_pair_request,
+    conformance_parse_request,
+    default_generation_settings,
+    market_request,
+    model_schema_hash,
+    pair_request,
+    parse_request_hash,
+)
+from ._discovery.provenance import (
+    atomic_write_json,
+    canonical_json_sha256,
+    sha256_file,
+    text_sha256,
 )
 from ._discovery.input import load_source_markets
 from ._discovery.nli import (
@@ -34,6 +50,12 @@ from ._discovery.nli import (
     nli_inference_fingerprint,
     score_bidirectional,
 )
+from ._discovery.adjudication import (
+    classification_validation_error,
+    derive_atomic_relation,
+    nli_text,
+)
+from ._discovery.parsing import proposition_row, validate_parsed_market
 from .queries import DuckDB, q
 from ._discovery.versions import (
     BENCHMARK_SCHEMA_VERSION,
@@ -111,7 +133,7 @@ def create_model_manifest(
         manifest_id=canonical_json_sha256(base),
         **base,
     )
-    _write_json(output_path.resolve(), manifest.model_dump(mode="json"))
+    atomic_write_json(output_path.resolve(), manifest.model_dump(mode="json"))
     return manifest.model_dump(mode="json")
 
 
@@ -153,8 +175,6 @@ async def _check_model_async(
     *,
     allow_remote: bool,
 ) -> dict[str, Any]:
-    from .discovery import _CLASSIFY_PROMPT, _PARSE_PROMPT
-
     client = LocalStructuredClient(
         manifest.inference_origin,
         allow_remote=allow_remote,
@@ -172,41 +192,25 @@ async def _check_model_async(
             raise ValueError("Runtime version does not match the manifest")
         parse = await client.generate(
             model=manifest.loaded_model_identifier,
-            system_prompt=_PARSE_PROMPT,
-            payload={
-                "market_id": "conformance-market",
-                "question": "Will the conformance check pass?",
-                "description": "A local schema-conformance request.",
-                "outcomes": [
-                    {"outcome": "Yes", "clob_token_id": "yes"},
-                    {"outcome": "No", "clob_token_id": "no"},
-                ],
-            },
+            system_prompt=PARSE_PROMPT,
+            payload=conformance_parse_request().model_dump(mode="json"),
             response_model=ParsedMarket,
-            settings=_default_settings(role="parse"),
+            settings=default_generation_settings(role="parse"),
         )
         classification = await client.generate(
             model=manifest.loaded_model_identifier,
-            system_prompt=_CLASSIFY_PROMPT,
-            payload={
-                "pair_id": "conformance-pair",
-                "proposition_A": {
-                    "question": "Will the conformance check pass?",
-                    "outcome": "Yes",
-                },
-                "proposition_B": {
-                    "question": "Will the conformance check pass?",
-                    "outcome": "No",
-                },
-            },
+            system_prompt=CLASSIFY_PROMPT,
+            payload=conformance_pair_request(
+                manifest.loaded_model_identifier
+            ).model_dump(mode="json"),
             response_model=AtomicPairAssessment,
-            settings=_default_settings(role="classify"),
+            settings=default_generation_settings(role="classify"),
         )
         stable_failure = False
         try:
             await client.generate(
                 model=manifest.loaded_model_identifier,
-                system_prompt=_CLASSIFY_PROMPT,
+                system_prompt=CLASSIFY_PROMPT,
                 payload={"pair_id": "truncation-check"},
                 response_model=AtomicPairAssessment,
                 settings=GenerationSettings(
@@ -315,10 +319,9 @@ def build_model_profile(
     out_dir = out_dir.resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
     _write_predictions(out_dir / "calibration_predictions.parquet", predictions)
-    _write_json(out_dir / "calibration_report.json", report)
-    _write_json(out_dir / "model_profile.json", profile.model_dump(mode="json"))
+    atomic_write_json(out_dir / "calibration_report.json", report)
+    atomic_write_json(out_dir / "model_profile.json", profile.model_dump(mode="json"))
     return report
-
 
 async def _calibration_predictions(
     input_path: Path,
@@ -328,58 +331,55 @@ async def _calibration_predictions(
     *,
     allow_remote: bool,
 ) -> list[dict[str, Any]]:
-    from .discovery import (
-        _CLASSIFY_PROMPT,
-        _PARSE_PROMPT,
-        _classification_validation_error,
-        _derive_atomic_relation,
-        _market_payload,
-        _model_schema_hash,
-        _nli_text,
-        _pair_id,
-        _proposition_row,
-        _public_proposition,
-        _text_hash,
-        _validate_parsed_market,
-    )
-
     source_schema, _, markets, _ = load_source_markets(
         input_path,
         max_propositions=5_000,
     )
-    by_token: dict[str, dict[str, Any]] = {}
-    by_market: dict[str, Any] = {}
-    for market in markets:
-        by_market[market.market_id] = market
-        for outcome in market.outcomes:
-            by_token[outcome.clob_token_id] = {
-                "market": market,
-                "outcome": outcome,
-            }
+    by_token = {
+        outcome.clob_token_id: (market, outcome)
+        for market in markets
+        for outcome in market.outcomes
+    }
+    required_token_ids = {
+        str(row[field])
+        for row in benchmark_rows
+        for field in ("proposition_a_id", "proposition_b_id")
+        if row.get(field)
+    }
+    missing_tokens = sorted(required_token_ids - set(by_token))
+    if missing_tokens:
+        raise ValueError(
+            "Calibration benchmark contains proposition IDs outside the "
+            f"top-5,000 population: {missing_tokens[:5]}"
+        )
+    required_market_ids = {
+        by_token[token_id][0].market_id for token_id in required_token_ids
+    }
+    required_markets = {
+        market.market_id: market
+        for market in markets
+        if market.market_id in required_market_ids
+    }
+
     client = LocalStructuredClient(
         manifest.inference_origin,
         allow_remote=allow_remote,
     )
-    await _with_retries(
-        lambda: client.preflight(
-            expected_model=manifest.loaded_model_identifier,
-            expected_runtime=manifest.runtime,
-        )
-    )
+    cache = InferenceCache(cache_dir.resolve())
     semaphore = asyncio.Semaphore(2)
-    cache = JsonCache(cache_dir.resolve() / "model-profile-v2")
-    parse_settings = _default_settings(role="parse")
-    classify_settings = _default_settings(role="classify")
-    parse_prompt_hash = _text_hash(_PARSE_PROMPT)
-    classify_prompt_hash = _text_hash(_CLASSIFY_PROMPT)
-    parse_schema_hash = _model_schema_hash(ParsedMarket)
-    classify_schema_hash = _model_schema_hash(AtomicPairAssessment)
+    parse_settings = default_generation_settings(role="parse")
+    classify_settings = default_generation_settings(role="classify")
+    parse_prompt_hash = text_sha256(PARSE_PROMPT)
+    classify_prompt_hash = text_sha256(CLASSIFY_PROMPT)
+    parse_schema_hash = model_schema_hash(ParsedMarket)
+    classify_schema_hash = model_schema_hash(AtomicPairAssessment)
     parse_fingerprint = inference_fingerprint(
         manifest,
         role="parse",
         requested_model=manifest.loaded_model_identifier,
         prompt_version=PARSE_PROMPT_VERSION,
         prompt_hash=parse_prompt_hash,
+        request_schema_hash=parse_request_hash(),
         schema_hash=parse_schema_hash,
         settings=parse_settings,
     )
@@ -389,178 +389,281 @@ async def _calibration_predictions(
         requested_model=manifest.loaded_model_identifier,
         prompt_version=CLASSIFY_PROMPT_VERSION,
         prompt_hash=classify_prompt_hash,
+        request_schema_hash=classify_request_hash(),
         schema_hash=classify_schema_hash,
         settings=classify_settings,
     )
-    pair_fingerprint = canonical_json_sha256(
-        {
-            "parse": parse_fingerprint,
-            "classify": classify_fingerprint,
-        }
-    )
-    market_parse_tasks: dict[str, asyncio.Task[dict[str, Any]]] = {}
 
-    async def parsed_market_entry(market: SourceMarket) -> dict[str, Any]:
-        payload = _market_payload(market)
-        key = cache.key(
-            "profile-production-parse",
-            parse_fingerprint,
-            PARSE_PROMPT_VERSION,
-            parse_prompt_hash,
-            parse_schema_hash,
-            payload,
-        )
-        entry = cache.get(key)
-        if entry is None:
-            try:
-                result = await _with_retries(
-                    lambda: client.generate(
-                        model=manifest.loaded_model_identifier,
-                        system_prompt=_PARSE_PROMPT,
-                        payload=payload,
-                        response_model=ParsedMarket,
-                        settings=parse_settings,
-                    )
-                )
-                parsed_market = ParsedMarket.model_validate(result.parsed)
-                _validate_parsed_market(market, parsed_market)
-                entry = cache_entry(
-                    task="profile-production-parse",
-                    parsed=parsed_market.model_dump(mode="json"),
-                    error=None,
-                    observed_model=result.observed_model,
-                    usage=result.usage,
-                    usage_scope=market.market_id,
-                    state="success",
-                )
-            except Exception as exc:
-                entry = cache_entry(
-                    task="profile-production-parse",
-                    parsed=None,
-                    error=str(exc),
-                    observed_model=manifest.loaded_model_identifier,
-                    usage={},
-                    usage_scope=None,
-                    state=(
-                        "transient_failure"
-                        if getattr(exc, "retryable", False)
-                        else "stable_failure"
-                    ),
-                    error_type=type(exc).__name__,
-                    status_code=getattr(exc, "status_code", None),
-                )
-            cache.put(key, entry)
-        return entry
-
-    async def parsed_proposition(
-        source: dict[str, Any],
-    ) -> tuple[dict[str, Any], dict[str, int]]:
-        market = source["market"]
-        task = market_parse_tasks.get(market.market_id)
-        if task is None:
-            task = asyncio.create_task(parsed_market_entry(market))
-            market_parse_tasks[market.market_id] = task
-        entry = await task
-        error = cache_error(entry)
-        if error is not None or entry.get("parsed") is None:
-            raise ValueError(error or "Missing production parse")
-        parsed_market = ParsedMarket.model_validate(entry["parsed"])
-        _validate_parsed_market(market, parsed_market)
-        outcome = source["outcome"]
-        parsed_outcome = next(
-            item
-            for item in parsed_market.propositions
-            if item.outcome == outcome.outcome
-        )
-        proposition = _proposition_row(
-            market,
-            outcome,
-            parsed_outcome,
-            str(
-                entry.get("observed_model")
-                or manifest.loaded_model_identifier
+    def failed_entry(task: str, exc: Exception) -> dict[str, Any]:
+        return cache_entry(
+            task=task,
+            parsed=None,
+            error=str(exc),
+            observed_model=manifest.loaded_model_identifier,
+            usage={},
+            usage_scope=None,
+            state=(
+                "transient_failure"
+                if getattr(exc, "retryable", False)
+                else "stable_failure"
             ),
-            source_schema,
-            None,
-            parse_fingerprint,
-            None,
-        )
-        return (
-            _public_proposition(proposition),
-            {
-                key: int(value)
-                for key, value in dict(entry.get("usage") or {}).items()
-                if key in {"input_tokens", "output_tokens", "total_tokens"}
-            },
+            error_type=type(exc).__name__,
+            status_code=getattr(exc, "status_code", None),
         )
 
-    async def predict(row: dict[str, Any]) -> dict[str, Any]:
-        async with semaphore:
-            role = "parse" if row["record_type"] == "parse" else "classify"
-            cache_fingerprint = (
-                parse_fingerprint if role == "parse" else pair_fingerprint
+    try:
+        await _with_retries(
+            lambda: client.preflight(
+                expected_model=manifest.loaded_model_identifier,
+                expected_runtime=manifest.runtime,
             )
-            cache_key = cache.key(
-                f"profile-{role}",
-                cache_fingerprint,
-                (
-                    PARSE_PROMPT_VERSION
-                    if role == "parse"
-                    else CLASSIFY_PROMPT_VERSION
-                ),
-                (
-                    parse_prompt_hash
-                    if role == "parse"
-                    else classify_prompt_hash
-                ),
-                (
-                    parse_schema_hash
-                    if role == "parse"
-                    else classify_schema_hash
-                ),
-                row,
+        )
+        parse_requests: dict[
+            str, tuple[SourceMarket, str, dict[str, object]]
+        ] = {}
+        for market_id, market in sorted(required_markets.items()):
+            payload = market_request(market).model_dump(mode="json")
+            key = cache.key(
+                "parse",
+                parse_fingerprint,
+                PARSE_PROMPT_VERSION,
+                parse_prompt_hash,
+                parse_schema_hash,
+                payload,
             )
-            cached = cache.get(cache_key)
-            if cached is not None and isinstance(cached.get("parsed"), dict):
-                return dict(cached["parsed"])
-            try:
-                if row["record_type"] == "parse":
-                    source = by_token[str(row["proposition_a_id"])]
-                    proposition, usage = await parsed_proposition(source)
-                    predicted = proposition
-                    confidence = float(proposition["parse_confidence"])
-                    nli_text_a = None
-                    nli_text_b = None
-                    observed_model = str(proposition["parser_model"])
-                else:
-                    a = by_token[str(row["proposition_a_id"])]
-                    b = by_token[str(row["proposition_b_id"])]
-                    proposition_a, _ = await parsed_proposition(a)
-                    proposition_b, _ = await parsed_proposition(b)
-                    payload = {
-                        "pair_id": _pair_id(
-                            str(row["proposition_a_id"]),
-                            str(row["proposition_b_id"]),
-                        ),
-                        "proposition_A": proposition_a,
-                        "proposition_B": proposition_b,
-                    }
+            parse_requests[market_id] = (market, key, payload)
+        cached_parse = cache.get_many(
+            [key for _, key, _ in parse_requests.values()],
+            offline=False,
+        )
+
+        async def infer_parse(
+            market: SourceMarket,
+            key: str,
+            payload: dict[str, object],
+        ) -> tuple[str, dict[str, Any]]:
+            async with semaphore:
+                try:
                     result = await _with_retries(
                         lambda: client.generate(
                             model=manifest.loaded_model_identifier,
-                            system_prompt=_CLASSIFY_PROMPT,
+                            system_prompt=PARSE_PROMPT,
+                            payload=payload,
+                            response_model=ParsedMarket,
+                            settings=parse_settings,
+                        )
+                    )
+                    parsed_market = ParsedMarket.model_validate(result.parsed)
+                    validate_parsed_market(market, parsed_market)
+                    entry = cache_entry(
+                        task="parse",
+                        parsed=parsed_market.model_dump(mode="json"),
+                        error=None,
+                        observed_model=result.observed_model,
+                        usage=result.usage,
+                        usage_scope=cache.usage_scope("parse", [payload]),
+                        state="success",
+                    )
+                except Exception as exc:
+                    entry = failed_entry("parse", exc)
+                return key, entry
+
+        parse_misses = [
+            request
+            for request in parse_requests.values()
+            if request[1] not in cached_parse
+        ]
+        parse_results = await asyncio.gather(
+            *(infer_parse(*request) for request in parse_misses)
+        )
+        cache.put_many(dict(sorted(parse_results)))
+        parse_entries = {
+            market_id: (
+                cached_parse.get(key)
+                or dict(parse_results).get(key)
+            )
+            for market_id, (_, key, _) in parse_requests.items()
+        }
+
+        propositions: dict[str, dict[str, Any]] = {}
+        proposition_errors: dict[str, str] = {}
+        for token_id in sorted(required_token_ids):
+            market, outcome = by_token[token_id]
+            entry = parse_entries.get(market.market_id)
+            if entry is None:
+                proposition_errors[token_id] = "Missing production parse"
+                continue
+            error = cache_error(entry)
+            if error is not None or entry.get("parsed") is None:
+                proposition_errors[token_id] = error or "Missing production parse"
+                continue
+            try:
+                parsed_market = ParsedMarket.model_validate(entry["parsed"])
+                validate_parsed_market(market, parsed_market)
+                parsed_outcome = next(
+                    item
+                    for item in parsed_market.propositions
+                    if item.outcome == outcome.outcome
+                )
+                proposition = proposition_row(
+                    market,
+                    outcome,
+                    parsed_outcome,
+                    str(
+                        entry.get("observed_model")
+                        or manifest.loaded_model_identifier
+                    ),
+                    source_schema,
+                    None,
+                    parse_fingerprint,
+                    None,
+                )
+                propositions[token_id] = {
+                    key: value
+                    for key, value in proposition.items()
+                    if not key.startswith("_")
+                }
+            except (StopIteration, TypeError, ValueError) as exc:
+                proposition_errors[token_id] = str(exc)
+
+        pair_requests: dict[
+            str, tuple[dict[str, object], str, dict[str, Any], dict[str, Any]]
+        ] = {}
+        for row in benchmark_rows:
+            if row["record_type"] != "pair":
+                continue
+            record_id = str(row["record_id"])
+            a_id = str(row["proposition_a_id"])
+            b_id = str(row["proposition_b_id"])
+            if a_id not in propositions or b_id not in propositions:
+                continue
+            proposition_a = propositions[a_id]
+            proposition_b = propositions[b_id]
+            payload = pair_request(
+                proposition_a,
+                proposition_b,
+            ).model_dump(mode="json")
+            key = cache.key(
+                "classify",
+                classify_fingerprint,
+                CLASSIFY_PROMPT_VERSION,
+                classify_prompt_hash,
+                classify_schema_hash,
+                payload,
+            )
+            pair_requests[record_id] = (
+                payload,
+                key,
+                proposition_a,
+                proposition_b,
+            )
+        cached_classify = cache.get_many(
+            [key for _, key, _, _ in pair_requests.values()],
+            offline=False,
+        )
+        unique_classify_misses = {
+            key: payload
+            for payload, key, _, _ in pair_requests.values()
+            if key not in cached_classify
+        }
+
+        async def infer_classify(
+            key: str,
+            payload: dict[str, object],
+        ) -> tuple[str, dict[str, Any]]:
+            async with semaphore:
+                try:
+                    result = await _with_retries(
+                        lambda: client.generate(
+                            model=manifest.loaded_model_identifier,
+                            system_prompt=CLASSIFY_PROMPT,
                             payload=payload,
                             response_model=AtomicPairAssessment,
                             settings=classify_settings,
                         )
                     )
-                    assessment = AtomicPairAssessment.model_validate(result.parsed)
+                    assessment = AtomicPairAssessment.model_validate(
+                        result.parsed
+                    )
                     if assessment.pair_id != payload["pair_id"]:
                         raise ValueError(
                             "Structured classification returned the wrong pair_id"
                         )
-                    relation, error = _derive_atomic_relation(assessment)
-                    error = error or _classification_validation_error(
+                    entry = cache_entry(
+                        task="classify",
+                        parsed=assessment.model_dump(mode="json"),
+                        error=None,
+                        observed_model=result.observed_model,
+                        usage=result.usage,
+                        usage_scope=cache.usage_scope(
+                            "classify",
+                            [payload],
+                        ),
+                        state="success",
+                    )
+                except Exception as exc:
+                    entry = failed_entry("classify", exc)
+                return key, entry
+
+        classify_results = await asyncio.gather(
+            *(
+                infer_classify(key, payload)
+                for key, payload in sorted(unique_classify_misses.items())
+            )
+        )
+        cache.put_many(dict(sorted(classify_results)))
+        classify_entries = {
+            **cached_classify,
+            **dict(classify_results),
+        }
+
+        predictions: list[dict[str, Any]] = []
+        for row in benchmark_rows:
+            record_id = str(row["record_id"])
+            nli_text_a: str | None = None
+            nli_text_b: str | None = None
+            try:
+                a_id = str(row["proposition_a_id"])
+                if a_id in proposition_errors:
+                    raise ValueError(proposition_errors[a_id])
+                proposition_a = propositions[a_id]
+                if row["record_type"] == "parse":
+                    predicted = proposition_a
+                    confidence = float(proposition_a["parse_confidence"])
+                    entry = parse_entries[
+                        by_token[a_id][0].market_id
+                    ]
+                    usage = dict(entry.get("usage") or {}) if entry else {}
+                    nli_text_a = None
+                    nli_text_b = None
+                else:
+                    b_id = str(row["proposition_b_id"])
+                    if b_id in proposition_errors:
+                        raise ValueError(proposition_errors[b_id])
+                    payload, key, proposition_a, proposition_b = pair_requests[
+                        record_id
+                    ]
+                    nli_text_a = nli_text(proposition_a)
+                    nli_text_b = nli_text(proposition_b)
+                    entry = classify_entries.get(key)
+                    error_message = cache_error(entry or {})
+                    if (
+                        entry is None
+                        or error_message
+                        or entry.get("parsed") is None
+                    ):
+                        raise ValueError(
+                            error_message or "Missing classification"
+                        )
+                    assessment = AtomicPairAssessment.model_validate(
+                        entry["parsed"]
+                    )
+                    if assessment.pair_id != payload["pair_id"]:
+                        raise ValueError(
+                            "Structured classification returned the wrong pair_id"
+                        )
+                    relation, error = derive_atomic_relation(assessment)
+                    error = error or classification_validation_error(
                         assessment,
                         proposition_a,
                         proposition_b,
@@ -570,86 +673,56 @@ async def _calibration_predictions(
                     predicted = assessment.model_dump(mode="json")
                     predicted["derived_relation"] = relation
                     confidence = assessment.confidence
-                    nli_text_a = _nli_text(proposition_a)
-                    nli_text_b = _nli_text(proposition_b)
-                    observed_model = result.observed_model
-                    usage = result.usage
-                prediction = {
-                    "record_id": str(row["record_id"]),
-                    "record_type": str(row["record_type"]),
-                    "expected_relation": row.get("expected_relation"),
-                    "expected_unsupported_assumption": bool(
-                        row.get("unsupported_assumption")
-                    ),
-                    "predicted_relation": predicted.get("derived_relation"),
-                    "confidence": float(confidence),
-                    "valid": True,
-                    "error": None,
-                    "prediction_json": json.dumps(
-                        predicted,
-                        sort_keys=True,
-                        default=str,
-                    ),
-                    "nli_text_a": nli_text_a,
-                    "nli_text_b": nli_text_b,
-                    "input_tokens": int(usage.get("input_tokens", 0)),
-                    "output_tokens": int(usage.get("output_tokens", 0)),
-                }
-                cache.put(
-                    cache_key,
-                    cache_entry(
-                        task=f"profile-{role}",
-                        parsed=prediction,
-                        error=None,
-                        observed_model=observed_model,
-                        usage=usage,
-                        usage_scope=str(row["record_id"]),
-                        state="success",
-                    ),
-                )
-                return prediction
-            except Exception as exc:
-                prediction = {
-                    "record_id": str(row["record_id"]),
-                    "record_type": str(row["record_type"]),
-                    "expected_relation": row.get("expected_relation"),
-                    "expected_unsupported_assumption": bool(
-                        row.get("unsupported_assumption")
-                    ),
-                    "predicted_relation": None,
-                    "confidence": 0.0,
-                    "valid": False,
-                    "error": str(exc),
-                    "prediction_json": None,
-                    "nli_text_a": None,
-                    "nli_text_b": None,
-                    "input_tokens": 0,
-                    "output_tokens": 0,
-                }
-                cache.put(
-                    cache_key,
-                    cache_entry(
-                        task=f"profile-{role}",
-                        parsed=prediction,
-                        error=str(exc),
-                        observed_model=manifest.loaded_model_identifier,
-                        usage={},
-                        usage_scope=None,
-                        state=(
-                            "transient_failure"
-                            if getattr(exc, "retryable", False)
-                            else "stable_failure"
+                    usage = dict(entry.get("usage") or {})
+                predictions.append(
+                    {
+                        "record_id": record_id,
+                        "record_type": str(row["record_type"]),
+                        "expected_relation": row.get("expected_relation"),
+                        "expected_unsupported_assumption": bool(
+                            row.get("unsupported_assumption")
                         ),
-                        error_type=type(exc).__name__,
-                        status_code=getattr(exc, "status_code", None),
-                    ),
+                        "predicted_relation": predicted.get(
+                            "derived_relation"
+                        ),
+                        "confidence": float(confidence),
+                        "valid": True,
+                        "error": None,
+                        "prediction_json": json.dumps(
+                            predicted,
+                            sort_keys=True,
+                            default=str,
+                        ),
+                        "nli_text_a": nli_text_a,
+                        "nli_text_b": nli_text_b,
+                        "input_tokens": int(usage.get("input_tokens", 0)),
+                        "output_tokens": int(usage.get("output_tokens", 0)),
+                    }
                 )
-                return prediction
-
-    try:
-        return await asyncio.gather(*(predict(row) for row in benchmark_rows))
+            except Exception as exc:
+                predictions.append(
+                    {
+                        "record_id": record_id,
+                        "record_type": str(row["record_type"]),
+                        "expected_relation": row.get("expected_relation"),
+                        "expected_unsupported_assumption": bool(
+                            row.get("unsupported_assumption")
+                        ),
+                        "predicted_relation": None,
+                        "confidence": 0.0,
+                        "valid": False,
+                        "error": str(exc),
+                        "prediction_json": None,
+                        "nli_text_a": nli_text_a,
+                        "nli_text_b": nli_text_b,
+                        "input_tokens": 0,
+                        "output_tokens": 0,
+                    }
+                )
+        return predictions
     finally:
         await client.aclose()
+        cache.close()
 
 
 def _profile_from_predictions(
@@ -658,13 +731,6 @@ def _profile_from_predictions(
     benchmark_path: Path,
     manifest: ModelManifest,
 ) -> tuple[ModelProfile, dict[str, Any]]:
-    from .discovery import (
-        _CLASSIFY_PROMPT,
-        _PARSE_PROMPT,
-        _model_schema_hash,
-        _text_hash,
-    )
-
     pairs = [row for row in predictions if row["record_type"] == "pair"]
     targets = {
         "complement": 0.995,
@@ -702,8 +768,7 @@ def _profile_from_predictions(
     nli_truth: list[str] = []
     for prediction in pairs:
         if (
-            not prediction["valid"]
-            or not prediction.get("nli_text_a")
+            not prediction.get("nli_text_a")
             or not prediction.get("nli_text_b")
         ):
             continue
@@ -755,25 +820,27 @@ def _profile_from_predictions(
                 precision_target=0.99,
             )
 
-    settings_parse = _default_settings(role="parse")
-    settings_classify = _default_settings(role="classify")
+    settings_parse = default_generation_settings(role="parse")
+    settings_classify = default_generation_settings(role="classify")
     fingerprints = {
         "parse": inference_fingerprint(
             manifest,
             role="parse",
             requested_model=manifest.loaded_model_identifier,
-            prompt_version="proposition-parse-v3",
-            prompt_hash=_text_hash(_PARSE_PROMPT),
-            schema_hash=_model_schema_hash(ParsedMarket),
+            prompt_version=PARSE_PROMPT_VERSION,
+            prompt_hash=text_sha256(PARSE_PROMPT),
+            request_schema_hash=parse_request_hash(),
+            schema_hash=model_schema_hash(ParsedMarket),
             settings=settings_parse,
         ),
         "classify": inference_fingerprint(
             manifest,
             role="classify",
             requested_model=manifest.loaded_model_identifier,
-            prompt_version="atomic-relation-v1",
-            prompt_hash=_text_hash(_CLASSIFY_PROMPT),
-            schema_hash=_model_schema_hash(AtomicPairAssessment),
+            prompt_version=CLASSIFY_PROMPT_VERSION,
+            prompt_hash=text_sha256(CLASSIFY_PROMPT),
+            request_schema_hash=classify_request_hash(),
+            schema_hash=model_schema_hash(AtomicPairAssessment),
             settings=settings_classify,
         ),
         "nli": nli_inference_fingerprint(
@@ -794,10 +861,14 @@ def _profile_from_predictions(
         "runtime_version": manifest.runtime_version,
         "benchmark_sha256": sha256_file(benchmark_path.resolve()),
         "calibration_partition_sha256": calibration_hash,
-        "parse_prompt_hash": _text_hash(_PARSE_PROMPT),
-        "parse_schema_hash": _model_schema_hash(ParsedMarket),
-        "classify_prompt_hash": _text_hash(_CLASSIFY_PROMPT),
-        "classify_schema_hash": _model_schema_hash(AtomicPairAssessment),
+        "parse_prompt_hash": text_sha256(PARSE_PROMPT),
+        "parse_schema_hash": model_schema_hash(ParsedMarket),
+        "classify_prompt_hash": text_sha256(CLASSIFY_PROMPT),
+        "classify_schema_hash": model_schema_hash(AtomicPairAssessment),
+        "request_contract_hashes": {
+            "parse": parse_request_hash(),
+            "classify": classify_request_hash(),
+        },
         "inference_fingerprints": fingerprints,
         "relations": relation_profiles,
         "nli_actions": nli_profiles,
@@ -808,9 +879,11 @@ def _profile_from_predictions(
             **task_metrics,
         },
     }
-    profile = ModelProfile(
-        profile_id=canonical_json_sha256(base),
-        **base,
+    profile = ModelProfile.model_validate(
+        {
+            **base,
+            "profile_id": canonical_json_sha256(base),
+        }
     )
     report = {
         "profile_id": profile.profile_id,
@@ -1093,17 +1166,6 @@ async def _with_retries(call: Any) -> Any:
     raise RuntimeError("unreachable")
 
 
-def _default_settings(*, role: str) -> GenerationSettings:
-    return GenerationSettings(
-        seed=0,
-        temperature=0.1,
-        top_p=0.8,
-        top_k=20,
-        presence_penalty=1.5,
-        max_output_tokens=4096 if role == "parse" else 1024,
-    )
-
-
 def _metadata_hash(path: Path, names: tuple[str, ...], *, fallback: str) -> str:
     if path.is_file():
         return fallback
@@ -1140,13 +1202,3 @@ def _is_loopback(origin: str) -> bool:
         "localhost",
         "::1",
     }
-
-
-def _write_json(path: Path, value: object) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_text(
-        json.dumps(value, indent=2, sort_keys=True, default=str) + "\n",
-        encoding="utf-8",
-    )
-    temporary.replace(path)
