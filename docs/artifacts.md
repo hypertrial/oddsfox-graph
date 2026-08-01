@@ -61,3 +61,6 @@ verifier manifests, automation/qualification files, and a compute profile.
 `build_manifest.json` is the completion marker and is written last. It binds the
 input, mode, validation status, public/state hashes, versions, evidence, rules,
 solver, deadline, cutoff, resource use, cache, and incremental execution plan.
+Fast manifests also bind every published database, snapshot, report, public
+artifact, and state file in `published_file_hashes`; incremental reuse rejects
+missing files or any content-hash mismatch before copying the baseline.

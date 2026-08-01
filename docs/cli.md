@@ -27,6 +27,12 @@ is not part of the full discovery deadline. `--progress-format
 auto|plain|json|quiet` writes events to stderr. Final results use
 `--output-format table|json|jsonl` where supported.
 
+Full-mode doctor treats a missing automation-profile file as a required-check
+failure. `model-check` requires the endpoint to report the exact runtime version
+and context length recorded in its manifest. Discovery deadlines must be
+strictly positive; an explicit zero is rejected rather than replaced by a
+default.
+
 `serve --out OUTPUT` starts a read-only loopback service. `explorer-export
 --out OUTPUT --destination DIRECTORY --scope event|component|neighborhood
 --identifier ID` creates a bounded portable snapshot and fails on truncation.

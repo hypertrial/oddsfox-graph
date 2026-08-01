@@ -205,6 +205,96 @@ def test_fast_mode_rejects_full_flags_and_stale_baselines(tmp_path: Path) -> Non
         )
 
 
+@pytest.mark.parametrize(
+    ("artifact", "corrupt"),
+    (
+        ("nodes.parquet", False),
+        ("logic_edges.parquet", True),
+        ("oddsfox_graph.duckdb", True),
+        ("reports/summary.md", True),
+    ),
+)
+def test_fast_mode_rejects_damaged_incremental_baselines(
+    tmp_path: Path,
+    artifact: str,
+    corrupt: bool,
+) -> None:
+    catalog = tmp_path / "catalog.parquet"
+    _write_catalog(catalog)
+    baseline = tmp_path / "baseline"
+    discover(
+        catalog,
+        baseline,
+        config=DiscoveryConfig(mode="fast", progress_format="quiet"),
+    )
+    target = baseline / artifact
+    if corrupt:
+        target.write_bytes(target.read_bytes() + b"corrupt")
+    else:
+        target.unlink()
+    with pytest.raises(ValueError, match="baseline"):
+        discover(
+            catalog,
+            tmp_path / "replay",
+            config=DiscoveryConfig(
+                mode="fast",
+                incremental_from=baseline,
+                progress_format="quiet",
+            ),
+        )
+
+
+def test_fast_mode_rejects_baseline_without_complete_file_hashes(
+    tmp_path: Path,
+) -> None:
+    catalog = tmp_path / "catalog.parquet"
+    _write_catalog(catalog)
+    baseline = tmp_path / "baseline"
+    discover(
+        catalog,
+        baseline,
+        config=DiscoveryConfig(mode="fast", progress_format="quiet"),
+    )
+    manifest_path = baseline / "build_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest.pop("published_file_hashes")
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(ValueError, match="baseline"):
+        discover(
+            catalog,
+            tmp_path / "replay",
+            config=DiscoveryConfig(
+                mode="fast",
+                incremental_from=baseline,
+                progress_format="quiet",
+            ),
+        )
+
+
+def test_cli_rejects_explicit_zero_deadline(tmp_path: Path) -> None:
+    catalog = tmp_path / "catalog.parquet"
+    _write_catalog(catalog)
+    assert (
+        main(
+            [
+                "discover",
+                "--mode",
+                "fast",
+                "--input",
+                str(catalog),
+                "--out",
+                str(tmp_path / "out"),
+                "--deadline-seconds",
+                "0",
+                "--progress-format",
+                "quiet",
+            ]
+        )
+        == 1
+    )
+    assert not (tmp_path / "out" / "build_manifest.json").exists()
+
+
 @pytest.mark.parametrize("variant", ("change", "addition", "removal"))
 def test_fast_changed_inputs_match_clean_rebuilds(
     tmp_path: Path,

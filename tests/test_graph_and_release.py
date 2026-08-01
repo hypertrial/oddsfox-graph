@@ -440,8 +440,11 @@ def test_doctor_reports_nonfatal_warnings_and_required_failures(
         "http://127.0.0.1:8081/v1",
         compute,
     )
-    assert report.passed is True
-    assert any(check.status == "warn" for check in report.checks)
+    assert report.passed is False
+    assert any(
+        check.name == "automation_profile" and check.status == "fail"
+        for check in report.checks
+    )
     compute.write_text("{}", encoding="utf-8")
     failed = doctor(
         catalog,

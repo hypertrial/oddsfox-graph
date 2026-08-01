@@ -286,6 +286,9 @@ def discover_fast(
             manifest["deadline"] = stats["deadline"]
             manifest["stats"] = stats
             write_summary_report(out_dir, stats)
+            manifest["published_file_hashes"] = {
+                name: sha256_file(out_dir / name) for name in sorted(published_names)
+            }
             write_manifest_last(out_dir, manifest)
         except Exception:
             swap.rollback()
@@ -353,7 +356,64 @@ def _validate_incremental_baseline(
         }.items()
     ):
         raise ValueError("Incremental baseline is incompatible; run a clean v0.11 discovery")
+    _validate_incremental_baseline_files(baseline, manifest)
     return {str(key): value for key, value in manifest.items()}
+
+
+def _validate_incremental_baseline_files(
+    baseline: Path,
+    manifest: dict[str, Any],
+) -> None:
+    required_artifacts = {
+        *DISCOVERY_PARQUET_ARTIFACTS,
+        *DISCOVERY_JSON_ARTIFACTS,
+        GRAPH_DATABASE_ARTIFACT,
+        GRAPH_SNAPSHOT_ARTIFACT,
+        *reports(),
+        *STATE_ARTIFACTS,
+    }
+    declared = manifest.get("artifacts")
+    if not isinstance(declared, list) or not required_artifacts <= {
+        str(name) for name in declared
+    }:
+        raise ValueError(
+            "Incremental baseline is incomplete; run a clean v0.11 discovery"
+        )
+    if any(not (baseline / name).is_file() for name in required_artifacts):
+        raise ValueError(
+            "Incremental baseline is incomplete; run a clean v0.11 discovery"
+        )
+    published_hashes = manifest.get("published_file_hashes")
+    if not isinstance(published_hashes, dict) or set(published_hashes) != required_artifacts:
+        raise ValueError(
+            "Incremental baseline is incomplete; run a clean v0.11 discovery"
+        )
+    for name in sorted(required_artifacts):
+        expected = published_hashes.get(name)
+        if not isinstance(expected, str) or sha256_file(baseline / name) != expected:
+            raise ValueError(
+                "Incremental baseline artifact hashes do not match; "
+                "run a clean v0.11 discovery"
+            )
+    for field, expected_names in (
+        (
+            "artifact_hashes",
+            {*DISCOVERY_PARQUET_ARTIFACTS, *DISCOVERY_JSON_ARTIFACTS},
+        ),
+        ("state_hashes", set(STATE_ARTIFACTS)),
+    ):
+        hashes = manifest.get(field)
+        if not isinstance(hashes, dict) or set(hashes) != expected_names:
+            raise ValueError(
+                "Incremental baseline is incomplete; run a clean v0.11 discovery"
+            )
+        for name in sorted(expected_names):
+            expected = hashes.get(name)
+            if not isinstance(expected, str) or published_hashes.get(name) != expected:
+                raise ValueError(
+                    "Incremental baseline artifact hashes do not match; "
+                    "run a clean v0.11 discovery"
+                )
 
 
 def _reuse_unchanged_baseline(

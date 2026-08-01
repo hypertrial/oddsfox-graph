@@ -260,8 +260,11 @@ def doctor(
         checks.append(
             Check(
                 name="automation_profile",
-                status="warn",
-                message="full discovery requires an exact precomputed automation profile",
+                status="fail",
+                message=(
+                    "full discovery requires an existing exact precomputed "
+                    "automation profile"
+                ),
             )
         )
 

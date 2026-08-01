@@ -166,11 +166,10 @@ async def _check_model_async(
                 expected_runtime=manifest.runtime,
             )
         )
-        if metadata.get("runtime_version") not in {
-            None,
-            manifest.runtime_version,
-        }:
-            raise ValueError("Runtime version does not match the manifest")
+        observed_runtime_version, context_length = _validated_runtime_metadata(
+            manifest,
+            metadata,
+        )
         parse = await client.generate(
             model=manifest.loaded_model_identifier,
             system_prompt=PARSE_PROMPT,
@@ -217,16 +216,15 @@ async def _check_model_async(
             )
         except ValueError as exc:
             parse_validation_error = str(exc)
-        context_length = _context_length(metadata)
         return {
             "manifest_id": manifest.manifest_id,
             "origin": manifest.inference_origin,
             "runtime": manifest.runtime,
             "runtime_version": manifest.runtime_version,
-            "observed_runtime_version": metadata.get("runtime_version"),
+            "observed_runtime_version": observed_runtime_version,
             "observed_context_length": context_length,
             "preflight": True,
-            "metadata_complete": context_length > 1,
+            "metadata_complete": True,
             "parse_schema": parse_validation_error is None,
             "parse_validation_error": parse_validation_error,
             "classification_schema": (
@@ -248,6 +246,21 @@ async def _check_model_async(
         }
     finally:
         await client.aclose()
+
+
+def _validated_runtime_metadata(
+    manifest: ModelManifest,
+    metadata: dict[str, Any],
+) -> tuple[str, int]:
+    observed_runtime_version = metadata.get("runtime_version")
+    if not isinstance(observed_runtime_version, str) or not observed_runtime_version:
+        raise ValueError("Runtime version metadata is missing")
+    if observed_runtime_version != manifest.runtime_version:
+        raise ValueError("Runtime version does not match the manifest")
+    context_length = _context_length(metadata)
+    if context_length != manifest.context_length:
+        raise ValueError("Runtime context length does not match the manifest")
+    return observed_runtime_version, context_length
 
 
 async def _preflight(

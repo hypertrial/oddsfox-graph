@@ -9,6 +9,8 @@ from typing import Any
 import httpx
 import pytest
 
+from oddsfox_graph import model_tools
+
 from oddsfox_graph._discovery.cache import CACHE_FILENAME, InferenceCache, cache_entry
 from oddsfox_graph._discovery.consensus import merge_parsed_markets, relation_consensus
 from oddsfox_graph._discovery.contracts import (
@@ -466,3 +468,26 @@ def test_runtime_preflight_supports_llamacpp_and_vllm(
     assert observed["runtime_version"] == version
     assert observed["context_length"] == context_length
     assert metadata_path in paths
+
+
+def test_model_check_requires_exact_runtime_metadata() -> None:
+    manifest = _manifest(PRIMARY)
+    assert model_tools._validated_runtime_metadata(
+        manifest,
+        {"runtime_version": manifest.runtime_version, "context_length": 8192},
+    ) == (manifest.runtime_version, 8192)
+    with pytest.raises(ValueError, match="version metadata is missing"):
+        model_tools._validated_runtime_metadata(
+            manifest,
+            {"runtime_version": None, "context_length": 8192},
+        )
+    with pytest.raises(ValueError, match="Runtime version does not match"):
+        model_tools._validated_runtime_metadata(
+            manifest,
+            {"runtime_version": "different", "context_length": 8192},
+        )
+    with pytest.raises(ValueError, match="context length does not match"):
+        model_tools._validated_runtime_metadata(
+            manifest,
+            {"runtime_version": manifest.runtime_version, "context_length": 2048},
+        )

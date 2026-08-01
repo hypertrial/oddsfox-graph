@@ -230,7 +230,11 @@ def _dispatch(args: argparse.Namespace) -> dict[str, Any] | list[dict[str, Any]]
                 mode="fast",
                 incremental_from=args.incremental_from,
                 max_propositions=args.max_propositions,
-                deadline_seconds=args.deadline_seconds or 120.0,
+                deadline_seconds=(
+                    120.0
+                    if args.deadline_seconds is None
+                    else args.deadline_seconds
+                ),
                 output_format=args.output_format,
                 progress_format=args.progress_format,
             )
@@ -278,7 +282,11 @@ def _dispatch(args: argparse.Namespace) -> dict[str, Any] | list[dict[str, Any]]
             llm_concurrency=args.llm_concurrency,
             output_format=getattr(args, "output_format", "table"),
             progress_format=getattr(args, "progress_format", "quiet"),
-            deadline_seconds=getattr(args, "deadline_seconds", None) or 3_600.0,
+            deadline_seconds=(
+                3_600.0
+                if getattr(args, "deadline_seconds", None) is None
+                else args.deadline_seconds
+            ),
         )
         if args.cmd == "discover":
             from .discovery import discover
