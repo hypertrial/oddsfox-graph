@@ -378,7 +378,7 @@ def _render_recording(
     story_value = json.loads(story_path.read_text(encoding="utf-8"))
     highlights = story_value["highlights"]
     manifest = {
-        "schema_version": "oddsfox-recording-manifest-v1",
+        "schema_version": "oddsfox-recording-manifest-v2",
         "graph_fingerprint": story_value["graph_fingerprint"],
         "graph_sha256": story_value["graph_fingerprint"],
         "story_sha256": sha256_file(story_path),
@@ -473,7 +473,9 @@ def _validate_story(
 ) -> None:
     if not isinstance(story, dict):
         raise RuntimeError("Presentation controller returned a non-object story")
-    if story.get("schema_version") != "oddsfox-recording-story-v1":
+    if expected_plan.get("schema_version") != "oddsfox-recording-plan-v2":
+        raise RuntimeError("Recording requires a v2 World Cup recording plan")
+    if story.get("schema_version") != "oddsfox-recording-story-v2":
         raise RuntimeError(
             "Presentation controller returned an unsupported story schema"
         )

@@ -1,4 +1,4 @@
-"""Installed, content-bound v0.11 fast-mode release validation."""
+"""Installed, content-bound v0.12 fast-mode release validation."""
 
 from __future__ import annotations
 
@@ -170,7 +170,7 @@ def validate_release_fixture(fixture_root: Path, work_dir: Path) -> dict[str, An
             )
         )
     ):
-        raise ValueError("Release performance report is not bound to the v0.11 M4 budget")
+        raise ValueError("Release performance report is not bound to the packaged M4 budget")
     runs = performance.get("runs")
     if not isinstance(runs, list) or len(runs) != 3:
         raise ValueError("Release performance requires three isolated runs")

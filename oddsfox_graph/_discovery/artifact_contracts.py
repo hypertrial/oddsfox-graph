@@ -83,6 +83,17 @@ PROPOSITION_COLUMNS = {
     "extraction_status": "VARCHAR",
     "source_spans_json": "VARCHAR",
     "proof_scope_key": "VARCHAR",
+    "team_name": "VARCHAR",
+    "stage_key": "VARCHAR",
+    "stage_rank": "INTEGER",
+    "progression_level": "INTEGER",
+    "market_direction": "VARCHAR",
+    "progression_outcome": "VARCHAR",
+    "is_progression": "BOOLEAN",
+    "market_status": "VARCHAR",
+    "is_still_alive": "BOOLEAN",
+    "opposite_clob_token_id": "VARCHAR",
+    "market_volume_usd": "DOUBLE",
 }
 
 REJECTED_EDGE_COLUMNS = {

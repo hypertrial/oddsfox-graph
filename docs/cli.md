@@ -8,8 +8,14 @@ Current commands:
 - graph: `search`, `nodes`, `edges`, `condition`, `explain`, `explain-edge`,
   `prove`, and `why-not`.
 
-`discover --mode fast` needs only `--input` and `--out`. It uses the complete
-catalog unless `--max-propositions N` is set. Fast supports
+`doctor`, `discover`, and `qualify` accept `--input-profile
+auto|polymarket-market-snapshot-v1|polymarket-wc2026-graph-hourly-v1`.
+Production explorer builds pass the WC2026 profile explicitly; `auto` succeeds
+only when exactly one schema matches.
+
+`discover --mode fast` needs only `--input` and `--out`. Generic compact input
+uses the complete catalog unless `--max-propositions N` is set. WC2026 hourly
+input rejects that option so team-stage chains cannot be truncated. Fast supports
 `--incremental-from`, `--deadline-seconds`, `--progress-format`, and
 `--output-format`, and rejects all semantic-inference options.
 For `discover` and `qualify`, the output cannot be the input file or an ancestor
@@ -36,8 +42,10 @@ strictly positive; an explicit zero is rejected rather than replaced by a
 default.
 
 `serve --out OUTPUT` starts a read-only loopback service. `explorer-export
---out OUTPUT --destination DIRECTORY --scope event|component|neighborhood
---identifier ID` creates a bounded portable snapshot and fails on truncation.
+--out OUTPUT --destination DIRECTORY --scope graph` creates the complete
+standalone WC2026 explorer. The existing
+`event|component|neighborhood --identifier ID` scopes remain available for
+technical snapshots and fail on truncation.
 
 `record --out OUTPUT --destination NEW_DIRECTORY` automatically ranks logical
 edges, freezes the bounded story graph and layout, renders every addressed

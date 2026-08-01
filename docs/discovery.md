@@ -1,11 +1,27 @@
 # Discovery
 
-`discover` requires `--mode fast|full`; there is no implicit mode. When
-`--max-propositions` is absent, both modes select the complete valid catalog in
-stable market order. The canonical release file has 94,781 rows, four rejected
-invalid rows, 94,777 selected markets, and 189,570 propositions.
+`discover` requires `--mode fast|full`; there is no implicit mode. Input profile
+`auto` detects exactly one supported schema, while production WC2026 commands
+must pass `--input-profile polymarket-wc2026-graph-hourly-v1` explicitly.
 The output must not be the input file or an ancestor directory containing it;
 discovery rejects either target before publication.
+
+## WC2026 graph input
+
+The human explorer consumes only the pipeline's registry-scoped
+`polymarket_wc2026_graph_token_hourly_odds` export. The adapter validates every
+hourly row and collapses it into one market with exactly two Yes/No claims. Team,
+stage, market direction, progression meaning, token orientation, reciprocal
+opposite-token IDs, status, and hourly grain must be complete and unambiguous.
+Malformed markets fail the build; discovery never skips them or falls back to
+question or slug matching.
+
+Prices and hourly observation times do not participate in logical semantics.
+The manifest records the raw file hash as provenance and a separate normalized
+semantic fingerprint that is stable across row order and price changes.
+`--max-propositions` is invalid for this profile because partial selection can
+break team-stage chains. Sparse but structurally valid upstream stage coverage
+is retained and reported rather than synthesized.
 
 ## Fast mode
 
@@ -28,6 +44,13 @@ adversarial generated cases with no false acceptance.
 Cross-market deterministic rules require the same authoritative event scope.
 Negated bounded ranges and negated equality are non-convex sets, so fast mode
 does not reduce them to unsafe single-interval numeric proofs.
+
+For the WC2026 profile, pipeline semantics take precedence over question text.
+The deterministic core publishes same-market complements, same-team progression
+implications, reverse negative implications, same-level equivalences, and
+pairwise exclusion between different teams' positive winner claims. It never
+uses odds timestamps as event intervals or creates cross-team stage
+implications.
 
 ## Full mode
 
@@ -60,5 +83,7 @@ Every output records `build_mode`, `validation_status`, evidence tier, extractor
 and rule bindings, source spans, proof scope, assessed/unassessed counts, cutoff,
 deadline state, stage wall time, RSS, DuckDB/spill bytes, component sizes, and
 publication bytes. Deadline status covers the manifest-complete published graph.
-`DETERMINISTIC_VALIDATED` applies only to fast outputs;
-v0.11 full outputs are always `EXPERIMENTAL_FULL`.
+`DETERMINISTIC_VALIDATED` applies only to fast outputs; 0.12 full outputs are
+always `EXPERIMENTAL_FULL`. Classification reporting is nullable:
+`not_applicable`, `not_started`, `partial`, or `complete`. A zero-eligible fast
+run is `not_applicable`, never artificial 100% coverage.

@@ -99,18 +99,19 @@ def test_story_validation_rejects_browser_highlights_that_differ_from_plan(
     tmp_path: Path,
 ) -> None:
     expected_plan = {
+        "schema_version": "oddsfox-recording-plan-v2",
         "graph_fingerprint": "fixture",
-        "ranking_version": "balanced-logic-edge-v1",
+        "ranking_version": "human-wc2026-story-edge-v2",
         "mode": "full",
         "validation_status": "VALID",
         "highlights": [{"proposal_id": "expected"}],
         "context_pruning": {},
     }
     story: dict[str, object] = {
-        "schema_version": "oddsfox-recording-story-v1",
+        "schema_version": "oddsfox-recording-story-v2",
         "graph_fingerprint": "fixture",
         "source_fingerprint": "fixture",
-        "ranking_version": "balanced-logic-edge-v1",
+        "ranking_version": "human-wc2026-story-edge-v2",
         "mode": "full",
         "validation_status": "VALID",
         "highlights": [{"proposal_id": "unexpected"}],

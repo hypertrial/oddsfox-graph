@@ -515,7 +515,7 @@ def test_dual_model_online_offline_incremental_and_graph_queries(tmp_path: Path)
     )
     manifest = json.loads((out / "build_manifest.json").read_text(encoding="utf-8"))
     first_hashes = manifest["artifact_hashes"]
-    assert manifest["version"] == "0.11.0"
+    assert manifest["version"] == "0.12.0"
     assert manifest["build_mode"] == "full"
     assert manifest["validation_status"] == "EXPERIMENTAL_FULL"
     assert manifest["stats"]["qualification_status"] == "AUTOMATION_VALIDATED"
@@ -579,7 +579,7 @@ def test_dual_model_online_offline_incremental_and_graph_queries(tmp_path: Path)
     assert graph.edges("complement")
     methods = {edge.discovery_method for edge in graph.edges(top=100)}
     assert methods <= {"deterministic", "generative_consensus"}
-    assert graph.metadata().package_version == "0.11.0"
+    assert graph.metadata().package_version == "0.12.0"
     assert graph.events(limit=10).rows
     assert graph.components(limit=10).rows
     assert graph.overview("event").nodes

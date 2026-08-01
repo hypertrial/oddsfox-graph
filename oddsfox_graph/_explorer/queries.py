@@ -9,18 +9,31 @@ from pathlib import Path
 from typing import Literal, cast
 
 from .contracts import (
+    CompareResult,
+    CoverageStatus,
+    EdgeMode,
+    EntitySearchResult,
+    ExploreHome,
     ExplorerEdge,
     ExplorerMetadata,
     ExplorerNode,
     GraphFilter,
     GraphPage,
     GraphView,
+    HumanHighlight,
+    MarketDetail,
+    RelationshipDetail,
     RecordingContextPruning,
     RecordingHighlight,
     RecordingPlan,
     RecordingScoreBreakdown,
+    StageDetail,
+    StageSummary,
+    TeamDetail,
 )
+from .human import HumanExplorer, essential_relationship_rows, graph_display_stats
 from .. import __version__
+from .._discovery.versions import WC2026_SOURCE_SCHEMA
 from ..queries import DuckDB
 
 
@@ -31,11 +44,22 @@ WITH qualified AS (
         src_node.canonical_proposition AS src_label,
         src.market_id AS src_market_id,
         src.event_key AS src_event_key,
-        src.primary_domain AS src_domain,
+        coalesce(src.primary_domain, 'sports') AS src_domain,
+        src.team_name AS src_team_name,
+        src.stage_key AS src_stage_key,
+        src.stage_rank AS src_stage_rank,
+        src.progression_level AS src_progression_level,
+        src.is_progression AS src_is_progression,
+        src.component_id AS component_id,
         dst_node.canonical_proposition AS dst_label,
         dst.market_id AS dst_market_id,
         dst.event_key AS dst_event_key,
-        dst.primary_domain AS dst_domain,
+        coalesce(dst.primary_domain, 'sports') AS dst_domain,
+        dst.team_name AS dst_team_name,
+        dst.stage_key AS dst_stage_key,
+        dst.stage_rank AS dst_stage_rank,
+        dst.progression_level AS dst_progression_level,
+        dst.is_progression AS dst_is_progression,
         coalesce(src_metric.total_degree, 0)
             + coalesce(dst_metric.total_degree, 0) AS degree_sum,
         row_number() OVER (
@@ -68,45 +92,57 @@ WITH qualified AS (
     SELECT * EXCLUDE (duplicate_rank)
     FROM qualified
     WHERE duplicate_rank = 1
-), features AS (
+), contextual AS (
     SELECT *,
-        CASE
-            WHEN src_event_key != dst_event_key THEN 1.0
-            WHEN src_market_id != dst_market_id THEN 0.65
-            ELSE 0.25
-        END AS scope,
-        CASE evidence_tier
-            WHEN 'generative_consensus' THEN 1.0
-            WHEN 'deterministic_rule' THEN 0.80
-            WHEN 'source_contract' THEN 0.55
-            ELSE 0.0
-        END AS evidence_interest,
-        CASE edge_type
-            WHEN 'implies' THEN 1.0
-            WHEN 'equivalent' THEN 0.90
-            WHEN 'mutually_exclusive' THEN 0.85
-            WHEN 'complement' THEN 0.60
-            ELSE 0.0
-        END AS relation_interest,
-        CASE
-            WHEN max(degree_sum) OVER () <= 0 THEN 0.0
-            ELSE ln(1.0 + degree_sum) / ln(1.0 + max(degree_sum) OVER ())
-        END AS structural_reach,
-        count(*) OVER () AS eligible_edge_count
+        concat_ws(':', src_progression_level, dst_progression_level,
+                  src_is_progression, dst_is_progression) AS template_key,
+        nullif(trim(coalesce(explanation, evidence, '')), '') IS NOT NULL
+          AND nullif(trim(src_team_name), '') IS NOT NULL
+          AND nullif(trim(dst_team_name), '') IS NOT NULL
+          AND src_stage_rank BETWEEN 0 AND 5
+          AND dst_stage_rank BETWEEN 0 AND 5 AS has_human_context
     FROM deduplicated
-), scored AS (
-    SELECT *,
-        0.30 * confidence
-        + 0.25 * scope
-        + 0.20 * structural_reach
-        + 0.15 * evidence_interest
-        + 0.10 * relation_interest AS base_importance
-    FROM features
+), eligible AS (
+    SELECT *, count(*) OVER () AS eligible_edge_count
+    FROM contextual
+    WHERE has_human_context
 )
 SELECT *
-FROM scored
-ORDER BY base_importance DESC, proposal_id
+FROM eligible
+ORDER BY confidence DESC, proposal_id
 LIMIT ?
+"""
+
+
+_RECORDING_EXCLUSIONS_SQL = """
+WITH qualified AS (
+    SELECT e.*, src.team_name AS src_team_name,
+           src.stage_rank AS src_stage_rank,
+           dst.team_name AS dst_team_name,
+           dst.stage_rank AS dst_stage_rank,
+           row_number() OVER (
+            PARTITION BY e.edge_type,
+                CASE WHEN e.edge_type = 'implies' THEN e.src_node_id
+                     ELSE least(e.src_node_id, e.dst_node_id) END,
+                CASE WHEN e.edge_type = 'implies' THEN e.dst_node_id
+                     ELSE greatest(e.src_node_id, e.dst_node_id) END
+            ORDER BY e.proposal_id
+           ) AS duplicate_rank
+    FROM logic_edges_v e
+    JOIN explorer_propositions_v src ON src.proposition_id = e.src_node_id
+    JOIN explorer_propositions_v dst ON dst.proposition_id = e.dst_node_id
+    WHERE e.edge_type != 'compatible' AND e.confidence >= ?
+)
+SELECT count(*) FILTER (
+    WHERE duplicate_rank = 1 AND NOT (
+        nullif(trim(coalesce(explanation, evidence, '')), '') IS NOT NULL
+        AND nullif(trim(src_team_name), '') IS NOT NULL
+        AND nullif(trim(dst_team_name), '') IS NOT NULL
+        AND src_stage_rank BETWEEN 0 AND 5
+        AND dst_stage_rank BETWEEN 0 AND 5
+    )
+)::BIGINT AS missing_context
+FROM qualified
 """
 
 
@@ -173,6 +209,109 @@ class ExplorerStore:
 
     def coverage(self) -> dict[str, object]:
         return self._read_json("coverage_summary.json")
+
+    def explore_home(
+        self,
+        *,
+        team_limit: int = 24,
+        highlight_limit: int = 6,
+    ) -> ExploreHome:
+        db = self._db()
+        try:
+            return self._human(db).explore_home(
+                team_limit=team_limit,
+                highlight_limit=highlight_limit,
+            )
+        finally:
+            db.close()
+
+    def stages(self) -> tuple[StageSummary, ...]:
+        db = self._db()
+        try:
+            return self._human(db).stages()
+        finally:
+            db.close()
+
+    def stage(self, stage_key: str) -> StageDetail:
+        db = self._db()
+        try:
+            return self._human(db).stage(stage_key)
+        finally:
+            db.close()
+
+    def teams(
+        self,
+        *,
+        cursor: str | None = None,
+        limit: int = 100,
+    ) -> GraphPage:
+        db = self._db()
+        try:
+            rows, next_cursor, truncated = self._human(db).teams(
+                cursor=cursor, limit=limit
+            )
+            return GraphPage(
+                rows=tuple(row.model_dump(mode="json") for row in rows),
+                next_cursor=next_cursor,
+                truncated=truncated,
+            )
+        finally:
+            db.close()
+
+    def team(self, team_key: str) -> TeamDetail:
+        db = self._db()
+        try:
+            return self._human(db).team(team_key)
+        finally:
+            db.close()
+
+    def market(self, market_id: str) -> MarketDetail:
+        db = self._db()
+        try:
+            return self._human(db).market(market_id)
+        finally:
+            db.close()
+
+    def relationship(self, proposal_id: str) -> RelationshipDetail:
+        db = self._db()
+        try:
+            return self._human(db).relationship(proposal_id)
+        finally:
+            db.close()
+
+    def human_highlights(
+        self,
+        *,
+        limit: int = 6,
+        min_confidence: float = 0.95,
+    ) -> tuple[HumanHighlight, ...]:
+        db = self._db()
+        try:
+            return self._human(db).highlights(
+                limit=limit, min_confidence=min_confidence
+            )
+        finally:
+            db.close()
+
+    def entity_search(
+        self, query: str, *, limit: int = 20
+    ) -> tuple[EntitySearchResult, ...]:
+        db = self._db()
+        try:
+            return self._human(db).search(query, limit=limit)
+        finally:
+            db.close()
+
+    def compare(
+        self, source_id: str, target_id: str, *, max_hops: int = 4
+    ) -> CompareResult:
+        db = self._db()
+        try:
+            return self._human(db).compare(
+                source_id, target_id, max_hops=max_hops
+            )
+        finally:
+            db.close()
 
     def events(
         self,
@@ -322,9 +461,12 @@ class ExplorerStore:
         filters: GraphFilter | None = None,
         max_nodes: int = 5_000,
         max_edges: int = 10_000,
+        edge_mode: EdgeMode = "all",
     ) -> GraphView:
         if not node_ids:
             raise ValueError("At least one seed node is required")
+        if edge_mode not in {"all", "essential"}:
+            raise ValueError("edge_mode must be all or essential")
         bounded_hops = _bounded(hops, 0, 4, "hop count")
         node_limit = _bounded(max_nodes, 1, 5_000, "node limit")
         edge_limit = _bounded(max_edges, 0, 10_000, "edge limit")
@@ -415,7 +557,8 @@ class ExplorerStore:
             node_rows = db.rows(
                 """
                 SELECT n.*, m.component_id, m.total_degree,
-                       m.classification_state, m.classification_coverage,
+                       m.classification_state, m.classification_status,
+                       m.classification_coverage,
                        p.event_key
                 FROM nodes_table n
                 JOIN node_metrics_v m USING (node_id)
@@ -437,7 +580,13 @@ class ExplorerStore:
                 str(row["dst_node_id"]),
             ),
         )
-        edges = tuple(_logic_edge(row) for row in edge_rows[:edge_limit])
+        input_edge_count = len(edge_rows[:edge_limit])
+        if edge_mode == "essential":
+            edge_rows = essential_relationship_rows(edge_rows[:edge_limit])
+        else:
+            edge_rows = edge_rows[:edge_limit]
+        edges = tuple(_logic_edge(row) for row in edge_rows)
+        labels = tuple(node.label for node in nodes)
         return GraphView(
             level="proposition",
             nodes=nodes,
@@ -445,6 +594,12 @@ class ExplorerStore:
             truncated_nodes=truncated_nodes,
             truncated_edges=truncated_edges,
             coverage=self.coverage(),
+            edge_mode=edge_mode,
+            display_stats=graph_display_stats(
+                labels,
+                tuple((edge.source, edge.target) for edge in edges),
+                input_edge_count=input_edge_count,
+            ),
         )
 
     def edge(self, proposal_id: str) -> dict[str, object]:
@@ -467,6 +622,7 @@ class ExplorerStore:
         *,
         max_nodes: int = 5_000,
         max_edges: int = 10_000,
+        edge_mode: EdgeMode = "all",
     ) -> GraphView:
         """Return a bounded proposition view for semantic event drill-down."""
 
@@ -497,6 +653,7 @@ class ExplorerStore:
             filters=filters,
             max_nodes=node_limit,
             max_edges=max_edges,
+            edge_mode=edge_mode,
         )
 
     def component_graph(
@@ -569,16 +726,30 @@ class ExplorerStore:
         pool_limit = min(10_000, max(1_000, bounded_limit * 200))
         db = self._db()
         try:
-            candidates = db.rows(
+            self._human(db)
+            raw_candidates = db.rows(
                 _RECORDING_CANDIDATES_SQL,
                 [min_confidence, pool_limit],
             )
-            if not candidates:
+            exclusions = db.rows(
+                _RECORDING_EXCLUSIONS_SQL,
+                [min_confidence],
+            )[0]
+            if not raw_candidates:
                 raise ValueError(
                     "No accepted non-compatible logical edges meet the "
-                    f"{min_confidence:.3f} recording confidence threshold"
+                    f"{min_confidence:.3f} recording confidence threshold "
+                    "with complete World Cup human context"
                 )
+            candidates = _prepare_recording_candidates(
+                essential_relationship_rows(raw_candidates)
+            )
             selected = _select_recording_highlights(candidates, bounded_limit)
+            if not selected:
+                raise ValueError(
+                    "No diverse World Cup recording highlight satisfies the "
+                    "human-context and selection constraints"
+                )
             endpoint_ids = sorted(
                 {
                     str(row[key])
@@ -593,7 +764,7 @@ class ExplorerStore:
                     sorted(str(row["proposal_id"]) for row, _ in selected),
                     endpoint_ids,
                     endpoint_ids,
-                    25,
+                    2,
                 ],
             )
             selected_by_id = {
@@ -603,16 +774,22 @@ class ExplorerStore:
                 str(row["proposal_id"]): row for row in context_rows
             }
             context_by_id.update(selected_by_id)
+            context_by_id = {
+                str(row["proposal_id"]): row
+                for row in essential_relationship_rows(list(context_by_id.values()))
+            }
+            context_by_id.update(selected_by_id)
             retained_edges, retained_nodes = _prune_recording_context(
                 context_by_id,
                 frozenset(selected_by_id),
-                max_nodes=750,
-                max_edges=1_500,
+                max_nodes=96,
+                max_edges=144,
             )
             node_rows = db.rows(
                 """
                 SELECT n.*, m.component_id, m.total_degree,
-                       m.classification_state, m.classification_coverage,
+                       m.classification_state, m.classification_status,
+                       m.classification_coverage,
                        p.event_key
                 FROM nodes_table n
                 JOIN node_metrics_v m USING (node_id)
@@ -669,7 +846,13 @@ class ExplorerStore:
             for row in context_by_id.values()
             for key in ("src_node_id", "dst_node_id")
         }
-        eligible_count = _int(candidates[0]["eligible_edge_count"])
+        eligible_count = _int(raw_candidates[0]["eligible_edge_count"])
+        selected_pathological = sum(
+            bool(row.get("pathological")) for row, _ in selected
+        )
+        pathological_candidates = sum(
+            bool(row.get("pathological")) for row in candidates
+        )
         return RecordingPlan(
             graph_fingerprint=graph_fingerprint,
             mode=cast(Literal["fast", "full"], mode),
@@ -678,10 +861,14 @@ class ExplorerStore:
             min_confidence=min_confidence,
             eligible_edge_count=eligible_count,
             candidate_pool_size=len(candidates),
+            excluded_missing_context=_int(exclusions["missing_context"]),
+            excluded_pathological=max(
+                0, pathological_candidates - selected_pathological
+            ),
             highlights=highlights,
             graph=view,
             context_pruning=RecordingContextPruning(
-                incident_edge_cap_per_endpoint=25,
+                incident_edge_cap_per_endpoint=2,
                 candidate_nodes=len(candidate_nodes),
                 candidate_edges=len(context_by_id),
                 retained_nodes=len(retained_nodes),
@@ -792,6 +979,7 @@ class ExplorerStore:
                         src.component_id AS source,
                         dst.component_id AS target,
                         e.edge_type,
+                        e.evidence_tier,
                         count(*)::BIGINT AS edge_count,
                         avg(e.confidence)::DOUBLE AS confidence
                     FROM logic_edges_v e
@@ -800,8 +988,10 @@ class ExplorerStore:
                     WHERE src.component_id IN (SELECT unnest(?))
                       AND dst.component_id IN (SELECT unnest(?))
                       AND src.component_id != dst.component_id
-                    GROUP BY src.component_id, dst.component_id, e.edge_type
-                    ORDER BY edge_count DESC, source, target, e.edge_type
+                    GROUP BY src.component_id, dst.component_id, e.edge_type,
+                             e.evidence_tier
+                    ORDER BY edge_count DESC, source, target, e.edge_type,
+                             e.evidence_tier
                     LIMIT ?
                     """,
                     [component_ids, component_ids, edge_limit + 1],
@@ -822,6 +1012,25 @@ class ExplorerStore:
 
     def _db(self) -> DuckDB:
         return DuckDB(self.database_path, read_only=True)
+
+    def _human(self, db: DuckDB) -> HumanExplorer:
+        metadata = self.metadata()
+        build_input = metadata.build.get("input")
+        input_profile = (
+            build_input.get("schema")
+            if isinstance(build_input, dict)
+            else metadata.build.get("input_schema")
+        )
+        if input_profile != WC2026_SOURCE_SCHEMA:
+            raise ValueError(
+                "World Cup exploration and recording require a graph built "
+                "with --input-profile polymarket-wc2026-graph-hourly-v1"
+            )
+        return HumanExplorer(
+            db,
+            coverage=metadata.coverage,
+            build=metadata.build,
+        )
 
     def _read_json(self, name: str) -> dict[str, object]:
         path = self.out_dir / name
@@ -891,7 +1100,8 @@ def _event_node(row: dict[str, object]) -> ExplorerNode:
         component_id=str(row["component_id"]),
         proposition_count=propositions,
         edge_count=_int(row["accepted_edge_count"]),
-        classification_coverage=_float(row["classification_coverage"]),
+        classification_coverage=_optional_float(row.get("classification_coverage")),
+        classification_status=_coverage_status(row),
     )
 
 
@@ -907,7 +1117,8 @@ def _component_node(row: dict[str, object]) -> ExplorerNode:
         component_id=component_id,
         proposition_count=_int(row["proposition_count"]),
         edge_count=_int(row["edge_count"]),
-        classification_coverage=_float(row["classification_coverage"]),
+        classification_coverage=_optional_float(row.get("classification_coverage")),
+        classification_status=_coverage_status(row),
     )
 
 
@@ -927,7 +1138,8 @@ def _proposition_node(row: dict[str, object]) -> ExplorerNode:
         component_id=str(row["component_id"]),
         market_id=str(row["market_id"]),
         edge_count=_int(row["total_degree"]),
-        classification_coverage=_float(row["classification_coverage"]),
+        classification_coverage=_optional_float(row.get("classification_coverage")),
+        classification_status=_coverage_status(row),
     )
 
 
@@ -949,7 +1161,9 @@ def _event_edge(row: dict[str, object]) -> ExplorerEdge:
             "count": _int(row["edge_count"]),
             "confidence": _float(row["mean_confidence"]),
             "discovery_method": "aggregate",
-            "evidence_tier": str(row.get("evidence_tier") or "aggregate"),
+            "evidence_tier": str(
+                row.get("evidence_tier") or "deterministic_rule"
+            ),
             "aggregation_only": True,
         }
     )
@@ -961,14 +1175,17 @@ def _component_edge(row: dict[str, object]) -> ExplorerEdge:
     relation = cast(str, row["edge_type"])
     return ExplorerEdge.model_validate(
         {
-            "id": f"component:{source}:{target}:{relation}",
+            "id": (
+                f"component:{source}:{target}:{relation}:"
+                f"{row['evidence_tier']}"
+            ),
             "source": source,
             "target": target,
             "relation": relation,
             "count": _int(row["edge_count"]),
             "confidence": _float(row["confidence"]),
             "discovery_method": "aggregate",
-            "evidence_tier": "aggregate",
+            "evidence_tier": str(row["evidence_tier"]),
             "aggregation_only": True,
         }
     )
@@ -997,9 +1214,40 @@ def _select_recording_highlights(
     remaining = list(candidates)
     selected: list[tuple[dict[str, object], RecordingScoreBreakdown]] = []
     while remaining and len(selected) < limit:
-        scored = [
-            (row, _recording_score(row, [item[0] for item in selected]))
+        selected_rows = [item[0] for item in selected]
+        used_teams = {
+            str(item[key])
+            for item in selected_rows
+            for key in ("src_team_name", "dst_team_name")
+        }
+        used_templates = {str(item["template_key"]) for item in selected_rows}
+        used_endpoints = {
+            str(item[key])
+            for item in selected_rows
+            for key in ("src_node_id", "dst_node_id")
+        }
+        pathological_selected = sum(
+            bool(item.get("pathological")) for item in selected_rows
+        )
+        admissible = [
+            row
             for row in remaining
+            if not (
+                {str(row["src_team_name"]), str(row["dst_team_name"])}
+                & used_teams
+            )
+            and str(row["template_key"]) not in used_templates
+            and not (
+                {str(row["src_node_id"]), str(row["dst_node_id"])}
+                & used_endpoints
+            )
+            and not (bool(row.get("pathological")) and pathological_selected)
+        ]
+        if not admissible:
+            break
+        scored = [
+            (row, _recording_score(row, selected_rows))
+            for row in admissible
         ]
         winner = min(
             scored,
@@ -1016,87 +1264,204 @@ def _select_recording_highlights(
     return selected
 
 
+def _prepare_recording_candidates(
+    candidates: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    """Compute versioned WC2026 ranking features from essential edges."""
+
+    if not candidates:
+        return []
+    template_frequency: dict[str, int] = {}
+    component_frequency: dict[str, int] = {}
+    component_nodes: dict[str, set[str]] = {}
+    component_templates: dict[str, set[str]] = {}
+    component_relations: dict[str, dict[str, int]] = {}
+    for row in candidates:
+        template = str(row["template_key"])
+        component = _recording_story_component(row)
+        relation = str(row["edge_type"])
+        template_frequency[template] = template_frequency.get(template, 0) + 1
+        component_frequency[component] = component_frequency.get(component, 0) + 1
+        component_nodes.setdefault(component, set()).update(
+            (str(row["src_node_id"]), str(row["dst_node_id"]))
+        )
+        component_templates.setdefault(component, set()).add(template)
+        relation_counts = component_relations.setdefault(component, {})
+        relation_counts[relation] = relation_counts.get(relation, 0) + 1
+    max_degree = max(_int(row["degree_sum"]) for row in candidates)
+    prepared: list[dict[str, object]] = []
+    for original in candidates:
+        row = dict(original)
+        component = _recording_story_component(row)
+        count = component_frequency[component]
+        node_count = len(component_nodes[component])
+        component_edges = count
+        density = (
+            component_edges / (node_count * (node_count - 1))
+            if node_count > 1
+            else 0.0
+        )
+        template_uniqueness = len(component_templates[component]) / count
+        relation_dominance = max(component_relations[component].values()) / count
+        pathological = node_count >= 20 and (
+            template_uniqueness < 0.15
+            or density > 0.15
+            or relation_dominance > 0.85
+        )
+        structural_reach = (
+            math.log1p(_int(row["degree_sum"])) / math.log1p(max_degree)
+            if max_degree > 0
+            else 0.0
+        )
+        if pathological:
+            structural_reach *= 0.5
+        stage_importance = max(
+            _int(row["src_progression_level"]),
+            _int(row["dst_progression_level"]),
+        ) / 5.0
+        template_novelty = 1.0 / math.sqrt(
+            template_frequency[str(row["template_key"])]
+        )
+        evidence_interest = {
+            "generative_consensus": 1.0,
+            "deterministic_rule": 0.80,
+            "source_contract": 0.55,
+        }.get(str(row["evidence_tier"]), 0.0)
+        relation_interest = {
+            "implies": 1.0,
+            "equivalent": 0.90,
+            "mutually_exclusive": 0.85,
+            "complement": 0.60,
+        }.get(str(row["edge_type"]), 0.0)
+        row.update(
+            {
+                "stage_importance": stage_importance,
+                "structural_reach": structural_reach,
+                "template_novelty": template_novelty,
+                "evidence_interest": evidence_interest,
+                "relation_interest": relation_interest,
+                "pathological": pathological,
+                "story_component_id": component,
+                "component_density": density,
+                "component_template_uniqueness": template_uniqueness,
+                "component_relation_dominance": relation_dominance,
+            }
+        )
+        prepared.append(row)
+    prepared.sort(
+        key=lambda row: (
+            -(
+                0.25 * _float(row["confidence"])
+                + 0.25 * _float(row["stage_importance"])
+                + 0.20 * _float(row["structural_reach"])
+                + 0.15 * _float(row["template_novelty"])
+                + 0.10 * _float(row["evidence_interest"])
+                + 0.05 * _float(row["relation_interest"])
+            ),
+            str(row["proposal_id"]),
+        )
+    )
+    return prepared
+
+
+def _recording_story_component(row: dict[str, object]) -> str:
+    """Group edges by the human story they belong to, not graph connectivity.
+
+    The tournament winner-exclusion clique intentionally joins every team into one
+    canonical graph component.  Using that component for story diversity makes all
+    same-team progression relationships look like one pathological hairball.  Keep
+    the canonical component on public highlights, while ranking same-team logic per
+    team and the cross-team winner constraint as one tournament-level story.
+    """
+
+    source_team = str(row["src_team_name"])
+    target_team = str(row["dst_team_name"])
+    if source_team == target_team:
+        return f"team:{source_team.casefold()}"
+    if (
+        str(row["edge_type"]) == "mutually_exclusive"
+        and _int(row["src_progression_level"]) == 5
+        and _int(row["dst_progression_level"]) == 5
+        and bool(row["src_is_progression"])
+        and bool(row["dst_is_progression"])
+    ):
+        return "tournament:winner-exclusion"
+    return f"cross-team:{row['component_id']}"
+
+
 def _recording_score(
     row: dict[str, object],
     selected: list[dict[str, object]],
 ) -> RecordingScoreBreakdown:
     relation = str(row["edge_type"])
     evidence_tier = str(row["evidence_tier"])
-    event_pair = frozenset(
-        (str(row["src_event_key"]), str(row["dst_event_key"]))
-    )
-    endpoints = frozenset(
-        (str(row["src_node_id"]), str(row["dst_node_id"]))
-    )
+    target_stage = str(row["dst_progression_level"])
+    component = str(row["story_component_id"])
     same_relation_count = sum(
         str(other["edge_type"]) == relation for other in selected
     )
     same_evidence_tier_count = sum(
         str(other["evidence_tier"]) == evidence_tier for other in selected
     )
-    same_event_pair_count = sum(
-        frozenset(
-            (str(other["src_event_key"]), str(other["dst_event_key"]))
-        )
-        == event_pair
+    same_target_stage_count = sum(
+        str(other["dst_progression_level"]) == target_stage
         for other in selected
     )
-    shared_endpoint_count = sum(
-        len(
-            endpoints
-            & frozenset(
-                (str(other["src_node_id"]), str(other["dst_node_id"]))
-            )
-        )
-        for other in selected
+    same_component_count = sum(
+        str(other["story_component_id"]) == component for other in selected
     )
     confidence = _float(row["confidence"])
-    scope = _float(row["scope"])
+    stage_importance = _float(row["stage_importance"])
     structural_reach = _float(row["structural_reach"])
+    template_novelty = _float(row["template_novelty"])
     evidence_interest = _float(row["evidence_interest"])
     relation_interest = _float(row["relation_interest"])
-    confidence_contribution = 0.30 * confidence
-    scope_contribution = 0.25 * scope
+    confidence_contribution = 0.25 * confidence
+    stage_importance_contribution = 0.25 * stage_importance
     structural_reach_contribution = 0.20 * structural_reach
-    evidence_interest_contribution = 0.15 * evidence_interest
-    relation_interest_contribution = 0.10 * relation_interest
+    template_novelty_contribution = 0.15 * template_novelty
+    evidence_interest_contribution = 0.10 * evidence_interest
+    relation_interest_contribution = 0.05 * relation_interest
     base_importance = (
         confidence_contribution
-        + scope_contribution
+        + stage_importance_contribution
         + structural_reach_contribution
+        + template_novelty_contribution
         + evidence_interest_contribution
         + relation_interest_contribution
     )
     same_relation_penalty = 0.08 * same_relation_count
-    same_evidence_tier_penalty = 0.10 * same_evidence_tier_count
-    same_event_pair_penalty = 0.15 * same_event_pair_count
-    shared_endpoint_penalty = 0.20 * shared_endpoint_count
+    same_evidence_tier_penalty = 0.04 * same_evidence_tier_count
+    same_target_stage_penalty = 0.10 * same_target_stage_count
+    same_component_penalty = 0.12 * same_component_count
     total_penalty = (
         same_relation_penalty
         + same_evidence_tier_penalty
-        + same_event_pair_penalty
-        + shared_endpoint_penalty
+        + same_target_stage_penalty
+        + same_component_penalty
     )
     return RecordingScoreBreakdown(
         confidence=confidence,
-        scope=scope,
+        stage_importance=stage_importance,
         structural_reach=structural_reach,
+        template_novelty=template_novelty,
         evidence_interest=evidence_interest,
         relation_interest=relation_interest,
         confidence_contribution=confidence_contribution,
-        scope_contribution=scope_contribution,
+        stage_importance_contribution=stage_importance_contribution,
         structural_reach_contribution=structural_reach_contribution,
+        template_novelty_contribution=template_novelty_contribution,
         evidence_interest_contribution=evidence_interest_contribution,
         relation_interest_contribution=relation_interest_contribution,
         base_importance=base_importance,
         same_relation_count=same_relation_count,
         same_evidence_tier_count=same_evidence_tier_count,
-        same_event_pair_count=same_event_pair_count,
-        shared_endpoint_count=shared_endpoint_count,
+        same_target_stage_count=same_target_stage_count,
+        same_component_count=same_component_count,
         same_relation_penalty=same_relation_penalty,
         same_evidence_tier_penalty=same_evidence_tier_penalty,
-        same_event_pair_penalty=same_event_pair_penalty,
-        shared_endpoint_penalty=shared_endpoint_penalty,
+        same_target_stage_penalty=same_target_stage_penalty,
+        same_component_penalty=same_component_penalty,
         total_penalty=total_penalty,
         selection_score=base_importance - total_penalty,
     )
@@ -1120,11 +1485,29 @@ def _recording_highlight(
             "source_market_id": str(row["src_market_id"]),
             "source_event_key": str(row["src_event_key"]),
             "source_domain": str(row["src_domain"]),
+            "source_team_name": str(row["src_team_name"]),
+            "source_stage_key": str(row["src_stage_key"]),
+            "source_stage_rank": _int(row["src_stage_rank"]),
+            "source_plain_claim": _recording_plain_claim(
+                str(row["src_team_name"]),
+                _int(row["src_progression_level"]),
+                bool(row["src_is_progression"]),
+            ),
             "target_id": str(row["dst_node_id"]),
             "target_label": str(row["dst_label"]),
             "target_market_id": str(row["dst_market_id"]),
             "target_event_key": str(row["dst_event_key"]),
             "target_domain": str(row["dst_domain"]),
+            "target_team_name": str(row["dst_team_name"]),
+            "target_stage_key": str(row["dst_stage_key"]),
+            "target_stage_rank": _int(row["dst_stage_rank"]),
+            "target_plain_claim": _recording_plain_claim(
+                str(row["dst_team_name"]),
+                _int(row["dst_progression_level"]),
+                bool(row["dst_is_progression"]),
+            ),
+            "template_key": str(row["template_key"]),
+            "component_id": str(row["component_id"]),
             "relation": str(row["edge_type"]),
             "confidence": _float(row["confidence"]),
             "evidence_tier": str(row["evidence_tier"]),
@@ -1134,6 +1517,28 @@ def _recording_highlight(
             "score_breakdown": breakdown,
         }
     )
+
+
+def _recording_plain_claim(team: str, level: int, progression: bool) -> str:
+    positive = {
+        0: "reaches the round of 32",
+        1: "reaches the round of 16",
+        2: "reaches the quarterfinals",
+        3: "reaches the semifinals",
+        4: "reaches the final",
+        5: "wins the World Cup",
+    }.get(level)
+    negative = {
+        0: "reach the round of 32",
+        1: "reach the round of 16",
+        2: "reach the quarterfinals",
+        3: "reach the semifinals",
+        4: "reach the final",
+        5: "win the World Cup",
+    }.get(level)
+    if positive is None or negative is None:
+        raise ValueError(f"Invalid World Cup progression level {level}")
+    return f"{team} {positive}" if progression else f"{team} does not {negative}"
 
 
 def _prune_recording_context(
@@ -1191,3 +1596,22 @@ def _int(value: object) -> int:
 
 def _float(value: object) -> float:
     return float(cast(float, value))
+
+
+def _optional_float(value: object) -> float | None:
+    return None if value is None else float(cast(float, value))
+
+
+def _coverage_status(row: dict[str, object]) -> CoverageStatus:
+    explicit = row.get("classification_status")
+    if explicit in {"not_applicable", "not_started", "partial", "complete"}:
+        return cast(CoverageStatus, explicit)
+    eligible = int(cast(int, row.get("classification_eligible_count") or 0))
+    assessed = int(cast(int, row.get("classification_assessed_count") or 0))
+    if eligible == 0:
+        return "not_applicable"
+    if assessed == 0:
+        return "not_started"
+    if assessed < eligible:
+        return "partial"
+    return "complete"

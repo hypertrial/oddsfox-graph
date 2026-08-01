@@ -132,6 +132,7 @@ from .solver import (
     solve_proposals,
 )
 from .versions import (
+    AGGREGATION_CONTRACT_VERSION,
     AUTOMATION_PROFILE_SCHEMA_VERSION,
     CACHE_ENTRY_VERSION,
     CANONICAL_CATALOG_SHA256,
@@ -140,6 +141,7 @@ from .versions import (
     CONSTRAINT_VERSION,
     DOMAIN_TAXONOMY_VERSION,
     EXECUTION_PLAN_VERSION,
+    INPUT_ADAPTER_VERSION,
     NLI_INFERENCE_VERSION,
     NORMALIZATION_VERSION,
     PARSE_FALLBACK_VERSION,
@@ -148,15 +150,19 @@ from .versions import (
     RETRIEVAL_VERSION,
     RULE_VERSION,
     SOLVER_VERSION,
-    QUALIFICATION_GENERATOR_VERSION,
     VIEWER_API_VERSION,
     VIEWER_ARTIFACT_VERSION,
     VISUALIZATION_LAYOUT_VERSION,
+    WC2026_SOURCE_SCHEMA,
+    discovery_semantics_fingerprint,
+    source_tree_fingerprint,
 )
 from ..qualification import (
     QualificationPrediction,
     evaluate_qualification,
     generate_qualification_cases,
+    generate_wc2026_qualification_cases,
+    qualification_case_contract,
     qualify_rule_registry,
     qualification_retrieval_fingerprint,
     qualification_retrieved_case_ids,
@@ -405,6 +411,7 @@ def _ensure_automation_profile(
     input_path: Path,
     out_dir: Path,
     selected_markets: Sequence[SourceMarket],
+    source_schema: str,
     config: DiscoveryConfig,
     cache: InferenceCache,
     inference: _InferenceContext,
@@ -412,6 +419,7 @@ def _ensure_automation_profile(
     injected: bool,
     embedder: Callable[[list[str], DiscoveryConfig], Any],
 ) -> _InferenceContext:
+    qualification_contract = qualification_case_contract(source_schema)
     fixture_qualification = (
         injected and _sha256(input_path) != CANONICAL_CATALOG_SHA256
     )
@@ -429,19 +437,38 @@ def _ensure_automation_profile(
         case_set_hash = _text_hash("network-free-qualification-fixture")
         evaluation_metrics: dict[str, Any] = {
             "fixture": True,
+            "qualification_input_profile": source_schema,
+            "qualification_case_schema_version": qualification_contract.schema_version,
             "semantic_accuracy_claim": False,
         }
         gates = {"network_free_fixture": True}
         thresholds = {relation: 0.0 for relation in config.relation_thresholds}
         status = "AUTOMATION_VALIDATED"
     else:
-        _, _, all_markets, _ = _load_source_markets(input_path)
-        cases = generate_qualification_cases(
-            all_markets,
-            seed=config.sampling_seed,
+        qualification_schema, _, all_markets, _ = _load_source_markets(
+            input_path,
+            input_profile=config.input_profile,
+        )
+        if qualification_schema != source_schema:
+            raise RuntimeError("Qualification input profile changed during validation")
+        cases = (
+            generate_wc2026_qualification_cases(
+                all_markets,
+                seed=config.sampling_seed,
+            )
+            if source_schema == WC2026_SOURCE_SCHEMA
+            else generate_qualification_cases(
+                all_markets,
+                seed=config.sampling_seed,
+            )
         )
         case_set_hash = qualification_case_set_hash(cases)
-        profile_key = _automation_profile_key(case_set_hash, inference, config)
+        profile_key = _automation_profile_key(
+            case_set_hash,
+            qualification_contract.generator_version,
+            inference,
+            config,
+        )
         cached_profile = cache.get_qualification_profile(profile_key)
         if cached_profile is not None:
             profile = AutomationProfile.model_validate(cached_profile)
@@ -462,6 +489,7 @@ def _ensure_automation_profile(
             )
             if profile.case_set_hash != case_set_hash:
                 raise ValueError("Cached automation profile case set does not match")
+            _validate_qualification_source_contract(profile, source_schema)
             if (
                 inference.profile is not None
                 and inference.profile.profile_id != profile.profile_id
@@ -487,7 +515,11 @@ def _ensure_automation_profile(
             embedder,
         )
         evaluation = evaluate_qualification(cases, predictions)
-        evaluation_metrics = evaluation.metrics
+        evaluation_metrics = {
+            **evaluation.metrics,
+            "qualification_input_profile": source_schema,
+            "qualification_case_schema_version": qualification_contract.schema_version,
+        }
         gates = evaluation.gates
         thresholds = evaluation.thresholds
         status = evaluation.status
@@ -495,7 +527,7 @@ def _ensure_automation_profile(
     content = {
         "status": status,
         "case_set_hash": case_set_hash,
-        "qualification_generator_version": QUALIFICATION_GENERATOR_VERSION,
+        "qualification_generator_version": qualification_contract.generator_version,
         "retrieval_fingerprint": qualification_retrieval_fingerprint(config),
         "primary_manifest_id": inference.primary_manifest.manifest_id,
         "primary_manifest_sha256": manifest_sha256(inference.primary_manifest),
@@ -547,7 +579,12 @@ def _ensure_automation_profile(
     report = _qualification_report(profile)
     if not fixture_qualification:
         cache.put_qualification_profile(
-            _automation_profile_key(case_set_hash, inference, config),
+            _automation_profile_key(
+                case_set_hash,
+                qualification_contract.generator_version,
+                inference,
+                config,
+            ),
             profile.model_dump(mode="json"),
         )
     if profile.status != "AUTOMATION_VALIDATED":
@@ -612,6 +649,13 @@ def _qualification_report(profile: AutomationProfile) -> dict[str, Any]:
         "status": profile.status,
         "profile_id": profile.profile_id,
         "case_set_hash": profile.case_set_hash,
+        "qualification_generator_version": (
+            profile.qualification_generator_version
+        ),
+        "input_profile": metrics.get("qualification_input_profile"),
+        "case_schema_version": metrics.get(
+            "qualification_case_schema_version"
+        ),
         "gates": gates,
         "metrics": metrics,
         "semantic_accuracy_claim": False,
@@ -619,8 +663,26 @@ def _qualification_report(profile: AutomationProfile) -> dict[str, Any]:
     }
 
 
+def _validate_qualification_source_contract(
+    profile: AutomationProfile,
+    source_schema: str,
+) -> None:
+    contract = qualification_case_contract(source_schema)
+    if (
+        profile.qualification_generator_version != contract.generator_version
+        or profile.metrics.get("qualification_input_profile") != source_schema
+        or profile.metrics.get("qualification_case_schema_version")
+        != contract.schema_version
+    ):
+        raise ValueError(
+            "Automation profile was generated for a different input contract; "
+            f"rerun qualify with --input-profile {source_schema}"
+        )
+
+
 def _automation_profile_key(
     case_set_hash: str,
+    qualification_generator_version: str,
     inference: _InferenceContext,
     config: DiscoveryConfig,
 ) -> str:
@@ -628,7 +690,7 @@ def _automation_profile_key(
         {
             "schema_version": AUTOMATION_PROFILE_SCHEMA_VERSION,
             "case_set_hash": case_set_hash,
-            "generator": QUALIFICATION_GENERATOR_VERSION,
+            "generator": qualification_generator_version,
             "retrieval": qualification_retrieval_fingerprint(config),
             "primary_manifest": manifest_sha256(inference.primary_manifest),
             "verifier_manifest": manifest_sha256(inference.verifier_manifest),
@@ -1215,8 +1277,11 @@ def _discover_impl(
         lambda: _load_source_markets(
             input_path,
             max_propositions=config.max_propositions,
+            input_profile=config.input_profile,
         ),
     )
+    if inference.profile is not None:
+        _validate_qualification_source_contract(inference.profile, source_schema)
     cache_dir = (config.cache_dir or Path(str(out_dir) + ".cache")).resolve()
     cache = InferenceCache(cache_dir, offline=config.offline)
     resources.callback(cache.close)
@@ -1230,6 +1295,7 @@ def _discover_impl(
                     input_path,
                     out_dir,
                     markets,
+                    source_schema,
                     config,
                     cache,
                     inference,
@@ -1685,6 +1751,7 @@ def _discover_impl(
             "publish_artifacts",
             lambda: _write_discovery_artifacts(
                 staging,
+                input_path,
                 markets,
                 propositions,
                 candidate_store,
@@ -1878,12 +1945,18 @@ def _qualify_only_impl(
     if not input_path.is_file():
         raise ValueError(f"Input parquet does not exist: {input_path}")
     validate_source_output_paths(input_path, out_dir)
+    source_schema, _, markets, _ = _load_source_markets(
+        input_path,
+        input_profile=config.input_profile,
+    )
     inference = _prepare_inference_context(
         config,
         out_dir,
         _primary_client,
         _verifier_client,
     )
+    if inference.profile is not None:
+        _validate_qualification_source_contract(inference.profile, source_schema)
     if inference.owns_primary_client and inference.primary_client is not None:
         resources.callback(_close_structured_client, inference.primary_client)
     if inference.owns_verifier_client and inference.verifier_client is not None:
@@ -1895,11 +1968,11 @@ def _qualify_only_impl(
         tempfile.mkdtemp(prefix=f".{out_dir.name}.qualification-", dir=out_dir.parent)
     )
     try:
-        _, _, markets, _ = _load_source_markets(input_path)
         inference = _ensure_automation_profile(
             input_path,
             out_dir,
             markets,
+            source_schema,
             config,
             cache,
             inference,
@@ -2835,6 +2908,14 @@ def _deterministic_proof_scope(
         "event_scope",
         "jurisdiction",
         "polarity",
+        "team_name",
+        "stage_key",
+        "stage_rank",
+        "progression_level",
+        "market_direction",
+        "progression_outcome",
+        "is_progression",
+        "opposite_clob_token_id",
     )
     return canonical_json_sha256(
         {
@@ -4115,6 +4196,7 @@ def _stage_workspace_tables(
 
 def _write_discovery_artifacts(
     directory: Path,
+    input_path: Path,
     markets: Sequence[SourceMarket],
     propositions: Sequence[dict[str, Any]],
     candidates: CandidateStore,
@@ -4361,6 +4443,15 @@ def _write_discovery_artifacts(
             "node_metrics.parquet",
             "visualization_layout.parquet",
         )
+        graph_content_fingerprint = canonical_json_sha256(
+            {
+                "coverage": coverage,
+                "artifacts": {
+                    name: _sha256(directory / name)
+                    for name in viewer_content_artifacts
+                },
+            }
+        )
         _write_json_atomic(
             directory / "viewer_manifest.json",
             {
@@ -4369,16 +4460,28 @@ def _write_discovery_artifacts(
                 "layout_version": VISUALIZATION_LAYOUT_VERSION,
                 "build_mode": "full",
                 "validation_status": "EXPERIMENTAL_FULL",
-                "source_watermark": source_watermark,
-                "graph_content_fingerprint": canonical_json_sha256(
-                    {
-                        "coverage": coverage,
-                        "artifacts": {
-                            name: _sha256(directory / name)
-                            for name in viewer_content_artifacts
-                        },
-                    }
+                "input_profile": source_schema,
+                "input": {
+                    "sha256": _sha256(input_path),
+                    "normalized_semantic_fingerprint": input_selection.get(
+                        "normalized_semantic_fingerprint"
+                    ),
+                },
+                "scope": {
+                    "source": input_selection.get("source", "input-parquet"),
+                    "scope": input_selection.get("scope", "catalog"),
+                    "universe": input_selection.get("universe", "all-markets"),
+                    "selection": input_selection.get(
+                        "selection", input_selection.get("strategy")
+                    ),
+                    "truncated": bool(input_selection.get("truncated", False)),
+                },
+                "source_tree_fingerprint": source_tree_fingerprint(),
+                "discovery_semantics_fingerprint": (
+                    discovery_semantics_fingerprint()
                 ),
+                "source_watermark": source_watermark,
+                "graph_content_fingerprint": graph_content_fingerprint,
                 "response_limits": {"nodes": 5_000, "edges": 10_000},
             },
         )
@@ -4404,6 +4507,7 @@ def _write_discovery_artifacts(
             }.items()
         }
         stats: dict[str, object] = {
+            "graph_content_fingerprint": graph_content_fingerprint,
             "input_rows": input_rows,
             "input_schema": source_schema,
             "input_selection": input_selection,
@@ -4829,6 +4933,9 @@ def _discovery_manifest(
         "qualification_report.json",
         *(("compute_profile.json",) if config.compute_profile is not None else ()),
     ]
+    input_selection = stats.get("input_selection")
+    if not isinstance(input_selection, dict):
+        input_selection = {}
     manifest = {
         "command": "discover",
         "version": __version__,
@@ -4838,6 +4945,23 @@ def _discovery_manifest(
         "input": str(input_path),
         "input_hash": input_hash,
         "input_schema": source_schema,
+        "input_profile": source_schema,
+        "input_selection": input_selection,
+        "input_semantic_fingerprint": input_selection.get(
+            "normalized_semantic_fingerprint"
+        ),
+        "scope": {
+            "source": input_selection.get("source", "input-parquet"),
+            "scope": input_selection.get("scope", "catalog"),
+            "universe": input_selection.get("universe", "all-markets"),
+            "selection": input_selection.get(
+                "selection", input_selection.get("strategy")
+            ),
+            "truncated": bool(input_selection.get("truncated", False)),
+        },
+        "source_tree_fingerprint": source_tree_fingerprint(),
+        "discovery_semantics_fingerprint": discovery_semantics_fingerprint(),
+        "graph_content_fingerprint": stats.get("graph_content_fingerprint"),
         "models": {
             "primary_parse": {
                 "requested": config.primary_model,
@@ -4913,6 +5037,7 @@ def _discovery_manifest(
             "proprietary_cache_lineage": False,
         },
         "versions": {
+            "input_adapter": INPUT_ADAPTER_VERSION,
             "normalization": NORMALIZATION_VERSION,
             "domain_taxonomy": DOMAIN_TAXONOMY_VERSION,
             "rules": RULE_VERSION,
@@ -4936,6 +5061,7 @@ def _discovery_manifest(
             "viewer_api": VIEWER_API_VERSION,
             "viewer_artifacts": VIEWER_ARTIFACT_VERSION,
             "visualization_layout": VISUALIZATION_LAYOUT_VERSION,
+            "aggregation": AGGREGATION_CONTRACT_VERSION,
             "cache": CACHE_ENTRY_VERSION,
             "rule_registry_hash": _text_hash(
                 json.dumps(RULE_REGISTRY, sort_keys=True)

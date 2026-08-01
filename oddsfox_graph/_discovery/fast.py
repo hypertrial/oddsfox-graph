@@ -45,8 +45,10 @@ from .publication import (
 )
 from .relations import RULE_REGISTRY, deterministic_relation
 from .versions import (
+    AGGREGATION_CONTRACT_VERSION,
     CANDIDATE_STATE_VERSION,
     CONSTRAINT_VERSION,
+    INPUT_ADAPTER_VERSION,
     EXECUTION_PLAN_VERSION,
     EXTRACTOR_ID,
     EXTRACTOR_VERSION,
@@ -54,10 +56,11 @@ from .versions import (
     PUBLICATION_VERSION,
     RULE_VERSION,
     SOLVER_VERSION,
-    SOURCE_SCHEMA,
     VIEWER_API_VERSION,
     VIEWER_ARTIFACT_VERSION,
     VISUALIZATION_LAYOUT_VERSION,
+    discovery_semantics_fingerprint,
+    source_tree_fingerprint,
 )
 from .workspace import (
     CANDIDATE_BLOCK_COLUMNS,
@@ -149,6 +152,7 @@ def discover_fast(
         lambda: load_source_markets(
             input_path,
             max_propositions=config.max_propositions,
+            input_profile=config.input_profile,
         ),
     )
     baseline_manifest = _validate_incremental_baseline(config, input_path, out_dir)
@@ -177,7 +181,15 @@ def discover_fast(
         else:
             stats = recorder.run(
                 "build_deterministic_workspace",
-                lambda: _build_workspace(staging, markets, selection, config, recorder),
+                lambda: _build_workspace(
+                    staging,
+                    input_path,
+                    source_schema,
+                    markets,
+                    selection,
+                    config,
+                    recorder,
+                ),
             )
             stats["incremental"] = {
                 "enabled": baseline_manifest is not None,
@@ -249,16 +261,35 @@ def discover_fast(
             "input": {
                 "path": str(input_path),
                 "sha256": input_hash,
-                "schema": SOURCE_SCHEMA,
+                "schema": source_schema,
+                "profile": source_schema,
+                "normalized_semantic_fingerprint": selection.get(
+                    "normalized_semantic_fingerprint"
+                ),
                 "selection": selection,
             },
+            "scope": {
+                "source": selection.get("source", "input-parquet"),
+                "scope": selection.get("scope", "catalog"),
+                "universe": selection.get("universe", "all-markets"),
+                "selection": selection.get("selection", selection.get("strategy")),
+                "truncated": bool(selection.get("truncated", False)),
+            },
+            "source_tree_fingerprint": source_tree_fingerprint(),
+            "discovery_semantics_fingerprint": discovery_semantics_fingerprint(),
+            "graph_content_fingerprint": stats.get("graph_content_fingerprint"),
             "versions": {
+                "input_adapter": INPUT_ADAPTER_VERSION,
                 "publication": PUBLICATION_VERSION,
                 "normalization": NORMALIZATION_VERSION,
                 "extractor": EXTRACTOR_VERSION,
                 "rules": RULE_VERSION,
                 "candidate_state": CANDIDATE_STATE_VERSION,
                 "execution_plan": EXECUTION_PLAN_VERSION,
+                "viewer_api": VIEWER_API_VERSION,
+                "viewer_artifacts": VIEWER_ARTIFACT_VERSION,
+                "visualization_layout": VISUALIZATION_LAYOUT_VERSION,
+                "aggregation": AGGREGATION_CONTRACT_VERSION,
                 "solver": SOLVER_VERSION,
                 "constraints": CONSTRAINT_VERSION,
             },
@@ -360,13 +391,13 @@ def _validate_incremental_baseline(
     baseline = config.incremental_from.resolve()
     manifest_path = baseline / "build_manifest.json"
     if baseline == out_dir or baseline == input_path.parent or not manifest_path.is_file():
-        raise ValueError("Incremental baseline is incomplete; run a clean v0.11 discovery")
+        raise ValueError("Incremental baseline is incomplete; run a clean v0.12 discovery")
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
-        raise ValueError("Incremental baseline is incompatible; run a clean v0.11 discovery") from exc
+        raise ValueError("Incremental baseline is incompatible; run a clean v0.12 discovery") from exc
     if manifest.get("version") != __version__ or manifest.get("build_mode") != "fast":
-        raise ValueError("Incremental baseline is incompatible; run a clean v0.11 discovery")
+        raise ValueError("Incremental baseline is incompatible; run a clean v0.12 discovery")
     versions = manifest.get("versions")
     if not isinstance(versions, dict) or any(
         versions.get(key) != expected
@@ -379,7 +410,7 @@ def _validate_incremental_baseline(
             "execution_plan": EXECUTION_PLAN_VERSION,
         }.items()
     ):
-        raise ValueError("Incremental baseline is incompatible; run a clean v0.11 discovery")
+        raise ValueError("Incremental baseline is incompatible; run a clean v0.12 discovery")
     _validate_incremental_baseline_files(baseline, manifest)
     return {str(key): value for key, value in manifest.items()}
 
@@ -401,23 +432,23 @@ def _validate_incremental_baseline_files(
         str(name) for name in declared
     }:
         raise ValueError(
-            "Incremental baseline is incomplete; run a clean v0.11 discovery"
+            "Incremental baseline is incomplete; run a clean v0.12 discovery"
         )
     if any(not (baseline / name).is_file() for name in required_artifacts):
         raise ValueError(
-            "Incremental baseline is incomplete; run a clean v0.11 discovery"
+            "Incremental baseline is incomplete; run a clean v0.12 discovery"
         )
     published_hashes = manifest.get("published_file_hashes")
     if not isinstance(published_hashes, dict) or set(published_hashes) != required_artifacts:
         raise ValueError(
-            "Incremental baseline is incomplete; run a clean v0.11 discovery"
+            "Incremental baseline is incomplete; run a clean v0.12 discovery"
         )
     for name in sorted(required_artifacts):
         expected = published_hashes.get(name)
         if not isinstance(expected, str) or sha256_file(baseline / name) != expected:
             raise ValueError(
                 "Incremental baseline artifact hashes do not match; "
-                "run a clean v0.11 discovery"
+                "run a clean v0.12 discovery"
             )
     for field, expected_names in (
         (
@@ -429,14 +460,14 @@ def _validate_incremental_baseline_files(
         hashes = manifest.get(field)
         if not isinstance(hashes, dict) or set(hashes) != expected_names:
             raise ValueError(
-                "Incremental baseline is incomplete; run a clean v0.11 discovery"
+                "Incremental baseline is incomplete; run a clean v0.12 discovery"
             )
         for name in sorted(expected_names):
             expected = hashes.get(name)
             if not isinstance(expected, str) or published_hashes.get(name) != expected:
                 raise ValueError(
                     "Incremental baseline artifact hashes do not match; "
-                    "run a clean v0.11 discovery"
+                    "run a clean v0.12 discovery"
                 )
 
 
@@ -465,6 +496,8 @@ def _reuse_unchanged_baseline(
 
 def _build_workspace(
     staging: Path,
+    input_path: Path,
+    source_schema: str,
     markets: list[SourceMarket],
     selection: dict[str, object],
     config: DiscoveryConfig,
@@ -550,7 +583,14 @@ def _build_workspace(
         mark("artifact_export")
         recorder.event("fast_substage", stage="artifact_export")
         atomic_write_json(staging / "coverage_summary.json", coverage)
-        _write_viewer_manifest(db, staging, coverage)
+        graph_content_fingerprint = _write_viewer_manifest(
+            db,
+            staging,
+            coverage,
+            input_path=input_path,
+            source_schema=source_schema,
+            selection=selection,
+        )
         mark("viewer_manifest")
         candidate_count = int(db.scalar("SELECT count(*) FROM relation_candidates_v") or 0)
         edge_count = int(db.scalar("SELECT count(*) FROM logic_edges_v") or 0)
@@ -574,6 +614,7 @@ def _build_workspace(
         )
         conditional_count = int(db.scalar("SELECT count(*) FROM conditional_edges_v") or 0)
         stats: dict[str, object] = {
+            "graph_content_fingerprint": graph_content_fingerprint,
             "candidate_edges": candidate_count,
             "logic_edges": edge_count,
             "deterministic_logic_edges": edge_count,
@@ -707,12 +748,41 @@ def _fast_proposition_row(
         "verifier_parse_fingerprint": None,
         "consensus_fingerprint": None,
         "automation_profile_id": None,
-        "source_schema": SOURCE_SCHEMA,
+        "source_schema": market.input_profile,
         "extractor_id": EXTRACTOR_ID,
         "extractor_version": EXTRACTOR_VERSION,
         "extraction_status": extracted.status,
         "source_spans_json": extracted.spans_json(),
         "proof_scope_key": extracted.proof_scope_key,
+        "team_name": market.team_name,
+        "stage_key": market.stage_key,
+        "stage_rank": (
+            market.stage_rank
+            if market.stage_rank is not None
+            else _STAGE_RANK.get(extracted.stage or "")
+        ),
+        "progression_level": market.progression_level,
+        "market_direction": market.market_direction,
+        "progression_outcome": market.progression_outcome,
+        "is_progression": next(
+            (
+                item.is_progression
+                for item in market.outcomes
+                if item.clob_token_id == token
+            ),
+            None,
+        ),
+        "market_status": market.market_status,
+        "is_still_alive": market.is_still_alive,
+        "opposite_clob_token_id": next(
+            (
+                item.opposite_clob_token_id
+                for item in market.outcomes
+                if item.clob_token_id == token
+            ),
+            None,
+        ),
+        "market_volume_usd": market.volume,
         "expected_tokens": len(market.outcomes),
         "is_active": market.is_active,
         "is_closed": market.is_closed,
@@ -725,7 +795,6 @@ def _fast_proposition_row(
         "temporal_predicate_signature": extracted.temporal_predicate_signature,
         "stage_family_signature": extracted.stage_family_signature,
         "winner_family_signature": extracted.winner_family_signature,
-        "stage_rank": _STAGE_RANK.get(extracted.stage or ""),
         "singular_winner": extracted.singular_winner,
         "rule_applicability_fingerprint": extracted.rule_applicability_fingerprint,
         "interval_low": low,
@@ -878,6 +947,22 @@ def _create_fast_candidates(db: DuckDB, max_candidates: int) -> None:
              AND a.proposition_id<b.proposition_id AND a.market_id!=b.market_id
              AND a.extraction_status='exact' AND b.extraction_status='exact'
              AND ({same_event})
+            UNION ALL
+            SELECT a.proposition_id, b.proposition_id, 'wc2026_team_progression'
+            FROM fast_propositions a JOIN fast_propositions b
+              ON a.team_name=b.team_name
+             AND a.source_schema='polymarket-wc2026-graph-hourly-v1'
+             AND b.source_schema='polymarket-wc2026-graph-hourly-v1'
+             AND a.proposition_id<b.proposition_id AND a.market_id!=b.market_id
+            UNION ALL
+            SELECT a.proposition_id, b.proposition_id, 'wc2026_winner_exclusion'
+            FROM fast_propositions a JOIN fast_propositions b
+              ON a.source_schema='polymarket-wc2026-graph-hourly-v1'
+             AND b.source_schema='polymarket-wc2026-graph-hourly-v1'
+             AND a.progression_level=5 AND b.progression_level=5
+             AND a.is_progression AND b.is_progression
+             AND a.team_name!=b.team_name
+             AND a.proposition_id<b.proposition_id
         ) SELECT DISTINCT a_id, b_id, reason FROM pairs
         """
     )
@@ -909,6 +994,8 @@ def _create_fast_candidates(db: DuckDB, max_candidates: int) -> None:
                    a.stage_family_signature,
                    a.winner_family_signature,
                    a.stage_rank, a.subject, a.polarity, a.time_start, a.time_end,
+                   a.source_schema, a.team_name, a.progression_level,
+                   a.is_progression,
                    a.interval_low, a.interval_low_inclusive,
                    a.interval_high, a.interval_high_inclusive,
                    a.expected_tokens,
@@ -926,6 +1013,9 @@ def _create_fast_candidates(db: DuckDB, max_candidates: int) -> None:
                    b.winner_family_signature b_winner_family,
                    b.stage_rank b_stage_rank, b.subject b_subject,
                    b.polarity b_polarity,
+                   b.source_schema b_source_schema, b.team_name b_team_name,
+                   b.progression_level b_progression_level,
+                   b.is_progression b_is_progression,
                    b.time_start b_time_start, b.time_end b_time_end,
                    b.interval_low b_interval_low,
                    b.interval_low_inclusive b_interval_low_inclusive,
@@ -940,6 +1030,36 @@ def _create_fast_candidates(db: DuckDB, max_candidates: int) -> None:
               CASE
                 WHEN market_id=b_market_id AND expected_tokens=2 THEN 'complement'
                 WHEN market_id=b_market_id THEN 'mutually_exclusive'
+                WHEN source_schema='polymarket-wc2026-graph-hourly-v1'
+                     AND b_source_schema=source_schema
+                     AND team_name=b_team_name
+                     AND progression_level=b_progression_level
+                     AND polarity=b_polarity THEN 'equivalent'
+                WHEN source_schema='polymarket-wc2026-graph-hourly-v1'
+                     AND b_source_schema=source_schema
+                     AND team_name=b_team_name
+                     AND polarity='positive' AND b_polarity='positive'
+                     AND progression_level>b_progression_level THEN 'A_implies_B'
+                WHEN source_schema='polymarket-wc2026-graph-hourly-v1'
+                     AND b_source_schema=source_schema
+                     AND team_name=b_team_name
+                     AND polarity='positive' AND b_polarity='positive'
+                     AND b_progression_level>progression_level THEN 'B_implies_A'
+                WHEN source_schema='polymarket-wc2026-graph-hourly-v1'
+                     AND b_source_schema=source_schema
+                     AND team_name=b_team_name
+                     AND polarity='negative' AND b_polarity='negative'
+                     AND progression_level<b_progression_level THEN 'A_implies_B'
+                WHEN source_schema='polymarket-wc2026-graph-hourly-v1'
+                     AND b_source_schema=source_schema
+                     AND team_name=b_team_name
+                     AND polarity='negative' AND b_polarity='negative'
+                     AND b_progression_level<progression_level THEN 'B_implies_A'
+                WHEN source_schema='polymarket-wc2026-graph-hourly-v1'
+                     AND b_source_schema=source_schema
+                     AND progression_level=5 AND b_progression_level=5
+                     AND is_progression AND b_is_progression
+                     AND team_name!=b_team_name THEN 'mutually_exclusive'
                 WHEN resolution_signature=b_resolution_signature
                      AND same_authoritative_scope THEN 'equivalent'
                 WHEN numeric_predicate_signature=b_numeric_signature
@@ -1001,6 +1121,15 @@ def _create_fast_candidates(db: DuckDB, max_candidates: int) -> None:
               CASE
                 WHEN market_id=b_market_id AND expected_tokens=2 THEN 'same_market.binary_complement.v1'
                 WHEN market_id=b_market_id THEN 'same_market.categorical_exclusion.v1'
+                WHEN source_schema='polymarket-wc2026-graph-hourly-v1'
+                     AND team_name=b_team_name
+                     AND progression_level=b_progression_level
+                     AND polarity=b_polarity THEN 'wc2026.same_progression.v1'
+                WHEN source_schema='polymarket-wc2026-graph-hourly-v1'
+                     AND team_name=b_team_name THEN 'wc2026.progression.v1'
+                WHEN source_schema='polymarket-wc2026-graph-hourly-v1'
+                     AND progression_level=5 AND b_progression_level=5
+                     THEN 'wc2026.winner_exclusion.v1'
                 WHEN resolution_signature=b_resolution_signature THEN 'equivalence.normalized_fields.v1'
                 WHEN numeric_predicate_signature=b_numeric_signature THEN 'threshold.interval_containment.v2'
                 WHEN temporal_predicate_signature=b_temporal_signature THEN 'time.interval_containment.v1'
@@ -1071,7 +1200,7 @@ def _candidate_projection_sql() -> str:
         "extractor_version": f"'{EXTRACTOR_VERSION}'",
         "source_spans_json": "json_object('A',json(source_spans_json),'B',json(b_source_spans_json))::VARCHAR",
         "rule_applicability_fingerprint": "sha256(rule_applicability_fingerprint || '|' || b_rule_fingerprint || '|' || selected_rule_id)",
-        "proof_scope_key": "CASE WHEN selected_rule_id LIKE 'same_market.%' THEN sha256('market|'||market_id) WHEN selected_rule_id LIKE 'equivalence.%' THEN resolution_signature WHEN selected_rule_id LIKE 'threshold.%' THEN numeric_predicate_signature WHEN selected_rule_id LIKE 'time.%' THEN temporal_predicate_signature WHEN selected_rule_id LIKE 'tournament.%' THEN stage_family_signature ELSE winner_family_signature END",
+        "proof_scope_key": "CASE WHEN selected_rule_id LIKE 'same_market.%' THEN sha256('market|'||market_id) WHEN selected_rule_id LIKE 'wc2026.%' THEN sha256(coalesce(team_name,'')||'|'||coalesce(progression_level::VARCHAR,'')||'|'||selected_rule_id) WHEN selected_rule_id LIKE 'equivalence.%' THEN resolution_signature WHEN selected_rule_id LIKE 'threshold.%' THEN numeric_predicate_signature WHEN selected_rule_id LIKE 'time.%' THEN temporal_predicate_signature WHEN selected_rule_id LIKE 'tournament.%' THEN stage_family_signature ELSE winner_family_signature END",
     }
     return ", ".join(
         f"{values.get(name, _candidate_null(name))} AS {name}"
@@ -1089,12 +1218,12 @@ def _candidate_null(name: str) -> str:
 
 
 def _create_fast_logic_edges(db: DuckDB) -> None:
-    proof_scope = "CASE WHEN selected_rule_id LIKE 'same_market.%' THEN sha256('market|'||market_id) WHEN selected_rule_id LIKE 'equivalence.%' THEN resolution_signature WHEN selected_rule_id LIKE 'threshold.%' THEN numeric_predicate_signature WHEN selected_rule_id LIKE 'time.%' THEN temporal_predicate_signature WHEN selected_rule_id LIKE 'tournament.%' THEN stage_family_signature ELSE winner_family_signature END"
+    proof_scope = "CASE WHEN selected_rule_id LIKE 'same_market.%' THEN sha256('market|'||market_id) WHEN selected_rule_id LIKE 'wc2026.%' THEN sha256(coalesce(team_name,'')||'|'||coalesce(progression_level::VARCHAR,'')||'|'||selected_rule_id) WHEN selected_rule_id LIKE 'equivalence.%' THEN resolution_signature WHEN selected_rule_id LIKE 'threshold.%' THEN numeric_predicate_signature WHEN selected_rule_id LIKE 'time.%' THEN temporal_predicate_signature WHEN selected_rule_id LIKE 'tournament.%' THEN stage_family_signature ELSE winner_family_signature END"
     columns: dict[str, str] = {
         "src_node_id": "CASE WHEN relation='B_implies_A' THEN b_id ELSE a_id END",
         "dst_node_id": "CASE WHEN relation='B_implies_A' THEN a_id ELSE b_id END",
         "edge_type": "CASE WHEN relation IN ('A_implies_B','B_implies_A') THEN 'implies' ELSE relation END",
-        "edge_basis": "CASE WHEN selected_rule_id LIKE 'same_market.%' THEN 'same_market' WHEN selected_rule_id LIKE 'equivalence.%' THEN 'normalized_equivalence' WHEN selected_rule_id LIKE 'threshold.%' THEN 'numeric_threshold' WHEN selected_rule_id LIKE 'time.%' THEN 'time_window_containment' WHEN selected_rule_id LIKE 'tournament.%' THEN 'tournament_stage' ELSE 'single_winner' END",
+        "edge_basis": "CASE WHEN selected_rule_id LIKE 'same_market.%' THEN 'same_market' WHEN selected_rule_id='wc2026.winner_exclusion.v1' THEN 'wc2026_single_winner' WHEN selected_rule_id LIKE 'wc2026.%' THEN 'wc2026_progression' WHEN selected_rule_id LIKE 'equivalence.%' THEN 'normalized_equivalence' WHEN selected_rule_id LIKE 'threshold.%' THEN 'numeric_threshold' WHEN selected_rule_id LIKE 'time.%' THEN 'time_window_containment' WHEN selected_rule_id LIKE 'tournament.%' THEN 'tournament_stage' ELSE 'single_winner' END",
         "confidence": "1.0::DOUBLE",
         "market_id_src": "CASE WHEN relation='B_implies_A' THEN b_market_id ELSE market_id END",
         "market_id_dst": "CASE WHEN relation='B_implies_A' THEN market_id ELSE b_market_id END",
@@ -1172,6 +1301,24 @@ def _validate_deterministic_invariants(db: DuckDB) -> None:
                     THEN stage_family_signature=b_stage_family
                          AND stage_family_signature IS NOT NULL
                          AND stage_rank!=b_stage_rank
+                WHEN selected_rule_id='wc2026.same_progression.v1'
+                    THEN source_schema='polymarket-wc2026-graph-hourly-v1'
+                         AND b_source_schema=source_schema
+                         AND team_name=b_team_name
+                         AND progression_level=b_progression_level
+                         AND polarity=b_polarity
+                WHEN selected_rule_id='wc2026.progression.v1'
+                    THEN source_schema='polymarket-wc2026-graph-hourly-v1'
+                         AND b_source_schema=source_schema
+                         AND team_name=b_team_name
+                         AND progression_level!=b_progression_level
+                         AND polarity=b_polarity
+                WHEN selected_rule_id='wc2026.winner_exclusion.v1'
+                    THEN source_schema='polymarket-wc2026-graph-hourly-v1'
+                         AND b_source_schema=source_schema
+                         AND progression_level=5 AND b_progression_level=5
+                         AND is_progression AND b_is_progression
+                         AND team_name!=b_team_name
                 WHEN selected_rule_id='event.single_winner.v1'
                     THEN winner_family_signature=b_winner_family
                          AND winner_family_signature IS NOT NULL
@@ -1342,11 +1489,27 @@ def _export_artifacts(db: DuckDB, staging: Path) -> None:
         copy_sorted_parquet(db, table, state_dir / name, list(columns), order)
 
 
-def _write_viewer_manifest(db: DuckDB, staging: Path, coverage: dict[str, object]) -> None:
+def _write_viewer_manifest(
+    db: DuckDB,
+    staging: Path,
+    coverage: dict[str, object],
+    *,
+    input_path: Path,
+    source_schema: str,
+    selection: dict[str, object],
+) -> str:
     content_names = (
         "nodes.parquet", "propositions.parquet", "relation_candidates.parquet",
         "logic_edges.parquet", "event_summary.parquet", "component_summary.parquet",
         "node_metrics.parquet", "visualization_layout.parquet",
+    )
+    graph_content_fingerprint = canonical_json_sha256(
+        {
+            "coverage": coverage,
+            "artifacts": {
+                name: sha256_file(staging / name) for name in content_names
+            },
+        }
     )
     atomic_write_json(
         staging / "viewer_manifest.json",
@@ -1356,14 +1519,29 @@ def _write_viewer_manifest(db: DuckDB, staging: Path, coverage: dict[str, object
             "layout_version": VISUALIZATION_LAYOUT_VERSION,
             "build_mode": "fast",
             "validation_status": "DETERMINISTIC_VALIDATED",
+            "input_profile": source_schema,
+            "input": {
+                "sha256": sha256_file(input_path),
+                "normalized_semantic_fingerprint": selection.get(
+                    "normalized_semantic_fingerprint"
+                ),
+            },
+            "scope": {
+                "source": selection.get("source", "input-parquet"),
+                "scope": selection.get("scope", "catalog"),
+                "universe": selection.get("universe", "all-markets"),
+                "selection": selection.get("selection", selection.get("strategy")),
+                "truncated": bool(selection.get("truncated", False)),
+            },
+            "source_tree_fingerprint": source_tree_fingerprint(),
+            "discovery_semantics_fingerprint": discovery_semantics_fingerprint(),
             "evidence_tiers": ["source_contract", "deterministic_rule"],
             "source_watermark": db.scalar("SELECT max(last_seen_ts) FROM nodes_table"),
-            "graph_content_fingerprint": canonical_json_sha256(
-                {"coverage": coverage, "artifacts": {name: sha256_file(staging / name) for name in content_names}}
-            ),
+            "graph_content_fingerprint": graph_content_fingerprint,
             "response_limits": {"nodes": 5_000, "edges": 10_000},
         },
     )
+    return graph_content_fingerprint
 
 
 def _tree_bytes(path: Path) -> int:

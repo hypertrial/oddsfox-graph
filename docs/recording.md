@@ -33,39 +33,48 @@ manual editing. If fewer edges qualify, it records the available set without
 lowering the threshold. If none qualify, it fails before recording.
 
 The defaults produce 48 seconds and exactly 1,440 frames when six highlights
-qualify: a three-second intro, six seven-second edge shots, and a three-second
-outro. Each shot uses two seconds of cubic camera movement, one second of
-endpoint reveal, and four seconds of captioned edge emphasis. There is no audio.
+qualify: a three-second text-led intro, six seven-second relationship shots, and
+a three-second summary. Intro and outro never show the complete graph. Each
+shot reveals its two human claim cards and at most the stored bounded context.
+There is no audio.
 
 ## Ranking
 
-Eligible accepted non-`compatible` edges meet the requested confidence. Duplicate
-implications use directed endpoints; symmetric relations use sorted endpoints.
-The deterministic base score is:
+Eligible accepted non-`compatible` display-essential edges meet the requested
+confidence and contain complete WC2026 team, stage, market, outcome, and
+explanation context. Duplicate implications use directed endpoints; symmetric
+relations use sorted endpoints. The deterministic base score is:
 
 ```text
-0.30 × confidence
-+ 0.25 × scope
+0.25 × confidence
++ 0.25 × stage importance
 + 0.20 × structural reach
-+ 0.15 × evidence interest
-+ 0.10 × relation interest
++ 0.15 × template novelty
++ 0.10 × evidence interest
++ 0.05 × relation interest
 ```
 
-Scope is 1.0 across events, 0.65 across markets in one event, and 0.25 within a
-market. Evidence interest is 1.0 for generative consensus, 0.80 for a
-deterministic rule, and 0.55 for a source contract. Relation interest is 1.0 for
-implication, 0.90 for equivalence, 0.85 for mutual exclusion, and 0.60 for a
-complement. Structural reach logarithmically normalizes the endpoint degree sum.
+Stage importance is the highest endpoint progression level divided by five.
+Structural reach logarithmically normalizes essential endpoint degree and
+discounts dense components. Template novelty is the inverse square root of the
+eligible stage/polarity template frequency. Evidence interest is 1.0 for
+generative consensus, 0.80 for a deterministic rule, and 0.55 for a source
+contract. Relation interest is 1.0 for implication, 0.90 for equivalence, 0.85
+for mutual exclusion, and 0.60 for a complement.
 
-Greedy selection subtracts 0.08 for each selected edge with the same relation,
-0.10 for the same evidence tier, 0.15 for the same unordered event pair, and
-0.20 per shared endpoint. Proposal ID resolves every tie. Every feature,
-contribution, count, penalty, base score, and selection score is retained in the
-plan and story.
+Selection allows one team, stage/polarity template, and endpoint per story and
+at most one highlight from a pathological component. It subtracts 0.08 for a
+repeated relation, 0.04 for repeated evidence, 0.10 for a repeated target stage,
+and 0.12 for a repeated component. Proposal ID resolves every tie. Every
+feature, contribution, count, exclusion, penalty, base score, and selection
+score is retained in the plan and story. If diversity leaves fewer than
+requested, the recorder reports the shortfall and never relaxes confidence or
+eligibility gates.
 
-The context view always retains selected edges and endpoints, then considers the
-25 strongest qualifying incident edges per endpoint. It is bounded at 750 nodes
-and 1,500 edges; stable pruning removes context only and reports all counts.
+The context view always retains selected edges and endpoints, then takes at
+most two qualifying incident edges per endpoint. The union is bounded at 96
+nodes and 144 edges, while a normal shot exposes no more than six nodes and five
+edges. Stable pruning removes context only and reports every count.
 
 ## Bundle and encoding
 
@@ -99,5 +108,6 @@ without changing selected logical edges.
 - An interrupted or failed run leaves the requested destination absent and
   removes its staging directory. An already existing destination is untouched.
 
-Static explorer exports are investigation-only in v1 because they do not carry
-the original completed graph manifest and recording-plan service.
+`story.json` and `recording_manifest.json` use v2 schemas. v1 plans and stories
+are intentionally rejected. Static explorer exports remain investigation-only
+because they do not provide the manifest-complete recording-plan service.

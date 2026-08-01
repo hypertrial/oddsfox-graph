@@ -2,7 +2,7 @@
 
 - [Architecture](architecture.md)
 - [Discovery](discovery.md)
-- [Logic explorer](explorer.md)
+- [FIFA World Cup 2026 outcome explorer](explorer.md)
 - [Deterministic recording](recording.md)
 - [Local dual-model runtime](local-runtime.md)
 - [Automated qualification](qualification.md)

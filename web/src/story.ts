@@ -6,6 +6,7 @@ import type {
   StoryFrameState,
   StoryShot,
 } from "./types";
+import { highlightSentence, relationLabel } from "./human";
 
 const FULL_CAMERA: CameraState = { x: 0.5, y: 0.5, ratio: 1, angle: 0 };
 
@@ -62,7 +63,7 @@ export function buildStory(
   });
   const frameCount = outroStart + outroFrames;
   return {
-    schema_version: "oddsfox-recording-story-v1",
+    schema_version: "oddsfox-recording-story-v2",
     graph_fingerprint: plan.graph_fingerprint,
     source_fingerprint: plan.graph_fingerprint,
     client_version: clientVersion,
@@ -101,6 +102,9 @@ export function storyFrame(story: RecordingStory, requestedFrame: number): Story
     story.timeline.shots.at(-1)!;
   const highlight =
     shot.highlight_index === null ? null : story.highlights[shot.highlight_index];
+  const visible = highlight
+    ? shotContext(story, highlight.proposal_id, highlight.source_id, highlight.target_id)
+    : { nodes: new Set<string>(), edges: new Set<string>() };
   let progress = normalized(frame, shot.start_frame, shot.zoom_end_frame);
   if (shot.kind === "outro") {
     progress = normalized(frame, shot.start_frame, shot.end_frame - 1);
@@ -127,21 +131,52 @@ export function storyFrame(story: RecordingStory, requestedFrame: number): Story
         ? [highlight.source_id, highlight.target_id]
         : [],
     ),
+    visibleEdges: visible.edges,
+    visibleNodes: visible.nodes,
     reveal,
     emphasis,
     overlay: shot.kind === "highlight" ? "caption" : shot.kind,
   };
 }
 
+function shotContext(
+  story: RecordingStory,
+  proposalId: string,
+  sourceId: string,
+  targetId: string,
+): { nodes: ReadonlySet<string>; edges: ReadonlySet<string> } {
+  const nodes = new Set([sourceId, targetId]);
+  const edges = new Set<string>();
+  const selected = story.graph.edges.find((edge) => edge.id === proposalId);
+  if (selected) edges.add(selected.id);
+  const context = story.graph.edges
+    .filter((edge) => edge.id !== proposalId && (
+      edge.source === sourceId
+      || edge.target === sourceId
+      || edge.source === targetId
+      || edge.target === targetId
+    ))
+    .sort((left, right) => right.confidence - left.confidence || left.id.localeCompare(right.id));
+  for (const edge of context) {
+    if (edges.size >= 5) break;
+    const nextNodes = new Set([...nodes, edge.source, edge.target]);
+    if (nextNodes.size > 6) continue;
+    nodes.add(edge.source);
+    nodes.add(edge.target);
+    edges.add(edge.id);
+  }
+  return { nodes, edges };
+}
+
 export function captionFor(story: RecordingStory, frame: number): string | null {
   const state = storyFrame(story, frame);
   if (state.shot.highlight_index === null) return null;
   const highlight = story.highlights[state.shot.highlight_index];
-  return `${highlight.source_label} ${humanRelation(highlight.relation)} ${highlight.target_label}`;
+  return highlightSentence(highlight);
 }
 
 export function humanRelation(relation: string): string {
-  return relation.replaceAll("_", " ");
+  return relationLabel(relation as RecordingPlan["highlights"][number]["relation"]);
 }
 
 function cameraForHighlight(
@@ -150,12 +185,13 @@ function cameraForHighlight(
   targetId: string,
 ): CameraState {
   const included = new Set([sourceId, targetId]);
-  const endpoints = new Set(included);
-  for (const edge of graph.edges) {
-    if (endpoints.has(edge.source) || endpoints.has(edge.target)) {
-      included.add(edge.source);
-      included.add(edge.target);
-    }
+  const neighbors = graph.edges
+    .filter((edge) => included.has(edge.source) || included.has(edge.target))
+    .sort((left, right) => right.confidence - left.confidence || left.id.localeCompare(right.id));
+  for (const edge of neighbors) {
+    if (included.size >= 6) break;
+    included.add(edge.source);
+    included.add(edge.target);
   }
   const all = graph.nodes;
   const focused = all.filter((node) => included.has(node.id));

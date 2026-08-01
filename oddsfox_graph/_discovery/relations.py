@@ -63,6 +63,24 @@ RULE_REGISTRY = {
         "applicability": "same_authoritative_single_winner_event",
         "hard_fact": False,
     },
+    "wc2026.same_progression.v1": {
+        "version": "1",
+        "basis": "wc2026_structured_progression",
+        "applicability": "same_team_progression_level_and_polarity",
+        "hard_fact": True,
+    },
+    "wc2026.progression.v1": {
+        "version": "1",
+        "basis": "wc2026_structured_progression",
+        "applicability": "same_team_ordered_progression_levels",
+        "hard_fact": True,
+    },
+    "wc2026.winner_exclusion.v1": {
+        "version": "1",
+        "basis": "wc2026_single_winner",
+        "applicability": "different_teams_positive_world_cup_winner",
+        "hard_fact": True,
+    },
 }
 
 HARD_FACT_RULE_IDS = frozenset(
@@ -119,6 +137,10 @@ def deterministic_relation(
     if min(float(a["parse_confidence"]), float(b["parse_confidence"])) < parse_confidence:
         return None
     confidence = min(float(a["parse_confidence"]), float(b["parse_confidence"]))
+
+    wc2026_relation = _wc2026_relation(a, b, confidence)
+    if wc2026_relation is not None:
+        return wc2026_relation
 
     if (
         proposition_signature(a) == proposition_signature(b)
@@ -230,6 +252,76 @@ def _rule(
         "confidence": confidence,
         "rule_id": rule_id,
     }
+
+
+def _wc2026_relation(
+    a: dict[str, Any],
+    b: dict[str, Any],
+    confidence: float,
+) -> dict[str, Any] | None:
+    profile = "polymarket-wc2026-graph-hourly-v1"
+    if a.get("source_schema") != profile or b.get("source_schema") != profile:
+        return None
+    required = ("team_name", "progression_level", "polarity")
+    if any(a.get(field) is None or b.get(field) is None for field in required):
+        return None
+    a_id = str(a["proposition_id"])
+    b_id = str(b["proposition_id"])
+    a_team = str(a["team_name"])
+    b_team = str(b["team_name"])
+    a_level = int(a["progression_level"])
+    b_level = int(b["progression_level"])
+    a_polarity = str(a["polarity"])
+    b_polarity = str(b["polarity"])
+    if a_team == b_team and a_level == b_level and a_polarity == b_polarity:
+        return _rule(
+            "equivalent",
+            min(a_id, b_id),
+            max(a_id, b_id),
+            "wc2026_progression",
+            "These markets encode the same team progression outcome",
+            confidence,
+            "wc2026.same_progression.v1",
+        )
+    if a_team == b_team and a_polarity == b_polarity and a_level != b_level:
+        if a_polarity == "positive":
+            src, dst = (a, b) if a_level > b_level else (b, a)
+            explanation = (
+                "Reaching a later World Cup stage implies reaching the earlier stage"
+            )
+        elif a_polarity == "negative":
+            src, dst = (a, b) if a_level < b_level else (b, a)
+            explanation = (
+                "Not reaching an earlier stage implies not reaching a later stage"
+            )
+        else:
+            return None
+        return _rule(
+            "implies",
+            str(src["proposition_id"]),
+            str(dst["proposition_id"]),
+            "wc2026_progression",
+            explanation,
+            confidence,
+            "wc2026.progression.v1",
+        )
+    if (
+        a_team != b_team
+        and a_level == b_level == 5
+        and a_polarity == b_polarity == "positive"
+        and a.get("is_progression") is True
+        and b.get("is_progression") is True
+    ):
+        return _rule(
+            "mutually_exclusive",
+            min(a_id, b_id),
+            max(a_id, b_id),
+            "wc2026_single_winner",
+            "Different teams cannot both win the FIFA World Cup 2026",
+            confidence,
+            "wc2026.winner_exclusion.v1",
+        )
+    return None
 
 
 def _numeric_threshold_relation(
@@ -384,6 +476,9 @@ def _same_values(
 
 
 def stage_rank(proposition: dict[str, Any]) -> int | None:
+    progression_level = proposition.get("progression_level")
+    if progression_level is not None:
+        return int(progression_level)
     values = [proposition.get("object"), proposition.get("predicate")]
     for value in values:
         if not value:
@@ -398,6 +493,14 @@ def stage_rank(proposition: dict[str, Any]) -> int | None:
 
 
 def is_winner_proposition(proposition: dict[str, Any]) -> bool:
+    if (
+        proposition.get("source_schema")
+        == "polymarket-wc2026-graph-hourly-v1"
+    ):
+        return bool(
+            proposition.get("progression_level") == 5
+            and proposition.get("polarity") == "positive"
+        )
     predicate = normalize_text(str(proposition.get("predicate") or "")).casefold()
     object_ = normalize_text(str(proposition.get("object") or "")).casefold()
     winner_words = {"win", "winner", "winners", "winning", "wins"}

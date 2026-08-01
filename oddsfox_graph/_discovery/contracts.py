@@ -25,6 +25,21 @@ CitationField = Literal[
     "tags",
     "time_start",
     "time_end",
+    "canonical_team_name",
+    "stage_key",
+    "stage_rank",
+    "market_direction",
+    "progression_outcome_label",
+    "is_progression_token",
+    "opposite_clob_token_id",
+    "market_status",
+    "is_still_alive",
+]
+
+InputProfile = Literal[
+    "auto",
+    "polymarket-market-snapshot-v1",
+    "polymarket-wc2026-graph-hourly-v1",
 ]
 
 
@@ -161,6 +176,17 @@ class PropositionRecord(BaseModel):
     extraction_status: Literal["exact", "ambiguous", "unmatched"] | None = None
     source_spans_json: str | None = None
     proof_scope_key: str | None = None
+    team_name: str | None = None
+    stage_key: str | None = None
+    stage_rank: int | None = None
+    progression_level: int | None = None
+    market_direction: str | None = None
+    progression_outcome: str | None = None
+    is_progression: bool | None = None
+    market_status: str | None = None
+    is_still_alive: bool | None = None
+    opposite_clob_token_id: str | None = None
+    market_volume_usd: float | None = None
 
 
 @dataclass(frozen=True)
@@ -168,6 +194,8 @@ class SourceOutcome:
     outcome_index: int
     outcome: str
     clob_token_id: str
+    is_progression: bool | None = None
+    opposite_clob_token_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -188,11 +216,21 @@ class SourceMarket:
     first_seen_ts: datetime | None = None
     last_seen_ts: datetime | None = None
     volume: float | None = None
+    input_profile: str = "polymarket-market-snapshot-v1"
+    team_name: str | None = None
+    stage_key: str | None = None
+    stage_rank: int | None = None
+    progression_level: int | None = None
+    market_direction: str | None = None
+    progression_outcome: str | None = None
+    market_status: str | None = None
+    is_still_alive: bool | None = None
 
 
 @dataclass(frozen=True)
 class DiscoveryConfig:
     mode: Literal["fast", "full"] = "full"
+    input_profile: InputProfile = "auto"
     cache_dir: Path | None = None
     incremental_from: Path | None = None
     compute_profile: Path | None = None
@@ -236,6 +274,20 @@ class DiscoveryConfig:
     def validate(self) -> None:
         if self.mode not in {"fast", "full"}:
             raise ValueError("mode must be fast or full")
+        if self.input_profile not in {
+            "auto",
+            "polymarket-market-snapshot-v1",
+            "polymarket-wc2026-graph-hourly-v1",
+        }:
+            raise ValueError("input_profile is not supported")
+        if (
+            self.input_profile == "polymarket-wc2026-graph-hourly-v1"
+            and self.max_propositions is not None
+        ):
+            raise ValueError(
+                "max_propositions is not supported for the WC2026 graph profile; "
+                "partial team progression chains are unsafe"
+            )
         if self.deadline_seconds <= 0:
             raise ValueError("deadline_seconds must be positive")
         if not 0.0 <= self.accept_confidence <= 1.0:

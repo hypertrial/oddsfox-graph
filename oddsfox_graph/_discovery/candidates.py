@@ -273,6 +273,38 @@ def generate_candidate_store(
                     proposition_id,
                     proposition,
                 )
+            if (
+                proposition.get("source_schema")
+                == "polymarket-wc2026-graph-hourly-v1"
+                and proposition.get("team_name")
+                and proposition.get("progression_level") is not None
+                and (
+                    rule_enabled("wc2026.same_progression.v1")
+                    or rule_enabled("wc2026.progression.v1")
+                )
+            ):
+                add_deterministic(
+                    "wc2026_progression",
+                    proposition["team_name"],
+                    proposition_id,
+                    proposition,
+                    rank=int(proposition["progression_level"]),
+                )
+            if (
+                rule_enabled("wc2026.winner_exclusion.v1")
+                and proposition.get("source_schema")
+                == "polymarket-wc2026-graph-hourly-v1"
+                and proposition.get("progression_level") == 5
+                and proposition.get("polarity") == "positive"
+                and proposition.get("is_progression") is True
+            ):
+                add_deterministic(
+                    "wc2026_winner",
+                    "fifa-world-cup-2026",
+                    proposition_id,
+                    proposition,
+                    rank=5,
+                )
 
     store = CandidateStore()
     store.initialize_semantic_state()
@@ -956,6 +988,8 @@ WHERE a.kind IN ('market', 'signature')
    )
    OR (a.kind = 'stage' AND a.stage_rank != b.stage_rank)
    OR (a.kind = 'winner' AND a.subject_key != b.subject_key)
+   OR a.kind = 'wc2026_progression'
+   OR (a.kind = 'wc2026_winner' AND a.subject_key != b.subject_key)
 """
 
 

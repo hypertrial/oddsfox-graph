@@ -74,6 +74,7 @@ export function GraphCanvas({
   });
   const activeView = useRef(0);
   const appliedLayoutNonce = useRef(layoutNonce);
+  const hiddenForStory = story ? storyFrame(story, frame).overlay !== "caption" : false;
 
   useLayoutEffect(() => {
     callbacks.current = { onSelectNode, onSelectEdge, onOpenNode, onReady };
@@ -83,12 +84,13 @@ export function GraphCanvas({
     if (!container.current) return undefined;
     const graph = new Graph({ multi: true, type: "directed" });
     graphRef.current = graph;
+    const colorScheme = window.matchMedia("(prefers-color-scheme: dark)");
     const renderer = new Sigma(graph, container.current, {
       allowInvalidContainer: false,
       renderEdgeLabels: false,
       labelRenderedSizeThreshold: 7,
       labelDensity: 0.7,
-      labelColor: { color: "#dce5f2" },
+      labelColor: { color: colorScheme.matches ? "#dce5f2" : "#243044" },
       defaultEdgeType: "curved",
       enableEdgeEvents: true,
       edgeProgramClasses: {
@@ -112,8 +114,16 @@ export function GraphCanvas({
       renderState.current.hoveredId = null;
       renderer.scheduleRefresh();
     });
+    const updateLabelColor = () => {
+      renderer.setSetting("labelColor", {
+        color: colorScheme.matches ? "#dce5f2" : "#243044",
+      });
+      renderer.scheduleRefresh();
+    };
+    colorScheme.addEventListener("change", updateLabelColor);
     return () => {
       activeView.current += 1;
+      colorScheme.removeEventListener("change", updateLabelColor);
       renderer.kill();
       rendererRef.current = null;
       graphRef.current = null;
@@ -199,6 +209,7 @@ export function GraphCanvas({
       className="graph-canvas"
       ref={container}
       role="img"
+      aria-hidden={hiddenForStory || undefined}
       aria-label={`Interactive logic graph with ${view?.nodes.length ?? 0} nodes and ${view?.edges.length ?? 0} relations. Double-click a component or event to zoom in.`}
     />
   );
@@ -241,6 +252,7 @@ function buildGraph(view: GraphView): Graph {
 }
 
 function reduceNode(graph: Graph, state: RenderState, node: string, data: Record<string, unknown>) {
+  if (state.story && !state.story.visibleNodes.has(node)) return { ...data, hidden: true };
   const focus = focusedNodes(graph, state);
   const relevant = focus.size === 0 || focus.has(node) || [...focus].some((id) => graph.hasNode(id) && graph.areNeighbors(node, id));
   const forced = focus.has(node) || state.highestDegree.has(node);
@@ -259,6 +271,7 @@ function reduceNode(graph: Graph, state: RenderState, node: string, data: Record
 }
 
 function reduceEdge(graph: Graph, state: RenderState, edge: string, data: Record<string, unknown>) {
+  if (state.story && !state.story.visibleEdges.has(edge)) return { ...data, hidden: true };
   const [source, target] = graph.extremities(edge);
   const storyEdge = state.story?.highlightedEdge;
   const focus = focusedNodes(graph, state);
@@ -314,6 +327,11 @@ function tweenPositions(
   let cancelled = false;
   const tick = (now: number) => {
     if (cancelled) return;
+    const container = renderer.getContainer();
+    if (!container.isConnected || container.clientWidth === 0 || container.clientHeight === 0) {
+      cancelled = true;
+      return;
+    }
     const progress = clamp((now - started) / duration, 0, 1);
     const eased = 1 - (1 - progress) ** 3;
     graph.updateEachNodeAttributes((node, attributes) => ({

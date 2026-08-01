@@ -12,13 +12,33 @@ from pydantic import BaseModel, ConfigDict
 
 from . import __version__
 from ._explorer.contracts import (
+    CompareResult,
+    EdgeMode,
+    EntitySearchResult,
+    ExploreHome,
     ExplorerMetadata,
     GraphFilter,
     GraphPage,
     GraphView,
+    HumanHighlight,
+    MarketDetail,
+    RelationshipDetail,
     RecordingPlan,
+    StageDetail,
+    StageSummary,
+    TeamDetail,
 )
 from ._explorer.queries import ExplorerStore
+from ._discovery.provenance import sha256_file
+from ._discovery.versions import (
+    PUBLICATION_VERSION,
+    RULE_VERSION,
+    VIEWER_API_VERSION,
+    VIEWER_ARTIFACT_VERSION,
+    COVERAGE_SUMMARY_VERSION,
+    WC2026_SOURCE_SCHEMA,
+    discovery_semantics_fingerprint,
+)
 from .queries import DuckDB
 from .search import PATH_SENTINEL, read_rows, require_artifact, resolve_node, search_nodes
 
@@ -131,7 +151,52 @@ class Graph:
             )
         build_mode = manifest.get("build_mode")
         if build_mode not in {"fast", "full"}:
-            raise ValueError("Graph manifest has no valid v0.11 build mode")
+            raise ValueError("Graph manifest has no valid v0.12 build mode")
+        versions = manifest.get("versions")
+        expected_versions = {
+            "rules": RULE_VERSION,
+            "publication": PUBLICATION_VERSION,
+            "viewer_api": VIEWER_API_VERSION,
+            "viewer_artifacts": VIEWER_ARTIFACT_VERSION,
+        }
+        if not isinstance(versions, dict) or any(
+            versions.get(name) != expected
+            for name, expected in expected_versions.items()
+        ):
+            raise ValueError(
+                f"Graph output uses stale discovery contracts; run a clean "
+                f"v{__version__} WC2026 discovery"
+            )
+        if (
+            manifest.get("discovery_semantics_fingerprint")
+            != discovery_semantics_fingerprint()
+        ):
+            raise ValueError(
+                "Graph output has an incompatible discovery semantics "
+                "fingerprint; run a clean WC2026 discovery"
+            )
+        input_value = manifest.get("input")
+        input_schema = (
+            input_value.get("schema")
+            if isinstance(input_value, dict)
+            else manifest.get("input_schema")
+        )
+        scope = manifest.get("scope")
+        if not isinstance(scope, dict):
+            raise ValueError("Graph output has no declared discovery scope")
+        if input_schema == WC2026_SOURCE_SCHEMA and any(
+            scope.get(key) != expected
+            for key, expected in {
+                "source": "oddsfox-pipeline",
+                "scope": "wc2026",
+                "universe": "knockout_progression",
+                "selection": "all_valid_pipeline_wc2026_markets",
+                "truncated": False,
+            }.items()
+        ):
+            raise ValueError(
+                "Graph output is not a complete WC2026 knockout-progression scope"
+            )
         required = (
             "oddsfox_graph.duckdb",
             "nodes.parquet",
@@ -155,6 +220,54 @@ class Graph:
             raise ValueError("Graph manifest does not declare the query artifacts")
         for artifact in required:
             require_artifact(resolved, artifact)
+        viewer = _read_manifest(resolved / "viewer_manifest.json", "viewer")
+        viewer_input = viewer.get("input")
+        build_input_sha = (
+            input_value.get("sha256")
+            if isinstance(input_value, dict)
+            else manifest.get("input_hash")
+        )
+        build_input_semantics = (
+            input_value.get("normalized_semantic_fingerprint")
+            if isinstance(input_value, dict)
+            else manifest.get("input_semantic_fingerprint")
+        )
+        if (
+            viewer.get("schema_version") != VIEWER_ARTIFACT_VERSION
+            or viewer.get("api_version") != VIEWER_API_VERSION
+            or viewer.get("build_mode") != build_mode
+            or viewer.get("validation_status") != manifest.get("validation_status")
+            or viewer.get("input_profile") != input_schema
+            or viewer.get("scope") != scope
+            or viewer.get("discovery_semantics_fingerprint")
+            != discovery_semantics_fingerprint()
+            or not isinstance(viewer.get("graph_content_fingerprint"), str)
+            or viewer.get("graph_content_fingerprint")
+            != manifest.get("graph_content_fingerprint")
+            or not isinstance(viewer_input, dict)
+            or viewer_input.get("sha256") != build_input_sha
+            or viewer_input.get("normalized_semantic_fingerprint")
+            != build_input_semantics
+        ):
+            raise ValueError(
+                "Graph viewer artifacts are incompatible; run a clean "
+                f"v{__version__} WC2026 discovery"
+            )
+        coverage = _read_manifest(resolved / "coverage_summary.json", "coverage")
+        if coverage.get("schema_version") != COVERAGE_SUMMARY_VERSION:
+            raise ValueError(
+                "Graph coverage artifacts are incompatible; run a clean "
+                f"v{__version__} WC2026 discovery"
+            )
+        artifact_hashes = manifest.get("artifact_hashes")
+        if isinstance(artifact_hashes, dict):
+            declared_viewer_hash = artifact_hashes.get("viewer_manifest.json")
+            if (
+                declared_viewer_hash is not None
+                and declared_viewer_hash
+                != sha256_file(resolved / "viewer_manifest.json")
+            ):
+                raise ValueError("Graph viewer manifest hash does not match its build")
         return cls(resolved, build_mode=build_mode)
 
     def metadata(self) -> ExplorerMetadata:
@@ -162,6 +275,62 @@ class Graph:
 
     def coverage(self) -> dict[str, object]:
         return self._explorer().coverage()
+
+    def explore_home(
+        self,
+        *,
+        team_limit: int = 24,
+        highlight_limit: int = 6,
+    ) -> ExploreHome:
+        return self._explorer().explore_home(
+            team_limit=team_limit,
+            highlight_limit=highlight_limit,
+        )
+
+    def stages(self) -> tuple[StageSummary, ...]:
+        return self._explorer().stages()
+
+    def stage(self, stage_key: str) -> StageDetail:
+        return self._explorer().stage(stage_key)
+
+    def teams(
+        self,
+        *,
+        cursor: str | None = None,
+        limit: int = 100,
+    ) -> GraphPage:
+        return self._explorer().teams(cursor=cursor, limit=limit)
+
+    def team(self, team_key: str) -> TeamDetail:
+        return self._explorer().team(team_key)
+
+    def market(self, market_id: str) -> MarketDetail:
+        return self._explorer().market(market_id)
+
+    def relationship(self, proposal_id: str) -> RelationshipDetail:
+        return self._explorer().relationship(proposal_id)
+
+    def human_highlights(
+        self,
+        *,
+        limit: int = 6,
+        min_confidence: float = 0.95,
+    ) -> tuple[HumanHighlight, ...]:
+        return self._explorer().human_highlights(
+            limit=limit, min_confidence=min_confidence
+        )
+
+    def entity_search(
+        self, query: str, *, limit: int = 20
+    ) -> tuple[EntitySearchResult, ...]:
+        return self._explorer().entity_search(query, limit=limit)
+
+    def compare(
+        self, source_id: str, target_id: str, *, max_hops: int = 4
+    ) -> CompareResult:
+        return self._explorer().compare(
+            source_id, target_id, max_hops=max_hops
+        )
 
     def events(
         self,
@@ -203,6 +372,7 @@ class Graph:
         filters: GraphFilter | None = None,
         max_nodes: int = 5_000,
         max_edges: int = 10_000,
+        edge_mode: EdgeMode = "all",
     ) -> GraphView:
         return self._explorer().neighborhood(
             node_ids,
@@ -210,6 +380,7 @@ class Graph:
             filters=filters,
             max_nodes=max_nodes,
             max_edges=max_edges,
+            edge_mode=edge_mode,
         )
 
     def subgraph(
@@ -220,6 +391,7 @@ class Graph:
         filters: GraphFilter | None = None,
         max_nodes: int = 5_000,
         max_edges: int = 10_000,
+        edge_mode: EdgeMode = "all",
     ) -> GraphView:
         return self.neighborhood(
             node_ids,
@@ -227,6 +399,7 @@ class Graph:
             filters=filters,
             max_nodes=max_nodes,
             max_edges=max_edges,
+            edge_mode=edge_mode,
         )
 
     def recording_plan(
@@ -251,12 +424,14 @@ class Graph:
         *,
         max_nodes: int = 5_000,
         max_edges: int = 10_000,
+        edge_mode: EdgeMode = "all",
     ) -> GraphView:
         return self._explorer().event_graph(
             event_key,
             filters,
             max_nodes=max_nodes,
             max_edges=max_edges,
+            edge_mode=edge_mode,
         )
 
     def component(self, component_id: str) -> dict[str, object]:
@@ -647,6 +822,16 @@ class Graph:
 
     def _explorer(self) -> ExplorerStore:
         return ExplorerStore(self.out_dir)
+
+
+def _read_manifest(path: Path, name: str) -> dict[str, object]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"Graph {name} manifest is invalid: {exc}") from exc
+    if not isinstance(value, dict):
+        raise ValueError(f"Graph {name} manifest must be an object")
+    return {str(key): item for key, item in value.items()}
 
 
 def _pair_rows(

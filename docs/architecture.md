@@ -2,7 +2,7 @@
 
 One typed staged pipeline owns both discovery modes:
 
-1. normalize the compact catalog and create every selected source proposition;
+1. normalize the selected input profile and create every source proposition;
 2. run the strict deterministic extractor with literal source spans;
 3. generate bounded structured candidates in DuckDB;
 4. derive and validate deterministic proofs;
@@ -10,8 +10,8 @@ One typed staged pipeline owns both discovery modes:
 6. solve proposal-connected components with RC2;
 7. aggregate explorer summaries and atomically publish the manifest last.
 
-`FastModePolicy` enables stages 1–4, 6, and 7 and forbids inference resources.
-`FullModePolicy` adds stage 5 and requires an exact automation profile. Mode
+Fast mode enables stages 1–4, 6, and 7 and forbids inference resources. Full
+mode adds stage 5 and requires an exact automation profile. Mode
 selection happens at the orchestration boundary; the graph, solver, publication,
 query, report, and explorer contracts are shared.
 
@@ -24,6 +24,14 @@ Candidates are blocked by market/event, resolution, numeric, temporal, stage,
 and strict singular-winner signatures. Cross-event rules require a complete
 rule-specific proof-scope key; fuzzy entity merging is never used.
 
+The human explorer's production profile reads the pipeline's long-form WC2026
+graph mart. A trust-boundary adapter validates the hourly grain and canonical
+team/stage/progression fields, then collapses rows into binary markets. Prices
+and observation timestamps are not logical inputs. Structured WC rules operate
+inside a team progression scope, except for explicit exclusion between
+different teams' positive winner claims. The raw file hash records provenance;
+a normalized semantic fingerprint controls compatibility and incremental reuse.
+
 ## Full enrichment
 
 MiniLM vectors are inserted into a single-threaded USearch HNSW index in stable
@@ -35,14 +43,17 @@ and solver acceptance.
 
 SQLite owns transactional inference cache entries. DuckDB owns propositions,
 candidates, proofs, solver state, aggregates, layouts, and the public database.
-Incremental baselines are current, manifest-complete v0.11 outputs only.
+Incremental baselines are current, manifest-complete 0.12 outputs with matching
+input profile, discovery semantics, rules, and viewer contracts only.
 
 ## Exploration
 
 `Graph` and `ExplorerStore` open completed outputs read-only. The loopback-only
 FastAPI service exposes bounded parameterized queries, never arbitrary SQL.
-React/Sigma starts at component or event summaries, then requests bounded
-proposition neighborhoods. `prove` traverses implication plus bidirectional
+React starts with an accessible WC2026 stage/team progression map. Sigma is an
+explicit Analyst surface that requests bounded proposition neighborhoods.
+Explore consumes display-essential edges and grouped constraints; source graph
+artifacts remain unchanged. `prove` traverses implication plus bidirectional
 equivalence only; it never materializes transitive closure.
 
 ## Presentation and recording

@@ -23,6 +23,7 @@ from .versions import (
     EXTRACTOR_VERSION,
     PROOF_SCOPE_VERSION,
     RULE_APPLICABILITY_VERSION,
+    WC2026_SOURCE_SCHEMA,
 )
 
 
@@ -126,6 +127,8 @@ def extract_proposition(
     market: SourceMarket,
     outcome: SourceOutcome,
 ) -> ExtractedProposition:
+    if market.input_profile == WC2026_SOURCE_SCHEMA:
+        return _extract_wc2026_proposition(market, outcome)
     question = unicodedata.normalize("NFKC", market.question).strip()
     outcome_text = unicodedata.normalize("NFKC", outcome.outcome).strip()
     spans: list[SourceSpan] = []
@@ -345,6 +348,139 @@ def extract_proposition(
         rule_applicability_fingerprint=applicability,
         spans=tuple(spans),
     )
+
+
+def _extract_wc2026_proposition(
+    market: SourceMarket,
+    outcome: SourceOutcome,
+) -> ExtractedProposition:
+    if any(
+        value is None
+        for value in (
+            market.team_name,
+            market.stage_key,
+            market.stage_rank,
+            market.progression_level,
+            market.market_direction,
+            market.progression_outcome,
+            outcome.is_progression,
+            outcome.opposite_clob_token_id,
+        )
+    ):
+        raise ValueError(
+            f"WC2026 market {market.market_id!r} is missing structured semantics"
+        )
+    assert market.team_name is not None
+    assert market.stage_key is not None
+    assert market.stage_rank is not None
+    assert market.progression_level is not None
+    assert market.market_direction is not None
+    assert market.progression_outcome is not None
+    assert outcome.is_progression is not None
+    assert outcome.opposite_clob_token_id is not None
+
+    polarity: Literal["positive", "negative"] = (
+        "positive" if outcome.is_progression else "negative"
+    )
+    competition = "FIFA World Cup 2026"
+    event_scope = "fifa-world-cup-2026"
+    predicate = market.progression_outcome.replace("_", " ")
+    resolution_signature = canonical_json_sha256(
+        {
+            "profile": WC2026_SOURCE_SCHEMA,
+            "team": market.team_name,
+            "progression_level": market.progression_level,
+            "polarity": polarity,
+        }
+    )
+    stage_family = canonical_json_sha256(
+        {
+            "profile": WC2026_SOURCE_SCHEMA,
+            "team": market.team_name,
+            "competition": competition,
+        }
+    )
+    winner_family = (
+        canonical_json_sha256(
+            {"profile": WC2026_SOURCE_SCHEMA, "event_scope": event_scope}
+        )
+        if market.progression_level == 5
+        else None
+    )
+    proof_scope_key = canonical_json_sha256(
+        {
+            "version": PROOF_SCOPE_VERSION,
+            "profile": WC2026_SOURCE_SCHEMA,
+            "market_id": market.market_id,
+            "team": market.team_name,
+            "stage_key": market.stage_key,
+            "stage_rank": market.stage_rank,
+            "progression_level": market.progression_level,
+            "market_direction": market.market_direction,
+            "progression_outcome": market.progression_outcome,
+            "is_progression": outcome.is_progression,
+            "opposite_clob_token_id": outcome.opposite_clob_token_id,
+        }
+    )
+    applicability = canonical_json_sha256(
+        {
+            "version": RULE_APPLICABILITY_VERSION,
+            "profile": WC2026_SOURCE_SCHEMA,
+            "binary": True,
+            "team": market.team_name,
+            "progression_level": market.progression_level,
+            "polarity": polarity,
+            "winner": market.progression_level == 5,
+        }
+    )
+    spans = (
+        SourceSpan("outcome", 0, len(outcome.outcome), outcome.outcome),
+        _structured_span("canonical_team_name", market.team_name),
+        _structured_span("stage_key", market.stage_key),
+        _structured_span("stage_rank", str(market.stage_rank)),
+        _structured_span("market_direction", market.market_direction),
+        _structured_span(
+            "progression_outcome_label", market.progression_outcome
+        ),
+        _structured_span(
+            "is_progression_token", str(outcome.is_progression).lower()
+        ),
+        _structured_span(
+            "opposite_clob_token_id", outcome.opposite_clob_token_id
+        ),
+    )
+    return ExtractedProposition(
+        status="exact",
+        polarity=polarity,
+        subject=(market.team_name,),
+        predicate=predicate,
+        operator=None,
+        threshold=None,
+        interval_low=None,
+        interval_low_inclusive=False,
+        interval_high=None,
+        interval_high_inclusive=False,
+        unit=None,
+        time_start=None,
+        time_end=None,
+        competition=competition,
+        event_scope=event_scope,
+        jurisdiction=None,
+        stage=market.stage_key.replace("_", " "),
+        singular_winner=market.progression_level == 5,
+        resolution_signature=resolution_signature,
+        numeric_predicate_signature=None,
+        temporal_predicate_signature=None,
+        stage_family_signature=stage_family,
+        winner_family_signature=winner_family,
+        proof_scope_key=proof_scope_key,
+        rule_applicability_fingerprint=applicability,
+        spans=spans,
+    )
+
+
+def _structured_span(field: CitationField, value: str) -> SourceSpan:
+    return SourceSpan(field, 0, len(value), value)
 
 
 def _operator_for(phrase: str) -> Operator:

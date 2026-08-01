@@ -197,7 +197,11 @@ def deterministic_extract(
     result: dict[str, object] = {}
     outcome_value = outcome.outcome if isinstance(outcome, SourceOutcome) else outcome
     outcome_name = outcome_value.casefold().strip()
-    if outcome_name in {"yes", "no"}:
+    if isinstance(outcome, SourceOutcome) and outcome.is_progression is not None:
+        result["polarity"] = (
+            "positive" if outcome.is_progression else "negative"
+        )
+    elif outcome_name in {"yes", "no"}:
         result["polarity"] = "negative" if outcome_name == "no" else "positive"
     normalized_question = market.question.casefold()
     operator: str | None = None
@@ -232,6 +236,13 @@ def market_request(market: SourceMarket) -> ParseRequest:
         ("tags", market.tags),
         ("time_start", market.time_start),
         ("time_end", market.time_end),
+        ("canonical_team_name", market.team_name),
+        ("stage_key", market.stage_key),
+        ("stage_rank", market.stage_rank),
+        ("market_direction", market.market_direction),
+        ("progression_outcome_label", market.progression_outcome),
+        ("market_status", market.market_status),
+        ("is_still_alive", market.is_still_alive),
     ):
         if value not in (None, "", ()):
             available_citation_fields.append(field)
@@ -255,7 +266,7 @@ def market_request(market: SourceMarket) -> ParseRequest:
                 clob_token_id=outcome.clob_token_id,
                 authoritative_extraction=deterministic_extract(
                     market,
-                    outcome.outcome,
+                    outcome,
                 ),
             )
             for outcome in market.outcomes

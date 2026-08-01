@@ -29,7 +29,6 @@ from ._discovery.contracts import (
     SourceMarket,
     SourceOutcome,
 )
-from ._discovery.modes import policy_for
 from ._discovery.workspace import CANDIDATE_COLUMNS
 
 if TYPE_CHECKING:
@@ -46,8 +45,7 @@ def discover(
     """Dispatch discovery at the single public mode boundary."""
 
     active = config or DiscoveryConfig()
-    policy = policy_for(active.mode)
-    if not policy.semantic_enrichment:
+    if active.mode == "fast":
         if test_dependencies:
             raise ValueError("Fast mode does not accept model test dependencies")
         from ._discovery.fast import discover_fast

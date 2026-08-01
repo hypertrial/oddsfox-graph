@@ -9,7 +9,10 @@ from typing import Any, cast
 
 from .._discovery.bulk import create_and_fill
 from .._discovery.provenance import canonical_json_sha256
-from .._discovery.versions import VISUALIZATION_LAYOUT_VERSION
+from .._discovery.versions import (
+    COVERAGE_SUMMARY_VERSION,
+    VISUALIZATION_LAYOUT_VERSION,
+)
 from ..qualification import assign_domain_fields
 from ..queries import DuckDB
 
@@ -31,6 +34,7 @@ EVENT_SUMMARY_COLUMNS = {
     "unclassified_pair_count": "BIGINT",
     "classification_eligible_count": "BIGINT",
     "classification_assessed_count": "BIGINT",
+    "classification_status": "VARCHAR",
     "classification_coverage": "DOUBLE",
     "deterministic_edge_count": "BIGINT",
     "consensus_edge_count": "BIGINT",
@@ -71,6 +75,7 @@ COMPONENT_SUMMARY_COLUMNS = {
     "consensus_edge_count": "BIGINT",
     "quarantined_pair_count": "BIGINT",
     "unclassified_pair_count": "BIGINT",
+    "classification_status": "VARCHAR",
     "classification_coverage": "DOUBLE",
     "representative_node_ids": "VARCHAR[]",
     "layout_min_x": "DOUBLE",
@@ -99,6 +104,7 @@ NODE_METRIC_COLUMNS = {
     "classification_eligible_count": "BIGINT",
     "classification_assessed_count": "BIGINT",
     "unclassified_pair_count": "BIGINT",
+    "classification_status": "VARCHAR",
     "classification_coverage": "DOUBLE",
 }
 
@@ -302,9 +308,17 @@ def coverage_summary(
     )[0]
     eligible = _integer(row["classification_eligible"])
     assessed = _integer(row["classification_assessed"])
-    coverage = 1.0 if eligible == 0 else assessed / eligible
+    coverage = None if eligible == 0 else assessed / eligible
+    if eligible == 0:
+        status = "not_applicable"
+    elif assessed == 0:
+        status = "not_started"
+    elif assessed < eligible:
+        status = "partial"
+    else:
+        status = "complete"
     return {
-        "schema_version": "coverage-summary-v1",
+        "schema_version": COVERAGE_SUMMARY_VERSION,
         "all_market_selection": not bool(input_selection.get("truncated")),
         "input_selection": dict(input_selection),
         "markets": _integer(row["markets"]),
@@ -317,8 +331,9 @@ def coverage_summary(
         "classification_eligible": eligible,
         "classification_assessed": assessed,
         "classification_unclassified": _integer(row["unclassified"]),
+        "classification_status": status,
         "classification_coverage": coverage,
-        "classification_gap": 1.0 - coverage,
+        "classification_gap": None if coverage is None else 1.0 - coverage,
         "accepted_edges": _integer(row["accepted_edges"]),
         "rejected_edges": _integer(row["rejected_edges"]),
         "quarantined_pairs": _integer(row["quarantined_pairs"]),
@@ -501,7 +516,13 @@ def _create_event_summary(db: DuckDB) -> None:
             coalesce(c.unclassified, 0)::BIGINT AS unclassified_pair_count,
             coalesce(c.eligible, 0)::BIGINT AS classification_eligible_count,
             coalesce(c.assessed, 0)::BIGINT AS classification_assessed_count,
-            CASE WHEN coalesce(c.eligible, 0) = 0 THEN 1.0
+            CASE
+                 WHEN coalesce(c.eligible, 0) = 0 THEN 'not_applicable'
+                 WHEN coalesce(c.assessed, 0) = 0 THEN 'not_started'
+                 WHEN c.assessed < c.eligible THEN 'partial'
+                 ELSE 'complete'
+            END AS classification_status,
+            CASE WHEN coalesce(c.eligible, 0) = 0 THEN NULL::DOUBLE
                  ELSE c.assessed::DOUBLE / c.eligible END
                 AS classification_coverage,
             coalesce(e.deterministic_edge_count, 0)::BIGINT
@@ -627,7 +648,13 @@ def _create_node_metrics(db: DuckDB) -> None:
             coalesce(c.eligible, 0)::BIGINT AS classification_eligible_count,
             coalesce(c.assessed, 0)::BIGINT AS classification_assessed_count,
             coalesce(c.unclassified, 0)::BIGINT AS unclassified_pair_count,
-            CASE WHEN coalesce(c.eligible, 0) = 0 THEN 1.0
+            CASE
+                 WHEN coalesce(c.eligible, 0) = 0 THEN 'not_applicable'
+                 WHEN coalesce(c.assessed, 0) = 0 THEN 'not_started'
+                 WHEN c.assessed < c.eligible THEN 'partial'
+                 ELSE 'complete'
+            END AS classification_status,
+            CASE WHEN coalesce(c.eligible, 0) = 0 THEN NULL::DOUBLE
                  ELSE c.assessed::DOUBLE / c.eligible END
                 AS classification_coverage
         FROM explorer_propositions_v p
@@ -820,7 +847,13 @@ def _create_component_summary(db: DuckDB) -> None:
                 AS consensus_edge_count,
             coalesce(q.count, 0)::BIGINT AS quarantined_pair_count,
             coalesce(c.unclassified, 0)::BIGINT AS unclassified_pair_count,
-            CASE WHEN coalesce(c.eligible, 0) = 0 THEN 1.0
+            CASE
+                 WHEN coalesce(c.eligible, 0) = 0 THEN 'not_applicable'
+                 WHEN coalesce(c.assessed, 0) = 0 THEN 'not_started'
+                 WHEN c.assessed < c.eligible THEN 'partial'
+                 ELSE 'complete'
+            END AS classification_status,
+            CASE WHEN coalesce(c.eligible, 0) = 0 THEN NULL::DOUBLE
                  ELSE c.assessed::DOUBLE / c.eligible END
                 AS classification_coverage,
             n.representative_node_ids,

@@ -13,7 +13,8 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict
 
 from .._discovery.provenance import canonical_json_sha256, sha256_file
-from .contracts import EvidenceTier, GraphFilter
+from .._discovery.versions import WC2026_SOURCE_SCHEMA
+from .contracts import EdgeMode, EvidenceTier, GraphFilter
 from ..graph import Graph, Relation
 
 
@@ -49,10 +50,30 @@ def create_app(
     if not 0 <= max_response_edges <= 10_000:
         raise ValueError("max_response_edges must be between 0 and 10000")
     metadata = graph.metadata()
+    build_input = metadata.build.get("input")
+    input_profile = (
+        build_input.get("schema")
+        if isinstance(build_input, dict)
+        else metadata.build.get("input_schema")
+    )
+    if input_profile != WC2026_SOURCE_SCHEMA:
+        raise ValueError(
+            "The FIFA World Cup 2026 Outcome Map requires a graph built with "
+            "--input-profile polymarket-wc2026-graph-hourly-v1"
+        )
     static_directory = Path(__file__).resolve().parents[1] / "static" / "explorer"
     client_fingerprint = (
-        sha256_file(static_directory / "index.html")
-        if (static_directory / "index.html").is_file()
+        canonical_json_sha256(
+            [
+                {
+                    "path": path.relative_to(static_directory).as_posix(),
+                    "sha256": sha256_file(path),
+                }
+                for path in sorted(static_directory.rglob("*"))
+                if path.is_file()
+            ]
+        )
+        if static_directory.is_dir()
         else "missing"
     )
     fingerprint = canonical_json_sha256(
@@ -64,7 +85,7 @@ def create_app(
     )
     etag = f'"{fingerprint}"'
     app = FastAPI(
-        title="OddsFox Logic Explorer",
+        title="FIFA World Cup 2026 Outcome Map",
         version=metadata.package_version,
         docs_url=None,
         openapi_url="/api/openapi.json",
@@ -115,6 +136,74 @@ def create_app(
     @app.get("/api/v1/coverage")
     def get_coverage() -> dict[str, object]:
         return graph.coverage()
+
+    @app.get("/api/v1/explore")
+    def explore(
+        team_limit: int = Query(default=24, ge=1, le=100),
+        highlight_limit: int = Query(default=6, ge=1, le=12),
+    ) -> dict[str, object]:
+        return graph.explore_home(
+            team_limit=team_limit,
+            highlight_limit=highlight_limit,
+        ).model_dump(mode="json")
+
+    @app.get("/api/v1/stages")
+    def stages() -> list[dict[str, object]]:
+        return [row.model_dump(mode="json") for row in graph.stages()]
+
+    @app.get("/api/v1/stages/{stage_key}")
+    def stage(stage_key: str) -> dict[str, object]:
+        return graph.stage(stage_key).model_dump(mode="json")
+
+    @app.get("/api/v1/teams")
+    def teams(
+        cursor: str | None = None,
+        limit: int = Query(default=100, ge=1, le=1_000),
+    ) -> dict[str, object]:
+        return graph.teams(cursor=cursor, limit=limit).model_dump(mode="json")
+
+    @app.get("/api/v1/teams/{team_key}")
+    def team(team_key: str) -> dict[str, object]:
+        return graph.team(team_key).model_dump(mode="json")
+
+    @app.get("/api/v1/markets/{market_id}")
+    def market(market_id: str) -> dict[str, object]:
+        return graph.market(market_id).model_dump(mode="json")
+
+    @app.get("/api/v1/relationships/{proposal_id}")
+    def relationship(proposal_id: str) -> dict[str, object]:
+        return graph.relationship(proposal_id).model_dump(mode="json")
+
+    @app.get("/api/v1/entity-search")
+    def entity_search(
+        q: str,
+        limit: int = Query(default=20, ge=1, le=100),
+    ) -> list[dict[str, object]]:
+        return [
+            row.model_dump(mode="json")
+            for row in graph.entity_search(q, limit=limit)
+        ]
+
+    @app.get("/api/v1/compare")
+    def compare(
+        a: str,
+        b: str,
+        max_hops: int = Query(default=4, ge=1, le=4),
+    ) -> dict[str, object]:
+        return graph.compare(a, b, max_hops=max_hops).model_dump(mode="json")
+
+    @app.get("/api/v1/highlights")
+    def highlights(
+        limit: int = Query(default=6, ge=1, le=12),
+        min_confidence: float = Query(default=0.95, ge=0.0, le=1.0),
+    ) -> list[dict[str, object]]:
+        return [
+            row.model_dump(mode="json")
+            for row in graph.human_highlights(
+                limit=limit,
+                min_confidence=min_confidence,
+            )
+        ]
 
     @app.get("/api/v1/recording-plan")
     def recording_plan(
@@ -188,6 +277,7 @@ def create_app(
         min_confidence: float = Query(default=0.0, ge=0.0, le=1.0),
         include_compatible: bool = False,
         evidence_tiers: list[EvidenceTier] = Query(default=[]),
+        edge_mode: EdgeMode = "all",
     ) -> dict[str, object]:
         return graph.event_graph(
             event_key,
@@ -199,6 +289,7 @@ def create_app(
             ),
             max_nodes=max_response_nodes,
             max_edges=max_response_edges,
+            edge_mode=edge_mode,
         ).model_dump(mode="json")
 
     @app.get("/api/v1/component-graph/{component_id}")
@@ -242,6 +333,7 @@ def create_app(
         evidence_tiers: list[EvidenceTier] = Query(default=[]),
         max_nodes: int = Query(default=max_response_nodes, ge=1, le=max_response_nodes),
         max_edges: int = Query(default=max_response_edges, ge=0, le=max_response_edges),
+        edge_mode: EdgeMode = "all",
     ) -> dict[str, object]:
         return graph.subgraph(
             tuple(node),
@@ -254,6 +346,7 @@ def create_app(
             ),
             max_nodes=max_nodes,
             max_edges=max_edges,
+            edge_mode=edge_mode,
         ).model_dump(mode="json")
 
     @app.get("/api/v1/nodes/{node_id}")

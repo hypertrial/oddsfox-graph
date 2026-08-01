@@ -160,6 +160,54 @@ def generate_rule_qualification_cases(
                 event_scope="multi winner",
                 description="The event permits multiple winners.",
             )
+        elif rule_id == "wc2026.same_progression.v1":
+            expected = "equivalent"
+            _wc2026_case(a, team=f"team-{index}", level=2, polarity="positive")
+            _wc2026_case(b, team=f"team-{index}", level=2, polarity="positive")
+            _wc2026_case(
+                negative_a,
+                team=f"team-{index}-a",
+                level=2,
+                polarity="positive",
+            )
+            _wc2026_case(
+                negative_b,
+                team=f"team-{index}-b",
+                level=2,
+                polarity="positive",
+            )
+        elif rule_id == "wc2026.progression.v1":
+            expected = "implies"
+            _wc2026_case(a, team=f"team-{index}", level=4, polarity="positive")
+            _wc2026_case(b, team=f"team-{index}", level=2, polarity="positive")
+            _wc2026_case(
+                negative_a,
+                team=f"team-{index}-a",
+                level=4,
+                polarity="positive",
+            )
+            _wc2026_case(
+                negative_b,
+                team=f"team-{index}-b",
+                level=2,
+                polarity="positive",
+            )
+        elif rule_id == "wc2026.winner_exclusion.v1":
+            expected = "mutually_exclusive"
+            _wc2026_case(a, team=f"team-{index}-a", level=5, polarity="positive")
+            _wc2026_case(b, team=f"team-{index}-b", level=5, polarity="positive")
+            _wc2026_case(
+                negative_a,
+                team=f"team-{index}-a",
+                level=5,
+                polarity="positive",
+            )
+            _wc2026_case(
+                negative_b,
+                team=f"team-{index}-b",
+                level=5,
+                polarity="negative",
+            )
         else:
             raise ValueError(
                 f"No independent qualification generator for {rule_id}"
@@ -209,6 +257,23 @@ def _rule_case_passes(
         and observed.get("edge_type") == case.expected_relation
         and observed.get("src_node_id") == case.expected_src
         and observed.get("dst_node_id") == case.expected_dst
+    )
+
+
+def _wc2026_case(
+    proposition: dict[str, Any],
+    *,
+    team: str,
+    level: int,
+    polarity: str,
+) -> None:
+    proposition.update(
+        source_schema="polymarket-wc2026-graph-hourly-v1",
+        team_name=team,
+        subject=[team],
+        progression_level=level,
+        polarity=polarity,
+        is_progression=polarity == "positive",
     )
 
 

@@ -12,7 +12,22 @@ from oddsfox_graph._discovery.contracts import (
     DEFAULT_VERIFIER_MODEL,
 )
 from oddsfox_graph._discovery.provenance import canonical_json_sha256, sha256_file
-from oddsfox_graph._discovery.versions import RELEASE_FIXTURE_SCHEMA_VERSION
+from oddsfox_graph._discovery import versions as discovery_versions
+from oddsfox_graph._discovery.versions import (
+    EXTRACTOR_VERSION,
+    PUBLICATION_VERSION,
+    RELEASE_FIXTURE_SCHEMA_VERSION,
+    RULE_VERSION,
+    VIEWER_API_VERSION,
+    VIEWER_ARTIFACT_VERSION,
+    WC2026_SOURCE_SCHEMA,
+    discovery_semantics_fingerprint,
+)
+from oddsfox_graph._explorer.human import (
+    _classification_coverage,
+    essential_relationship_rows,
+)
+from oddsfox_graph._explorer.aggregation import EVENT_SUMMARY_COLUMNS
 from oddsfox_graph.graph import Graph
 from oddsfox_graph.explorer import (
     create_explorer_app,
@@ -150,21 +165,22 @@ def test_recording_plan_is_deterministic_auditable_and_bounded(
     first = graph.recording_plan(limit=6, min_confidence=0.95)
     second = graph.recording_plan(limit=6, min_confidence=0.95)
     assert first == second
-    assert first.schema_version == "oddsfox-recording-plan-v1"
-    assert first.ranking_version == "balanced-logic-edge-v1"
+    assert first.schema_version == "oddsfox-recording-plan-v2"
+    assert first.ranking_version == "human-wc2026-story-edge-v2"
     assert first.graph_fingerprint == "fixture"
     assert first.mode == "full"
     assert first.requested_limit == 6
     assert first.eligible_edge_count == 2
-    assert [item.proposal_id for item in first.highlights] == ["p3", "p4"]
+    assert [item.proposal_id for item in first.highlights] == ["p4"]
     assert first.highlights[0].score_breakdown.base_importance == pytest.approx(
-        0.8975
+        0.9475
     )
-    assert first.highlights[1].score_breakdown.same_event_pair_penalty == 0.15
-    assert first.highlights[1].score_breakdown.shared_endpoint_penalty == 0.2
-    assert {edge.id for edge in first.graph.edges} >= {"p3", "p4"}
-    assert first.context_pruning.retained_nodes <= 750
-    assert first.context_pruning.retained_edges <= 1_500
+    assert first.highlights[0].source_plain_claim == (
+        "Argentina wins the World Cup"
+    )
+    assert {edge.id for edge in first.graph.edges} >= {"p4"}
+    assert first.context_pruning.retained_nodes <= 96
+    assert first.context_pruning.retained_edges <= 144
     assert first.context_pruning.pruned_edges == 0
 
     with pytest.raises(ValueError, match="between 1 and 12"):
@@ -186,12 +202,203 @@ def test_recording_plan_api_validates_limits_and_serializes(tmp_path: Path) -> N
         "/api/v1/recording-plan?limit=2&min_confidence=0.95"
     )
     assert response.status_code == 200
-    assert response.json()["highlights"][0]["proposal_id"] == "p3"
+    assert response.json()["highlights"][0]["proposal_id"] == "p4"
     assert client.get("/api/v1/recording-plan?limit=0").status_code == 422
     assert (
         client.get("/api/v1/recording-plan?min_confidence=1.1").status_code
         == 422
     )
+
+
+def test_wc2026_human_explorer_routes_use_structured_claims(tmp_path: Path) -> None:
+    out = _write_graph(tmp_path)
+    graph = Graph.open(out)
+    home = graph.explore_home(team_limit=4, highlight_limit=2)
+    assert home.scope.scope == "wc2026"
+    assert [team.canonical_team_name for team in home.teams] == [
+        "Argentina",
+        "Brazil",
+        "France",
+        "Germany",
+    ]
+    assert home.notable_relationships[0].relationship.source.plain_claim == (
+        "Argentina wins the World Cup"
+    )
+    assert home.display_stats.input_edge_count == 5
+    assert home.display_stats.display_edge_count == 4
+    assert home.display_stats.omitted_edge_count == 1
+    assert graph.team("argentina").summary.max_stage_rank == 5
+    argentina = graph.team("argentina").summary
+    assert argentina.classification_eligible_count == 1
+    assert argentina.classification_assessed_count == 1
+    assert argentina.classification_status == "complete"
+    assert argentina.classification_coverage == 1.0
+    winner = graph.stage("winner").summary
+    assert winner.label == "World Cup winner"
+    assert winner.classification_status == "complete"
+    assert graph.stage("final").summary.classification_status == "not_applicable"
+    assert graph.market("m1").claims[0].plain_claim == (
+        "Argentina wins the World Cup"
+    )
+    comparison = graph.compare("a", "d")
+    assert comparison.status == "direct"
+    assert comparison.direct is not None
+    assert comparison.direct.proposal_id == "p4"
+    search_result = graph.entity_search("Argentina")[0]
+    assert search_result.kind == "team"
+    assert search_result.description == "1 progression market"
+
+    client = TestClient(create_explorer_app(out))
+    assert client.get("/api/v1/explore").status_code == 200
+    assert client.get("/api/v1/teams/argentina").status_code == 200
+    assert client.get("/api/v1/stages/winner").status_code == 200
+    assert client.get("/api/v1/markets/m1").status_code == 200
+    assert client.get("/api/v1/relationships/p4").status_code == 200
+    assert client.get("/api/v1/entity-search?q=Argentina").status_code == 200
+    assert client.get("/api/v1/compare?a=a&b=d").json()["status"] == "direct"
+
+    indirect = graph.compare("b", "d")
+    assert indirect.status == "path"
+    assert [item.proposal_id for item in indirect.path] == ["p2", "p3"]
+    assert graph.relationship("p5").proposal_id == "p5"
+
+
+def test_human_essential_projection_is_deterministic_and_preservable() -> None:
+    def edge(
+        proposal_id: str,
+        source: str,
+        target: str,
+        relation: str,
+        confidence: float,
+    ) -> dict[str, object]:
+        return {
+            "proposal_id": proposal_id,
+            "src_node_id": source,
+            "dst_node_id": target,
+            "edge_type": relation,
+            "confidence": confidence,
+        }
+
+    rows = [
+        edge("path-a", "a", "b", "implies", 0.95),
+        edge("path-b", "b", "c", "implies", 0.95),
+        edge("redundant", "a", "c", "implies", 0.95),
+        edge("strong-direct", "a", "d", "implies", 0.96),
+        edge("weak-path-a", "a", "e", "implies", 0.95),
+        edge("weak-path-b", "e", "d", "implies", 0.95),
+        edge("source-complement", "x", "y", "complement", 1.0),
+        edge("duplicate-later", "y", "x", "complement", 1.0),
+    ]
+    projected = essential_relationship_rows(rows)
+    assert [row["proposal_id"] for row in projected] == [
+        "duplicate-later",
+        "strong-direct",
+        "path-a",
+        "weak-path-a",
+        "path-b",
+        "weak-path-b",
+    ]
+    assert projected == essential_relationship_rows(reversed(rows))
+    preserved = essential_relationship_rows(
+        rows,
+        preserve_proposal_ids=frozenset({"redundant"}),
+    )
+    assert "redundant" in {row["proposal_id"] for row in preserved}
+
+
+@pytest.mark.parametrize(
+    ("eligible", "assessed", "status", "coverage"),
+    (
+        (0, 0, "not_applicable", None),
+        (3, 0, "not_started", 0.0),
+        (4, 1, "partial", 0.25),
+        (4, 4, "complete", 1.0),
+    ),
+)
+def test_human_coverage_uses_four_explicit_states(
+    eligible: int,
+    assessed: int,
+    status: str,
+    coverage: float | None,
+) -> None:
+    assert _classification_coverage(eligible, assessed) == (
+        eligible,
+        assessed,
+        status,
+        coverage,
+    )
+
+
+def test_essential_edge_mode_removes_only_proven_redundancy(tmp_path: Path) -> None:
+    graph = Graph.open(_write_graph(tmp_path))
+    complete = graph.neighborhood(
+        ("a", "b", "c", "d"),
+        hops=1,
+        max_nodes=4,
+        max_edges=10,
+    )
+    essential = graph.neighborhood(
+        ("a", "b", "c", "d"),
+        hops=1,
+        max_nodes=4,
+        max_edges=10,
+        edge_mode="essential",
+    )
+    assert {edge.id for edge in complete.edges} == {"p1", "p2", "p3", "p4", "p5"}
+    assert {edge.id for edge in essential.edges} == {"p1", "p2", "p3", "p4"}
+    assert essential.display_stats is not None
+    assert essential.display_stats.omitted_edge_count == 1
+
+
+def test_graph_open_rejects_stale_semantics_fingerprint(tmp_path: Path) -> None:
+    out = _write_graph(tmp_path)
+    manifest_path = out / "build_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["discovery_semantics_fingerprint"] = "stale"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(ValueError, match="semantics fingerprint"):
+        Graph.open(out)
+
+
+def test_discovery_semantics_fingerprint_binds_aggregation_and_registry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    baseline = discovery_semantics_fingerprint()
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            discovery_versions,
+            "AGGREGATION_CONTRACT_VERSION",
+            "explorer-aggregation-audit-change",
+        )
+        assert discovery_semantics_fingerprint() != baseline
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            discovery_versions,
+            "WC2026_QUALIFICATION_GENERATOR_VERSION",
+            "wc2026-catalog-qualification-audit-change",
+        )
+        assert discovery_semantics_fingerprint() != baseline
+    with monkeypatch.context() as patch:
+        patch.setitem(EVENT_SUMMARY_COLUMNS, "audit_contract_field", "VARCHAR")
+        assert discovery_semantics_fingerprint() != baseline
+
+
+def test_recording_rejects_non_wc2026_graph_before_runtime_preflight(
+    tmp_path: Path,
+) -> None:
+    out = _write_graph(tmp_path)
+    build_path = out / "build_manifest.json"
+    viewer_path = out / "viewer_manifest.json"
+    build = json.loads(build_path.read_text(encoding="utf-8"))
+    viewer = json.loads(viewer_path.read_text(encoding="utf-8"))
+    build["input_schema"] = "canonical-propositions-v1"
+    viewer["input_profile"] = "canonical-propositions-v1"
+    build_path.write_text(json.dumps(build), encoding="utf-8")
+    viewer_path.write_text(json.dumps(viewer), encoding="utf-8")
+
+    graph = Graph.open(out)
+    with pytest.raises(ValueError, match="polymarket-wc2026-graph-hourly-v1"):
+        graph.recording_plan()
 
 
 def test_component_semantic_zoom_uses_a_component_scoped_event_view(
@@ -235,7 +442,7 @@ def test_recording_plan_collapses_reversed_symmetric_duplicates(
         db.close()
     plan = Graph.open(out).recording_plan(limit=6, min_confidence=0.95)
     assert plan.eligible_edge_count == 2
-    assert [item.proposal_id for item in plan.highlights] == ["p3", "p4"]
+    assert [item.proposal_id for item in plan.highlights] == ["p4"]
 
 
 def test_neighborhood_enforces_seed_ceiling_without_false_truncation(
@@ -276,10 +483,41 @@ def test_static_explorer_export_contains_bounded_parquet_snapshot(tmp_path: Path
         max_edges=5,
     )
     assert manifest["data_format"] == "duckdb-wasm-parquet"
-    assert manifest["schema_version"] == "static-explorer-v2"
+    assert manifest["schema_version"] == "static-explorer-v3"
+    assert manifest["graph_content_fingerprint"] == "fixture"
+    assert manifest["build_mode"] == "full"
+    assert manifest["validation_status"] == "EXPERIMENTAL_FULL"
+    assert manifest["input_profile"] == WC2026_SOURCE_SCHEMA
+    assert manifest["source_file_sha256"] == "fixture-source"
+    assert (
+        manifest["normalized_semantic_fingerprint"]
+        == "fixture-input-semantics"
+    )
+    assert (
+        manifest["discovery_semantics_fingerprint"]
+        == discovery_semantics_fingerprint()
+    )
+    assert manifest["source_tree_fingerprint"] == "fixture-source-tree"
+    assert manifest["display_stats"] == {
+        "input_node_count": 4,
+        "input_edge_count": 5,
+        "display_node_count": 4,
+        "display_edge_count": 4,
+        "omitted_edge_count": 1,
+        "density": 1 / 3,
+        "label_uniqueness": 1.0,
+        "max_degree": 2,
+        "recommended_representation": "grouped",
+    }
     assert set(manifest["snapshot_files"]) == {
         "snapshot_nodes.parquet",
         "snapshot_edges.parquet",
+        "snapshot_stages.parquet",
+        "snapshot_teams.parquet",
+        "snapshot_markets.parquet",
+        "snapshot_claims.parquet",
+        "snapshot_relationships.parquet",
+        "snapshot_relationship_groups.parquet",
     }
     for relative in (
         "index.html",
@@ -296,6 +534,35 @@ def test_static_explorer_export_contains_bounded_parquet_snapshot(tmp_path: Path
         assert db.rows(
             f"SELECT DISTINCT evidence_tier FROM read_parquet('{q(destination / 'snapshot_edges.parquet')}') ORDER BY evidence_tier"
         )
+        assert {
+            row["id"]
+            for row in db.rows(
+                f"SELECT id FROM read_parquet('{q(destination / 'snapshot_edges.parquet')}')"
+            )
+        } == {"p1", "p2", "p3", "p4", "p5"}
+        assert {
+            row["proposal_id"]
+            for row in db.rows(
+                f"SELECT proposal_id FROM read_parquet('{q(destination / 'snapshot_relationships.parquet')}')"
+            )
+        } == {"p1", "p2", "p3", "p4"}
+        stage_coverage = {
+            row["stage_key"]: row
+            for row in db.rows(
+                f"SELECT stage_key, classification_eligible_count, "
+                "classification_assessed_count, classification_status, "
+                f"classification_coverage FROM read_parquet('{q(destination / 'snapshot_stages.parquet')}')"
+            )
+        }
+        assert stage_coverage["winner"] == {
+            "stage_key": "winner",
+            "classification_eligible_count": 1,
+            "classification_assessed_count": 1,
+            "classification_status": "complete",
+            "classification_coverage": 1.0,
+        }
+        assert stage_coverage["final"]["classification_status"] == "not_applicable"
+        assert stage_coverage["final"]["classification_coverage"] is None
     finally:
         db.close()
 
@@ -401,8 +668,8 @@ def test_release_fixture_validates_fast_hashes_counts_and_performance(
                     "processor_contains": "Apple M4",
                     "repetitions": 3,
                     "selection": "complete-valid-catalog",
-                    "extractor_version": "strict-catalog-extractor-v1",
-                    "rule_version": "discovery-rules-v6",
+                    "extractor_version": EXTRACTOR_VERSION,
+                    "rule_version": RULE_VERSION,
                 },
                 "acceptance": {
                     "every_run_ready_within_budget": True,
@@ -613,7 +880,13 @@ def _write_graph(
             f"'{quarantine_reason}' AS reason_code, "
             "'diagnostic fixture' AS explanation"
         )
-        db.execute("CREATE TABLE candidates AS SELECT 'a' AS proposition_a_id, 'c' AS proposition_b_id, ['semantic']::VARCHAR[] AS candidate_reasons")
+        db.execute(
+            "CREATE TABLE candidates AS SELECT "
+            "'a' AS proposition_a_id, 'c' AS proposition_b_id, "
+            "['semantic']::VARCHAR[] AS candidate_reasons, "
+            "NULL::VARCHAR AS deterministic_relation, "
+            "'accepted'::VARCHAR AS status"
+        )
         db.execute("CREATE VIEW nodes_table AS SELECT * FROM nodes")
         db.execute("CREATE VIEW logic_edges_v AS SELECT * FROM edges")
         db.execute("CREATE VIEW rejected_edges_v AS SELECT * FROM rejected")
@@ -629,7 +902,24 @@ def _write_graph(
                    'parsed'::VARCHAR AS parse_status,
                    'e'::VARCHAR AS event_key, 'sports'::VARCHAR AS primary_domain,
                    'component-one'::VARCHAR AS component_id,
-                   'component-fingerprint'::VARCHAR AS component_fingerprint
+                   'component-fingerprint'::VARCHAR AS component_fingerprint,
+                   CASE node_id WHEN 'a' THEN 'Argentina'
+                        WHEN 'b' THEN 'Brazil' WHEN 'c' THEN 'France'
+                        ELSE 'Germany' END::VARCHAR AS team_name,
+                   CASE node_id WHEN 'a' THEN 'winner'
+                        WHEN 'b' THEN 'final' WHEN 'c' THEN 'semifinal'
+                        ELSE 'quarterfinal' END::VARCHAR AS stage_key,
+                   CASE node_id WHEN 'a' THEN 5 WHEN 'b' THEN 4
+                        WHEN 'c' THEN 3 ELSE 2 END::BIGINT AS stage_rank,
+                   CASE node_id WHEN 'a' THEN 5 WHEN 'b' THEN 4
+                        WHEN 'c' THEN 3 ELSE 2 END::BIGINT AS progression_level,
+                   'advance'::VARCHAR AS market_direction,
+                   'Yes'::VARCHAR AS progression_outcome,
+                   true::BOOLEAN AS is_progression,
+                   'active'::VARCHAR AS market_status,
+                   true::BOOLEAN AS is_still_alive,
+                   NULL::VARCHAR AS opposite_clob_token_id,
+                   NULL::DOUBLE AS market_volume_usd
             FROM nodes
             """
         )
@@ -645,6 +935,7 @@ def _write_graph(
                 1::BIGINT AS quarantined_pair_count, 0::BIGINT AS unclassified_pair_count,
                 1::BIGINT AS classification_eligible_count,
                 1::BIGINT AS classification_assessed_count,
+                'complete'::VARCHAR AS classification_status,
                 1.0::DOUBLE AS classification_coverage,
                 1::BIGINT AS deterministic_edge_count, 4::BIGINT AS consensus_edge_count,
                 0::BIGINT AS complement_count, 1::BIGINT AS equivalent_count,
@@ -674,6 +965,7 @@ def _write_graph(
                 1::BIGINT AS event_count, 5::BIGINT AS edge_count,
                 1::BIGINT AS deterministic_edge_count, 4::BIGINT AS consensus_edge_count,
                 1::BIGINT AS quarantined_pair_count, 0::BIGINT AS unclassified_pair_count,
+                'complete'::VARCHAR AS classification_status,
                 1.0::DOUBLE AS classification_coverage,
                 ['a','b','c','d']::VARCHAR[] AS representative_node_ids,
                 -10.0::DOUBLE AS layout_min_x, -10.0::DOUBLE AS layout_min_y,
@@ -696,6 +988,7 @@ def _write_graph(
                    1::BIGINT AS classification_eligible_count,
                    1::BIGINT AS classification_assessed_count,
                    0::BIGINT AS unclassified_pair_count,
+                   'complete'::VARCHAR AS classification_status,
                    1.0::DOUBLE AS classification_coverage
             FROM nodes
             """
@@ -721,6 +1014,8 @@ def _write_graph(
     finally:
         db.close()
     coverage = {
+        "schema_version": "coverage-summary-v2",
+        "classification_status": "complete",
         "classification_coverage": 1.0,
         "classification_gap": 0.0,
         "all_market_selection": True,
@@ -730,9 +1025,26 @@ def _write_graph(
     (out / "coverage_summary.json").write_text(json.dumps(coverage), encoding="utf-8")
     (out / "viewer_manifest.json").write_text(
         json.dumps({
+            "schema_version": VIEWER_ARTIFACT_VERSION,
+            "api_version": VIEWER_API_VERSION,
             "graph_content_fingerprint": "fixture",
             "build_mode": "full",
             "validation_status": "EXPERIMENTAL_FULL",
+            "input_profile": WC2026_SOURCE_SCHEMA,
+            "input": {
+                "sha256": "fixture-source",
+                "normalized_semantic_fingerprint": "fixture-input-semantics",
+            },
+            "scope": {
+                "source": "oddsfox-pipeline",
+                "scope": "wc2026",
+                "universe": "knockout_progression",
+                "selection": "all_valid_pipeline_wc2026_markets",
+                "truncated": False,
+            },
+            "discovery_semantics_fingerprint": (
+                discovery_semantics_fingerprint()
+            ),
             "versions": {},
         }),
         encoding="utf-8",
@@ -752,6 +1064,27 @@ def _write_graph(
                 "version": __version__,
                 "build_mode": "full",
                 "validation_status": "EXPERIMENTAL_FULL",
+                "input_hash": "fixture-source",
+                "input_schema": WC2026_SOURCE_SCHEMA,
+                "input_semantic_fingerprint": "fixture-input-semantics",
+                "graph_content_fingerprint": "fixture",
+                "scope": {
+                    "source": "oddsfox-pipeline",
+                    "scope": "wc2026",
+                    "universe": "knockout_progression",
+                    "selection": "all_valid_pipeline_wc2026_markets",
+                    "truncated": False,
+                },
+                "discovery_semantics_fingerprint": (
+                    discovery_semantics_fingerprint()
+                ),
+                "source_tree_fingerprint": "fixture-source-tree",
+                "versions": {
+                    "rules": RULE_VERSION,
+                    "publication": PUBLICATION_VERSION,
+                    "viewer_api": VIEWER_API_VERSION,
+                    "viewer_artifacts": VIEWER_ARTIFACT_VERSION,
+                },
                 "stats": {
                     "build_mode": "full",
                     "validation_status": "EXPERIMENTAL_FULL",

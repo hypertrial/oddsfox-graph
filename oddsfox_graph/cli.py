@@ -26,6 +26,7 @@ def build_parser() -> argparse.ArgumentParser:
     discover = sub.add_parser("discover")
     discover.add_argument("--mode", required=True, choices=("fast", "full"))
     discover.add_argument("--input", required=True, type=Path)
+    _add_input_profile_argument(discover)
     discover.add_argument("--out", required=True, type=Path)
     _add_full_discovery_arguments(discover, required=False)
     discover.add_argument("--incremental-from", type=Path)
@@ -41,6 +42,7 @@ def build_parser() -> argparse.ArgumentParser:
     qualify = sub.add_parser("qualify")
     _add_full_discovery_arguments(qualify, required=True)
     qualify.add_argument("--input", required=True, type=Path)
+    _add_input_profile_argument(qualify)
     qualify.add_argument("--out", required=True, type=Path)
     qualify.add_argument("--seed", type=int, default=0)
     qualify.add_argument("--output-format", choices=("table", "json"), default="table")
@@ -49,6 +51,7 @@ def build_parser() -> argparse.ArgumentParser:
     doctor.add_argument("--mode", required=True, choices=("fast", "full"))
     _add_runtime_arguments(doctor, required=False)
     doctor.add_argument("--input", required=True, type=Path)
+    _add_input_profile_argument(doctor)
     doctor.add_argument("--out", required=True, type=Path)
     doctor.add_argument("--cache-dir", type=Path)
     doctor.add_argument("--automation-profile", type=Path)
@@ -94,7 +97,7 @@ def build_parser() -> argparse.ArgumentParser:
     explorer_export.add_argument(
         "--scope",
         required=True,
-        choices=("event", "component", "neighborhood"),
+        choices=("graph", "event", "component", "neighborhood"),
     )
 
     record = sub.add_parser("record")
@@ -110,7 +113,7 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("plain", "json", "quiet"),
         default="plain",
     )
-    explorer_export.add_argument("--identifier", required=True)
+    explorer_export.add_argument("--identifier")
     explorer_export.add_argument("--max-nodes", type=int, default=5_000)
     explorer_export.add_argument("--max-edges", type=int, default=10_000)
     explorer_export.add_argument(
@@ -171,6 +174,18 @@ def _add_runtime_arguments(
     parser.add_argument("--primary-base-url", default="http://127.0.0.1:8080/v1")
     parser.add_argument("--verifier-base-url", default="http://127.0.0.1:8081/v1")
     parser.add_argument("--allow-remote-inference", action="store_true")
+
+
+def _add_input_profile_argument(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--input-profile",
+        choices=(
+            "auto",
+            "polymarket-market-snapshot-v1",
+            "polymarket-wc2026-graph-hourly-v1",
+        ),
+        default="auto",
+    )
 
 
 def _add_full_discovery_arguments(
@@ -249,6 +264,7 @@ def _dispatch(args: argparse.Namespace) -> dict[str, Any] | list[dict[str, Any]]
             _reject_fast_only_conflicts(args)
             config = DiscoveryConfig(
                 mode="fast",
+                input_profile=args.input_profile,
                 incremental_from=args.incremental_from,
                 max_propositions=args.max_propositions,
                 deadline_seconds=(
@@ -267,6 +283,7 @@ def _dispatch(args: argparse.Namespace) -> dict[str, Any] | list[dict[str, Any]]
         verifier = load_model_manifest(args.verifier_model_manifest)
         config = DiscoveryConfig(
             mode="full",
+            input_profile=args.input_profile,
             cache_dir=args.cache_dir,
             incremental_from=getattr(args, "incremental_from", None),
             compute_profile=args.compute_profile,
@@ -329,6 +346,7 @@ def _dispatch(args: argparse.Namespace) -> dict[str, Any] | list[dict[str, Any]]
             args.verifier_base_url,
             args.compute_profile,
             allow_remote=args.allow_remote_inference,
+            input_profile=args.input_profile,
         ).model_dump(mode="json")
     if args.cmd == "model-manifest":
         from .model_tools import create_model_manifest

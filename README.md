@@ -1,7 +1,10 @@
 # OddsFox Graph
 
-OddsFox Graph 0.11 builds and visualizes logical connections across every valid
-proposition in a compact Polymarket catalog. Discovery has two explicit modes:
+OddsFox Graph 0.12 builds and visualizes the logical connections in the
+pipeline's FIFA World Cup 2026 team-progression market export. The human
+explorer is deliberately scoped to that trusted universe; generic football
+props such as exact score, corners, and player markets are not admitted.
+Discovery has two explicit modes:
 
 - `fast` is model-free, complete in node coverage, and publishes only exact
   source-contract or strict deterministic-rule edges. It is the release-gated
@@ -10,9 +13,10 @@ proposition in a compact Polymarket catalog. Discovery has two explicit modes:
   NLI vetoes, and Qwen/Granite consensus. It is functional but carries the
   `EXPERIMENTAL_FULL` validation status until separate live certification.
 
-Fast mode is deliberately conservative: complete proposition coverage does not
-mean exhaustive relationship recall. Full mode also evaluates a bounded
-candidate set, not all 17.97 billion possible proposition pairs.
+Fast mode is deliberately conservative: coverage means every valid market in
+the supplied pipeline export, not every WC2026 market on Polymarket. Markets
+without hourly rows are absent upstream. Full mode evaluates a bounded candidate
+set and never treats unassessed pairs as unrelated.
 
 ## Install
 
@@ -34,42 +38,68 @@ the SSD containing this checkout.
 
 ## Input
 
-The Parquet contract is `polymarket-market-snapshot-v1`:
+The explorer input is
+`polymarket-wc2026-graph-hourly-v1`, exported from the sibling
+`oddsfox-pipeline` repository's public
+`polymarket_wc2026_graph_token_hourly_odds` mart. It contains both Yes and No
+tokens plus authoritative team, stage, direction, and progression semantics.
+Do not recreate membership by filtering questions, tags, or slugs.
 
-- required: `market_id`, `question`, `outcomes`, `clob_token_ids`;
-- optional: `event_id`, `event_slug`, `description`, `start_time`, `end_time`,
-  `category`, and `tags`;
-- outcome/token arrays must be nonempty and equal length, and token IDs must be
-  globally unique.
+```bash
+cd ../oddsfox-scraper/components/oddsfox-pipeline
+uv run python scripts/run_scope.py polymarket:wc2026 --step full
+uv run python scripts/export_polymarket_wc2026_graph_hourly_odds.py \
+  --snapshot-copy --output "$ODDSFOX_DATA_DIR/exports/wc2026_graph_hourly.parquet"
+```
+
+The older `polymarket-market-snapshot-v1` contract remains available to the
+graph library, but generic outputs are not a supported human explorer surface
+in 0.12.
 
 ## Fast graph
 
 ```bash
-oddsfox-graph doctor --mode fast --input data/polymarket.parquet --out output/fast
-oddsfox-graph discover --mode fast --input data/polymarket.parquet \
+oddsfox-graph doctor --mode fast \
+  --input-profile polymarket-wc2026-graph-hourly-v1 \
+  --input "$ODDSFOX_DATA_DIR/exports/wc2026_graph_hourly.parquet" --out output/fast
+oddsfox-graph discover --mode fast \
+  --input-profile polymarket-wc2026-graph-hourly-v1 \
+  --input "$ODDSFOX_DATA_DIR/exports/wc2026_graph_hourly.parquet" \
   --out output/fast --deadline-seconds 120 --progress-format plain
 oddsfox-graph serve --out output/fast --open-browser
+oddsfox-graph explorer-export --out output/fast \
+  --destination output/wc2026-html --scope graph
 oddsfox-graph record --out output/fast --destination recordings/fast-story
 ```
 
-Omitting `--max-propositions` selects the complete valid catalog. A development
-run may set it explicitly. Fast mode neither starts nor imports inference,
-embedding, NLI, or cache code.
+WC2026 input always selects the complete structurally valid export and rejects
+`--max-propositions`, which could break a team's progression chain. Fast mode
+neither starts nor imports inference, embedding, NLI, or cache code.
 
 ## Full enrichment
 
 Create and qualify both local model manifests out of band, then run:
 
 ```bash
-oddsfox-graph discover --mode full --input data/polymarket.parquet \
+oddsfox-graph qualify \
+  --input-profile polymarket-wc2026-graph-hourly-v1 \
+  --input "$ODDSFOX_DATA_DIR/exports/wc2026_graph_hourly.parquet" \
+  --out qualification --cache-dir cache \
+  --primary-model-manifest primary.json --verifier-model-manifest verifier.json \
+  --compute-profile compute.json
+oddsfox-graph discover --mode full \
+  --input-profile polymarket-wc2026-graph-hourly-v1 \
+  --input "$ODDSFOX_DATA_DIR/exports/wc2026_graph_hourly.parquet" \
   --out output/full --cache-dir cache \
   --automation-profile qualification/automation_profile.json \
   --primary-model-manifest primary.json --verifier-model-manifest verifier.json \
   --compute-profile compute.json --deadline-seconds 3600
 ```
 
-The profile must exactly bind the v0.11 extractor, ANN, NLI, prompts, schemas,
-settings, manifests, and runtime pair. A deadline cutoff stops new model work,
+The WC2026 qualification profile parses every collapsed progression market and
+uses a deterministic, market-disjoint 60/40 split for 5,000 controlled pair
+cases. The profile must exactly bind the v0.12 extractor, ANN, NLI, prompts,
+schemas, settings, manifests, runtime pair, and WC input contract. A deadline cutoff stops new model work,
 finishes in-flight requests, and publishes the valid deterministic core plus any
 accepted enrichment; the command exits nonzero when the requested SLA is missed.
 

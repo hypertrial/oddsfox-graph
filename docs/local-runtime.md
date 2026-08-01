@@ -14,7 +14,7 @@ scripts/local_stack.sh serve-full
 checking either model service. `serve-fast` serves that completed output.
 
 `full` requires previously installed weights, warm llama.cpp endpoints on ports
-8080/8081, exact manifests, a compute profile, and a v0.11 automation profile.
+8080/8081, exact manifests, a compute profile, and a v0.12 automation profile.
 It runs mode-aware doctor checks and upgrades the graph with bounded semantic
 enrichment. Qualification remains a separate command and is outside the one-hour
 discovery clock.

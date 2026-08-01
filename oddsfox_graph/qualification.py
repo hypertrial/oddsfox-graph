@@ -20,7 +20,11 @@ from typing import TYPE_CHECKING, Any, Literal, TypedDict
 from pydantic import BaseModel, ConfigDict, Field
 
 from ._discovery.artifact_contracts import QUALIFICATION_CASE_COLUMNS
-from ._discovery.contracts import DiscoveryConfig, PropositionRecord, SourceMarket
+from ._discovery.contracts import (
+    DiscoveryConfig,
+    PropositionRecord,
+    SourceMarket,
+)
 from ._discovery.protocol import PairRequest, market_request, pair_identifier
 from ._discovery.provenance import canonical_json_sha256
 from ._discovery.relations import RULE_REGISTRY, deterministic_relation
@@ -37,6 +41,9 @@ from ._discovery.versions import (
     QUALIFICATION_GENERATOR_VERSION,
     RETRIEVAL_VERSION,
     SOURCE_SCHEMA,
+    WC2026_QUALIFICATION_CASE_SCHEMA_VERSION,
+    WC2026_QUALIFICATION_GENERATOR_VERSION,
+    WC2026_SOURCE_SCHEMA,
 )
 
 if TYPE_CHECKING:
@@ -79,6 +86,54 @@ PUBLISHABLE_RELATIONS = (
     "implies",
     "compatible",
 )
+
+_RELATION_CASE_COUNTS = {
+    "complement": (300, 200),
+    "equivalent": (300, 200),
+    "mutually_exclusive": (300, 200),
+    "implies": (300, 200),
+    "compatible": (300, 200),
+    "unrelated": (750, 500),
+    "uncertain": (750, 500),
+}
+
+
+@dataclass(frozen=True)
+class QualificationCaseContract:
+    """Versioned case-generation contract for one resolved input profile."""
+
+    input_profile: str
+    schema_version: str
+    generator_version: str
+    parse_scope: str
+    pair_count: int
+    partition_contract: str
+
+
+GENERIC_QUALIFICATION_CONTRACT = QualificationCaseContract(
+    input_profile=SOURCE_SCHEMA,
+    schema_version=QUALIFICATION_CASE_SCHEMA_VERSION,
+    generator_version=QUALIFICATION_GENERATOR_VERSION,
+    parse_scope="five-domains-200-markets-each",
+    pair_count=5_000,
+    partition_contract="market-disjoint-600-selection-400-validation",
+)
+WC2026_QUALIFICATION_CONTRACT = QualificationCaseContract(
+    input_profile=WC2026_SOURCE_SCHEMA,
+    schema_version=WC2026_QUALIFICATION_CASE_SCHEMA_VERSION,
+    generator_version=WC2026_QUALIFICATION_GENERATOR_VERSION,
+    parse_scope="every-collapsed-wc2026-market",
+    pair_count=5_000,
+    partition_contract="deterministic-market-hash-disjoint-60-40-v1",
+)
+
+
+def qualification_case_contract(input_profile: str) -> QualificationCaseContract:
+    if input_profile == WC2026_SOURCE_SCHEMA:
+        return WC2026_QUALIFICATION_CONTRACT
+    if input_profile == SOURCE_SCHEMA:
+        return GENERIC_QUALIFICATION_CONTRACT
+    raise ValueError(f"Qualification input profile is not resolved: {input_profile!r}")
 
 
 class _PropositionFields(TypedDict):
@@ -258,11 +313,9 @@ def generate_qualification_cases(
                 )
             )
 
-    relation_counts = {
-        relation: (300, 200) for relation in PUBLISHABLE_RELATIONS
-    }
-    relation_counts.update({"unrelated": (750, 500), "uncertain": (750, 500)})
-    for relation, (selection_count, validation_count) in relation_counts.items():
+    for relation, (selection_count, validation_count) in (
+        _RELATION_CASE_COUNTS.items()
+    ):
         rows.extend(
             _pair_cases(
                 selection_markets,
@@ -286,6 +339,83 @@ def generate_qualification_cases(
     return sorted(rows, key=lambda row: str(row["case_id"]))
 
 
+def generate_wc2026_qualification_cases(
+    markets: Sequence[SourceMarket],
+    *,
+    seed: int = 0,
+) -> list[dict[str, Any]]:
+    """Generate the WC-specific, market-disjoint model conformance set."""
+
+    if any(market.input_profile != WC2026_SOURCE_SCHEMA for market in markets):
+        raise ValueError(
+            "WC2026 qualification requires only markets loaded through "
+            f"{WC2026_SOURCE_SCHEMA}"
+        )
+    ordered = sorted(
+        markets,
+        key=lambda market: canonical_json_sha256(
+            {
+                "seed": seed,
+                "source_hash": market.source_hash,
+                "market_id": market.market_id,
+                "contract": WC2026_QUALIFICATION_GENERATOR_VERSION,
+            }
+        ),
+    )
+    if len(ordered) < 2:
+        raise ValueError(
+            "WC2026 automated qualification requires at least two markets "
+            "for market-disjoint selection and validation partitions"
+        )
+    split = min(len(ordered) - 1, max(1, len(ordered) * 3 // 5))
+    selection_markets = ordered[:split]
+    validation_markets = ordered[split:]
+    selection_ids = {market.market_id for market in selection_markets}
+    rows = [
+        _case_row(
+            record_type="parse",
+            partition=(
+                "selection" if market.market_id in selection_ids else "validation"
+            ),
+            domain="sports",
+            expected_relation=None,
+            markets=(market,),
+            proposition_ids=tuple(
+                outcome.clob_token_id for outcome in market.outcomes
+            ),
+            generator_id="wc2026.source_market.parse_coverage.v1",
+            payload=market_request(market).model_dump(mode="json"),
+            contract=WC2026_QUALIFICATION_CONTRACT,
+        )
+        for market in ordered
+    ]
+    for relation, (selection_count, validation_count) in (
+        _RELATION_CASE_COUNTS.items()
+    ):
+        rows.extend(
+            _pair_cases(
+                selection_markets,
+                relation,
+                selection_count,
+                partition="selection",
+                contract=WC2026_QUALIFICATION_CONTRACT,
+            )
+        )
+        rows.extend(
+            _pair_cases(
+                validation_markets,
+                relation,
+                validation_count,
+                partition="validation",
+                contract=WC2026_QUALIFICATION_CONTRACT,
+            )
+        )
+    pair_count = sum(row["record_type"] == "pair" for row in rows)
+    if pair_count != WC2026_QUALIFICATION_CONTRACT.pair_count:
+        raise RuntimeError("WC2026 qualification generator produced an invalid case count")
+    return sorted(rows, key=lambda row: str(row["case_id"]))
+
+
 def qualification_case_set_hash(rows: Sequence[dict[str, Any]]) -> str:
     return canonical_json_sha256(
         [
@@ -296,9 +426,14 @@ def qualification_case_set_hash(rows: Sequence[dict[str, Any]]) -> str:
 
 
 def qualification_retrieval_fingerprint(config: DiscoveryConfig) -> str:
+    contract = (
+        WC2026_QUALIFICATION_CONTRACT
+        if config.input_profile == WC2026_SOURCE_SCHEMA
+        else GENERIC_QUALIFICATION_CONTRACT
+    )
     return canonical_json_sha256(
         {
-            "generator": QUALIFICATION_GENERATOR_VERSION,
+            "generator": contract.generator_version,
             "normalization": NORMALIZATION_VERSION,
             "retrieval": RETRIEVAL_VERSION,
             "parse_fallback": {
@@ -527,6 +662,7 @@ def _pair_cases(
     count: int,
     *,
     partition: Literal["selection", "validation"],
+    contract: QualificationCaseContract = GENERIC_QUALIFICATION_CONTRACT,
 ) -> list[dict[str, Any]]:
     if not markets:
         raise ValueError("Qualification pair generation requires source markets")
@@ -539,6 +675,7 @@ def _pair_cases(
             second,
             relation,
             index,
+            contract=contract,
         )
         rows.append(
             _case_row(
@@ -550,6 +687,7 @@ def _pair_cases(
                 proposition_ids=proposition_ids,
                 generator_id=generator_id,
                 payload=payload,
+                contract=contract,
             )
         )
     return rows
@@ -560,6 +698,8 @@ def _pair_payload(
     second: SourceMarket,
     relation: str,
     index: int,
+    *,
+    contract: QualificationCaseContract = GENERIC_QUALIFICATION_CONTRACT,
 ) -> tuple[dict[str, Any], tuple[str, str], str]:
     case_index = f"{relation}-{index}"
     scope = first.event_slug or first.event_id or f"scope-{first.market_id}"
@@ -683,17 +823,50 @@ def _pair_payload(
             )
             generator = "same_scope.provably_co_possible.oracle.v1"
     elif relation == "unrelated":
-        a = _qualification_proposition(first, case_index, "A", polarity="positive", **common)
+        first_scope = (
+            f"qualification-wc2026-unrelated-a-{index}"
+            if contract == WC2026_QUALIFICATION_CONTRACT
+            else scope
+        )
+        second_scope = (
+            f"qualification-wc2026-unrelated-b-{index}"
+            if contract == WC2026_QUALIFICATION_CONTRACT
+            else second.event_slug
+            or second.event_id
+            or f"scope-{second.market_id}"
+        )
+        first_subject = (
+            [f"independent World Cup qualification outcome A {index}"]
+            if contract == WC2026_QUALIFICATION_CONTRACT
+            else common["subject"]
+        )
+        second_subject = (
+            [f"independent World Cup qualification outcome B {index}"]
+            if contract == WC2026_QUALIFICATION_CONTRACT
+            else [second.question]
+        )
+        unrelated_first: _PropositionFields = {
+            **common,
+            "subject": first_subject,
+            "event_scope": first_scope,
+        }
+        a = _qualification_proposition(
+            first,
+            case_index,
+            "A",
+            polarity="positive",
+            **unrelated_first,
+        )
         b = _qualification_proposition(
             second,
             case_index,
             "B",
             polarity="positive",
-            subject=[second.question],
+            subject=second_subject,
             predicate="occur",
             object=None,
             competition=second.category,
-            event_scope=second.event_slug or second.event_id or f"scope-{second.market_id}",
+            event_scope=second_scope,
             jurisdiction=None,
         )
         generator = "cross_scope.unrelated.oracle.v1"
@@ -798,10 +971,11 @@ def _case_row(
     proposition_ids: Sequence[str],
     generator_id: str,
     payload: object,
+    contract: QualificationCaseContract = GENERIC_QUALIFICATION_CONTRACT,
 ) -> dict[str, Any]:
     content = {
-        "schema_version": QUALIFICATION_CASE_SCHEMA_VERSION,
-        "generator_version": QUALIFICATION_GENERATOR_VERSION,
+        "schema_version": contract.schema_version,
+        "generator_version": contract.generator_version,
         "record_type": record_type,
         "partition": partition,
         "domain": domain,

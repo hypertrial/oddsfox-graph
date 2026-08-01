@@ -15,6 +15,7 @@ from ._discovery.contracts import (
     AtomicPairAssessment,
     DiscoveryConfig,
     ParsedMarket,
+    InputProfile,
 )
 from ._discovery.input import load_source_markets
 from ._discovery.inference import (
@@ -68,6 +69,7 @@ def doctor(
     compute_profile: Path | None,
     *,
     allow_remote: bool = False,
+    input_profile: InputProfile = "auto",
 ) -> DoctorReport:
     if mode not in {"fast", "full"}:
         raise ValueError("doctor mode must be fast or full")
@@ -77,6 +79,7 @@ def doctor(
         schema, rows, _, selection = load_source_markets(
             input_path,
             max_propositions=None,
+            input_profile=input_profile,
         )
         eligible = selection.get("eligible_propositions")
         if not isinstance(eligible, int):
@@ -91,18 +94,30 @@ def doctor(
         )
         checks.append(Check(name="input_schema", status="pass", message=schema))
         source_hash = sha256_file(input_path)
+        is_wc2026 = schema == "polymarket-wc2026-graph-hourly-v1"
         checks.append(
             Check(
-                name="canonical_catalog",
+                name="input_fingerprint" if is_wc2026 else "canonical_catalog",
                 status=(
-                    "pass" if source_hash == CANONICAL_CATALOG_SHA256 else "warn"
+                    "pass"
+                    if is_wc2026 or source_hash == CANONICAL_CATALOG_SHA256
+                    else "warn"
                 ),
                 message=(
-                    "canonical release catalog"
-                    if source_hash == CANONICAL_CATALOG_SHA256
-                    else "valid compact catalog, but not the canonical release fixture"
+                    "valid canonical oddsfox-pipeline WC2026 export contract"
+                    if is_wc2026
+                    else (
+                        "canonical release catalog"
+                        if source_hash == CANONICAL_CATALOG_SHA256
+                        else "valid compact catalog, but not the canonical release fixture"
+                    )
                 ),
-                details={"sha256": source_hash},
+                details={
+                    "sha256": source_hash,
+                    "normalized_semantic_fingerprint": selection.get(
+                        "normalized_semantic_fingerprint"
+                    ),
+                },
             )
         )
     except Exception as exc:
@@ -213,6 +228,7 @@ def doctor(
             primary = load_model_manifest(primary_manifest_path)
             verifier = load_model_manifest(verifier_manifest_path)
             profile_config = DiscoveryConfig(
+                input_profile=input_profile,
                 cache_dir=cache_dir,
                 compute_profile=compute_profile,
                 primary_model_manifest=primary_manifest_path,

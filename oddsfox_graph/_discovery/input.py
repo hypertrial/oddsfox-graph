@@ -3,11 +3,11 @@ from __future__ import annotations
 from collections.abc import Sequence
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
-from .contracts import SourceMarket, SourceOutcome
+from .contracts import InputProfile, SourceMarket, SourceOutcome
 from .provenance import canonical_json_sha256
-from .versions import SOURCE_SCHEMA
+from .versions import INPUT_ADAPTER_VERSION, SOURCE_SCHEMA, WC2026_SOURCE_SCHEMA
 from ..queries import DuckDB, q
 
 
@@ -15,7 +15,17 @@ def load_source_markets(
     input_path: Path,
     *,
     max_propositions: int | None = None,
+    input_profile: InputProfile = "auto",
 ) -> tuple[str, int, list[SourceMarket], dict[str, object]]:
+    profile = resolve_input_profile(input_path, input_profile)
+    if profile == WC2026_SOURCE_SCHEMA:
+        if max_propositions is not None:
+            raise ValueError(
+                "max_propositions is not supported for the WC2026 graph profile; "
+                "partial team progression chains are unsafe"
+            )
+        return _load_wc2026_markets(input_path)
+
     db = DuckDB()
     try:
         db.execute("SET TimeZone = 'UTC'")
@@ -127,6 +137,511 @@ def load_source_markets(
         "truncated": len(markets) < eligible_markets,
     }
     return SOURCE_SCHEMA, input_rows, markets, selection
+
+
+_COMPACT_REQUIRED_COLUMNS = {
+    "market_id",
+    "question",
+    "outcomes",
+    "clob_token_ids",
+}
+_WC2026_REQUIRED_COLUMNS = {
+    "market_id",
+    "outcome_index",
+    "clob_token_id",
+    "question",
+    "outcome_label",
+    "event_slug",
+    "is_active",
+    "is_closed",
+    "market_volume_usd",
+    "stage_key",
+    "stage_rank",
+    "canonical_team_name",
+    "market_direction",
+    "progression_outcome_label",
+    "is_progression_token",
+    "opposite_clob_token_id",
+    "market_status",
+    "is_still_alive",
+    "odds_hour_utc",
+    "odds_hour_epoch",
+}
+_WC2026_STAGE_RANKS = {
+    "round_of_32": 0,
+    "round_of_16": 1,
+    "quarterfinal": 2,
+    "semifinal": 3,
+    "final": 4,
+    "winner": 5,
+}
+_WC2026_PROGRESSION_OUTCOMES = {
+    ("round_of_32", "advance"): "reach_round_of_32",
+    ("round_of_16", "advance"): "reach_round_of_16",
+    ("quarterfinal", "advance"): "reach_quarterfinal",
+    ("semifinal", "advance"): "reach_semifinal",
+    ("final", "advance"): "reach_final",
+    ("winner", "winner"): "win_world_cup",
+    ("round_of_32", "elimination"): "not_eliminated_in_round_of_32",
+    ("round_of_16", "elimination"): "not_eliminated_in_round_of_16",
+}
+_WC2026_EXPORT_GUIDANCE = (
+    " Re-export with oddsfox-pipeline/scripts/"
+    "export_polymarket_wc2026_graph_hourly_odds.py."
+)
+
+
+def _wc2026_error(message: str) -> ValueError:
+    return ValueError(message + _WC2026_EXPORT_GUIDANCE)
+
+
+def resolve_input_profile(input_path: Path, requested: InputProfile = "auto") -> str:
+    """Resolve exactly one supported schema from column contracts."""
+
+    if requested not in {"auto", SOURCE_SCHEMA, WC2026_SOURCE_SCHEMA}:
+        raise ValueError(f"Unsupported input profile: {requested}")
+    db = DuckDB()
+    try:
+        schema = {
+            str(row["column_name"]).lower(): str(row["column_type"]).upper()
+            for row in db.rows(
+                f"DESCRIBE SELECT * FROM read_parquet('{q(input_path)}')"
+            )
+        }
+    finally:
+        db.close()
+    columns = set(schema)
+    matches = [
+        profile
+        for profile, required in (
+            (SOURCE_SCHEMA, _COMPACT_REQUIRED_COLUMNS),
+            (WC2026_SOURCE_SCHEMA, _WC2026_REQUIRED_COLUMNS),
+        )
+        if required <= columns
+    ]
+    if requested != "auto":
+        required = (
+            _WC2026_REQUIRED_COLUMNS
+            if requested == WC2026_SOURCE_SCHEMA
+            else _COMPACT_REQUIRED_COLUMNS
+        )
+        missing = sorted(required - columns)
+        if missing:
+            error = ValueError(
+                f"Input does not match {requested}; missing columns: "
+                + ", ".join(missing)
+            )
+            if requested == WC2026_SOURCE_SCHEMA:
+                error = _wc2026_error(str(error))
+            raise error
+        return requested
+    if len(matches) != 1:
+        if not matches:
+            raise ValueError(
+                "Discovery input does not match a known schema. Supported profiles: "
+                f"{SOURCE_SCHEMA}, {WC2026_SOURCE_SCHEMA}. Pass --input-profile "
+                "after exporting a supported Parquet contract"
+            )
+        raise ValueError(
+            "Discovery input matches multiple schemas; pass --input-profile explicitly: "
+            + ", ".join(sorted(matches))
+        )
+    return matches[0]
+
+
+def _load_wc2026_markets(
+    input_path: Path,
+) -> tuple[str, int, list[SourceMarket], dict[str, object]]:
+    db = DuckDB()
+    try:
+        db.execute("SET TimeZone = 'UTC'")
+        schema = {
+            str(row["column_name"]).lower(): str(row["column_type"]).upper()
+            for row in db.rows(
+                f"DESCRIBE SELECT * FROM read_parquet('{q(input_path)}')"
+            )
+        }
+        _validate_wc2026_column_types(schema)
+        input_rows = int(
+            db.scalar(f"SELECT count(*) FROM read_parquet('{q(input_path)}')") or 0
+        )
+        if input_rows == 0:
+            raise _wc2026_error("WC2026 graph input contains no hourly rows")
+        invalid_ids = _wc2026_invalid_required_rows(db, input_path)
+        if invalid_ids:
+            raise _wc2026_error(
+                "WC2026 graph input has null or empty required fields for: "
+                + ", ".join(invalid_ids)
+            )
+        invalid_hours = _bounded_values(
+            db,
+            f"""
+            SELECT market_id || '/' || clob_token_id || '/' || odds_hour_epoch AS value
+            FROM read_parquet('{q(input_path)}')
+            WHERE odds_hour_epoch % 3600 != 0
+               OR epoch(odds_hour_utc) != odds_hour_epoch::DOUBLE
+               OR date_trunc('hour', odds_hour_utc) != odds_hour_utc
+               OR market_volume_usd < 0
+               OR NOT isfinite(market_volume_usd)
+            ORDER BY value
+            """,
+        )
+        if invalid_hours:
+            raise _wc2026_error(
+                "WC2026 graph input has invalid hourly grain or volume for: "
+                + ", ".join(invalid_hours)
+            )
+        duplicate_grains = _bounded_values(
+            db,
+            f"""
+            SELECT market_id || '/' || clob_token_id || '/' || odds_hour_epoch AS value
+            FROM read_parquet('{q(input_path)}')
+            GROUP BY market_id, clob_token_id, odds_hour_epoch
+            HAVING count(*) > 1
+            ORDER BY value
+            """,
+        )
+        if duplicate_grains:
+            raise _wc2026_error(
+                "WC2026 graph input has duplicate market/token/hour rows for: "
+                + ", ".join(duplicate_grains)
+            )
+        semantic_rows = db.rows(
+            f"""
+            SELECT DISTINCT
+                market_id::VARCHAR AS market_id,
+                outcome_index::INTEGER AS outcome_index,
+                clob_token_id::VARCHAR AS clob_token_id,
+                question::VARCHAR AS question,
+                outcome_label::VARCHAR AS outcome_label,
+                event_slug::VARCHAR AS event_slug,
+                is_active::BOOLEAN AS is_active,
+                is_closed::BOOLEAN AS is_closed,
+                market_volume_usd::DOUBLE AS market_volume_usd,
+                stage_key::VARCHAR AS stage_key,
+                stage_rank::INTEGER AS stage_rank,
+                canonical_team_name::VARCHAR AS canonical_team_name,
+                market_direction::VARCHAR AS market_direction,
+                progression_outcome_label::VARCHAR AS progression_outcome_label,
+                is_progression_token::BOOLEAN AS is_progression_token,
+                opposite_clob_token_id::VARCHAR AS opposite_clob_token_id,
+                market_status::VARCHAR AS market_status,
+                is_still_alive::BOOLEAN AS is_still_alive
+            FROM read_parquet('{q(input_path)}')
+            ORDER BY market_id, outcome_index, clob_token_id
+            """
+        )
+        observation_rows = db.rows(
+            f"""
+            SELECT market_id::VARCHAR AS market_id,
+                   min(try_cast(odds_hour_utc AS TIMESTAMPTZ)) AS first_seen_ts,
+                   max(try_cast(odds_hour_utc AS TIMESTAMPTZ)) AS last_seen_ts,
+                   min(odds_hour_epoch)::BIGINT AS first_hour_epoch,
+                   max(odds_hour_epoch)::BIGINT AS last_hour_epoch
+            FROM read_parquet('{q(input_path)}')
+            GROUP BY market_id
+            ORDER BY market_id
+            """
+        )
+    finally:
+        db.close()
+
+    observations = {str(row["market_id"]): row for row in observation_rows}
+    markets = _wc2026_source_markets(semantic_rows, observations)
+    semantic_payload = [_wc2026_market_semantics(market) for market in markets]
+    stage_keys = sorted({market.stage_key for market in markets if market.stage_key})
+    team_names = sorted({market.team_name for market in markets if market.team_name})
+    first_epoch = min(
+        _required_int(row["first_hour_epoch"], "first_hour_epoch")
+        for row in observation_rows
+    )
+    last_epoch = max(
+        _required_int(row["last_hour_epoch"], "last_hour_epoch")
+        for row in observation_rows
+    )
+    selection: dict[str, object] = {
+        "strategy": "all_valid_pipeline_wc2026_markets",
+        "source": "oddsfox-pipeline",
+        "scope": "wc2026",
+        "universe": "knockout_progression",
+        "selection": "all_valid_pipeline_wc2026_markets",
+        "adapter_version": INPUT_ADAPTER_VERSION,
+        "input_hourly_rows": input_rows,
+        "input_rows": input_rows,
+        "input_market_rows": len(markets),
+        "input_propositions": len(markets) * 2,
+        "invalid_market_rows": 0,
+        "eligible_markets": len(markets),
+        "eligible_propositions": len(markets) * 2,
+        "selected_markets": len(markets),
+        "selected_propositions": len(markets) * 2,
+        "teams": len(team_names),
+        "stages": len(stage_keys),
+        "stage_keys": stage_keys,
+        "first_hour_epoch": first_epoch,
+        "last_hour_epoch": last_epoch,
+        "normalized_semantic_fingerprint": canonical_json_sha256(semantic_payload),
+        "truncated": False,
+    }
+    return WC2026_SOURCE_SCHEMA, input_rows, markets, selection
+
+
+def _validate_wc2026_column_types(schema: dict[str, str]) -> None:
+    allowed = {
+        "market_id": {"VARCHAR"},
+        "outcome_index": {"INTEGER", "BIGINT", "SMALLINT", "TINYINT"},
+        "clob_token_id": {"VARCHAR"},
+        "question": {"VARCHAR"},
+        "outcome_label": {"VARCHAR"},
+        "event_slug": {"VARCHAR"},
+        "is_active": {"BOOLEAN"},
+        "is_closed": {"BOOLEAN"},
+        "market_volume_usd": {"DOUBLE", "FLOAT", "DECIMAL"},
+        "stage_key": {"VARCHAR"},
+        "stage_rank": {"INTEGER", "BIGINT", "SMALLINT", "TINYINT"},
+        "canonical_team_name": {"VARCHAR"},
+        "market_direction": {"VARCHAR"},
+        "progression_outcome_label": {"VARCHAR"},
+        "is_progression_token": {"BOOLEAN"},
+        "opposite_clob_token_id": {"VARCHAR"},
+        "market_status": {"VARCHAR"},
+        "is_still_alive": {"BOOLEAN"},
+        "odds_hour_epoch": {"BIGINT", "INTEGER", "UBIGINT", "UINTEGER"},
+    }
+    wrong = {}
+    for name, accepted in allowed.items():
+        actual = schema[name]
+        if not any(
+            actual == value or actual.startswith(value + "(")
+            for value in accepted
+        ):
+            wrong[name] = actual
+    if wrong:
+        raise _wc2026_error(
+            "WC2026 graph input has incompatible column types: "
+            + ", ".join(f"{name}={value}" for name, value in sorted(wrong.items()))
+        )
+    if not schema["odds_hour_utc"].startswith("TIMESTAMP"):
+        raise _wc2026_error(
+            "WC2026 graph input has incompatible column type: "
+            f"odds_hour_utc={schema['odds_hour_utc']}"
+        )
+
+
+def _wc2026_invalid_required_rows(db: DuckDB, input_path: Path) -> list[str]:
+    text_columns = (
+        "market_id",
+        "clob_token_id",
+        "question",
+        "outcome_label",
+        "event_slug",
+        "canonical_team_name",
+        "stage_key",
+        "market_direction",
+        "progression_outcome_label",
+        "opposite_clob_token_id",
+        "market_status",
+    )
+    empty = " OR ".join(f"trim({name}::VARCHAR) = ''" for name in text_columns)
+    nulls = " OR ".join(
+        f"{name} IS NULL" for name in sorted(_WC2026_REQUIRED_COLUMNS)
+    )
+    return _bounded_values(
+        db,
+        f"""
+        SELECT coalesce(market_id::VARCHAR, '<null>') || '/' ||
+               coalesce(clob_token_id::VARCHAR, '<null>') AS value
+        FROM read_parquet('{q(input_path)}')
+        WHERE {nulls} OR {empty}
+        ORDER BY value
+        """,
+    )
+
+
+def _bounded_values(db: DuckDB, sql: str, *, limit: int = 10) -> list[str]:
+    return [str(row["value"]) for row in db.rows(f"SELECT * FROM ({sql}) LIMIT {limit}")]
+
+
+def _required_int(value: object, field: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, (int, str)):
+        raise ValueError(f"WC2026 {field} must be an integer")
+    try:
+        return int(value)
+    except ValueError as exc:
+        raise ValueError(f"WC2026 {field} must be an integer") from exc
+
+
+def _wc2026_source_markets(
+    semantic_rows: Sequence[dict[str, object]],
+    observations: dict[str, dict[str, object]],
+) -> list[SourceMarket]:
+    by_market: dict[str, list[dict[str, object]]] = {}
+    token_owner: dict[str, str] = {}
+    for row in semantic_rows:
+        market_id = str(row["market_id"])
+        token = str(row["clob_token_id"])
+        owner = token_owner.setdefault(token, market_id)
+        if owner != market_id:
+            raise _wc2026_error(
+                f"WC2026 clob_token_id {token!r} belongs to multiple markets"
+            )
+        by_market.setdefault(market_id, []).append(row)
+
+    markets: list[SourceMarket] = []
+    errors: list[str] = []
+    for market_id, rows in sorted(by_market.items()):
+        if len(rows) != 2:
+            errors.append(f"{market_id}: expected 2 invariant token rows, found {len(rows)}")
+            continue
+        indexes = {
+            _required_int(row["outcome_index"], "outcome_index") for row in rows
+        }
+        labels = {str(row["outcome_label"]) for row in rows}
+        tokens = {str(row["clob_token_id"]) for row in rows}
+        progression_rows = [row for row in rows if bool(row["is_progression_token"])]
+        invariant_fields = (
+            "question",
+            "event_slug",
+            "is_active",
+            "is_closed",
+            "market_volume_usd",
+            "stage_key",
+            "stage_rank",
+            "canonical_team_name",
+            "market_direction",
+            "progression_outcome_label",
+            "market_status",
+            "is_still_alive",
+        )
+        non_invariant = [
+            field
+            for field in invariant_fields
+            if len({row[field] for row in rows}) != 1
+        ]
+        if indexes != {0, 1} or labels != {"Yes", "No"} or len(tokens) != 2:
+            errors.append(f"{market_id}: tokens must be unique literal Yes/No indexes 0/1")
+            continue
+        if len(progression_rows) != 1:
+            errors.append(f"{market_id}: expected exactly one progression token")
+            continue
+        if non_invariant:
+            errors.append(f"{market_id}: non-invariant {','.join(non_invariant)}")
+            continue
+        if any(
+            str(row["opposite_clob_token_id"]) not in tokens
+            or str(row["opposite_clob_token_id"]) == str(row["clob_token_id"])
+            for row in rows
+        ):
+            errors.append(f"{market_id}: opposite token links are not reciprocal")
+            continue
+        stage_key = str(rows[0]["stage_key"])
+        stage_rank = _required_int(rows[0]["stage_rank"], "stage_rank")
+        direction = str(rows[0]["market_direction"])
+        progression_outcome = str(rows[0]["progression_outcome_label"])
+        market_status = str(rows[0]["market_status"])
+        if _WC2026_STAGE_RANKS.get(stage_key) != stage_rank:
+            errors.append(f"{market_id}: invalid stage_key/stage_rank")
+            continue
+        if direction not in {"winner", "advance", "elimination"}:
+            errors.append(f"{market_id}: invalid market_direction {direction!r}")
+            continue
+        if market_status not in {"resolved", "closed", "live", "inactive"}:
+            errors.append(f"{market_id}: invalid market_status {market_status!r}")
+            continue
+        expected_status = (
+            "closed"
+            if bool(rows[0]["is_closed"])
+            else "live" if bool(rows[0]["is_active"]) else "inactive"
+        )
+        if market_status != "resolved" and market_status != expected_status:
+            errors.append(f"{market_id}: market_status conflicts with active/closed flags")
+            continue
+        expected_outcome = _WC2026_PROGRESSION_OUTCOMES.get((stage_key, direction))
+        if expected_outcome != progression_outcome:
+            errors.append(f"{market_id}: invalid progression_outcome_label")
+            continue
+        expected_label = "No" if direction == "elimination" else "Yes"
+        if str(progression_rows[0]["outcome_label"]) != expected_label:
+            errors.append(f"{market_id}: progression-token orientation is invalid")
+            continue
+        progression_level = stage_rank + (1 if direction == "elimination" else 0)
+        observation = observations[market_id]
+        source_outcomes = tuple(
+            SourceOutcome(
+                outcome_index=_required_int(row["outcome_index"], "outcome_index"),
+                outcome=str(row["outcome_label"]),
+                clob_token_id=str(row["clob_token_id"]),
+                is_progression=bool(row["is_progression_token"]),
+                opposite_clob_token_id=str(row["opposite_clob_token_id"]),
+            )
+            for row in sorted(
+                rows,
+                key=lambda item: _required_int(
+                    item["outcome_index"], "outcome_index"
+                ),
+            )
+        )
+        market_fields = {
+            "market_id": market_id,
+            **{field: rows[0][field] for field in invariant_fields},
+            "progression_level": progression_level,
+            "outcomes": [outcome.__dict__ for outcome in source_outcomes],
+        }
+        markets.append(
+            SourceMarket(
+                market_id=market_id,
+                question=str(rows[0]["question"]),
+                description="",
+                outcomes=source_outcomes,
+                source_hash=source_market_hash(market_fields),
+                event_slug=str(rows[0]["event_slug"]),
+                category="sports",
+                tags=("fifa-world-cup-2026", "knockout-progression"),
+                is_active=bool(rows[0]["is_active"]),
+                is_closed=bool(rows[0]["is_closed"]),
+                first_seen_ts=datetime_or_none(observation["first_seen_ts"]),
+                last_seen_ts=datetime_or_none(observation["last_seen_ts"]),
+                volume=float(cast(float, rows[0]["market_volume_usd"])),
+                input_profile=WC2026_SOURCE_SCHEMA,
+                team_name=str(rows[0]["canonical_team_name"]),
+                stage_key=stage_key,
+                stage_rank=stage_rank,
+                progression_level=progression_level,
+                market_direction=direction,
+                progression_outcome=progression_outcome,
+                market_status=str(rows[0]["market_status"]),
+                is_still_alive=bool(rows[0]["is_still_alive"]),
+            )
+        )
+    if errors:
+        suffix = "" if len(errors) <= 10 else f" (+{len(errors) - 10} more)"
+        raise _wc2026_error(
+            "WC2026 graph input failed market validation: "
+            + "; ".join(errors[:10])
+            + suffix
+        )
+    _validate_source_markets(markets)
+    return markets
+
+
+def _wc2026_market_semantics(market: SourceMarket) -> dict[str, Any]:
+    return {
+        "market_id": market.market_id,
+        "question": market.question,
+        "event_slug": market.event_slug,
+        "is_active": market.is_active,
+        "is_closed": market.is_closed,
+        "market_volume_usd": market.volume,
+        "team_name": market.team_name,
+        "stage_key": market.stage_key,
+        "stage_rank": market.stage_rank,
+        "progression_level": market.progression_level,
+        "market_direction": market.market_direction,
+        "progression_outcome": market.progression_outcome,
+        "market_status": market.market_status,
+        "is_still_alive": market.is_still_alive,
+        "outcomes": [outcome.__dict__ for outcome in market.outcomes],
+    }
 
 
 def _load_compact_markets(

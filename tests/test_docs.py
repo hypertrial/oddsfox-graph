@@ -102,12 +102,12 @@ def test_removed_workflows_do_not_appear_in_product_or_docs() -> None:
 
 
 def test_current_versions_and_fixture_schema_are_documented() -> None:
-    assert __version__ == "0.11.0"
+    assert __version__ == "0.12.0"
     assert CACHE_ENTRY_VERSION == 8
     schema = (DOCS / "release-fixture-manifest.schema.json").read_text(
         encoding="utf-8"
     )
-    assert '"0.11.0"' in schema
+    assert '"0.12.0"' in schema
     assert RELEASE_FIXTURE_SCHEMA_VERSION in schema
 
 

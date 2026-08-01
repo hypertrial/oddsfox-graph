@@ -1,4 +1,23 @@
-import type { EvidenceTier, GraphMetadata, GraphView, RecordingPlan, Relation, SearchNode } from "./types";
+import type {
+  CompareResult,
+  EdgeMode,
+  EntitySearchResult,
+  EvidenceTier,
+  ExploreHome,
+  GraphMetadata,
+  GraphView,
+  HumanHighlight,
+  MarketDetail,
+  Page,
+  RecordingPlan,
+  Relation,
+  RelationshipDetail,
+  SearchNode,
+  StageDetail,
+  StageSummary,
+  TeamDetail,
+  TeamSummary,
+} from "./types";
 
 let staticMode = false;
 
@@ -6,12 +25,15 @@ async function staticSnapshot() {
   return (await import("./staticData")).loadStaticSnapshot();
 }
 
-async function searchStatic(query: string) {
-  return (await import("./staticData")).staticSearch(query);
+async function staticProvider() {
+  return import("./staticData");
 }
 
 async function json<T>(path: string, signal?: AbortSignal): Promise<T> {
-  const response = await fetch(path, { headers: { Accept: "application/json" }, signal });
+  const response = await fetch(path, {
+    headers: { Accept: "application/json" },
+    signal,
+  });
   if (!response.ok) {
     const payload = (await response.json().catch(() => null)) as
       | { detail?: string }
@@ -21,13 +43,100 @@ async function json<T>(path: string, signal?: AbortSignal): Promise<T> {
   return (await response.json()) as T;
 }
 
+export function isStaticMode(): boolean {
+  return staticMode;
+}
+
 export async function metadata(): Promise<GraphMetadata> {
   try {
     return await json<GraphMetadata>("/api/v1/meta");
   } catch {
+    const loaded = await staticSnapshot();
     staticMode = true;
-    return (await staticSnapshot()).metadata;
+    return loaded.metadata;
   }
+}
+
+export async function exploreHome(
+  teamLimit = 24,
+  highlightLimit = 6,
+): Promise<ExploreHome> {
+  if (staticMode) return (await staticProvider()).staticExploreHome(teamLimit, highlightLimit);
+  const params = new URLSearchParams({
+    team_limit: String(teamLimit),
+    highlight_limit: String(highlightLimit),
+  });
+  return json<ExploreHome>(`/api/v1/explore?${params}`);
+}
+
+export async function stages(): Promise<StageSummary[]> {
+  if (staticMode) return (await staticProvider()).staticStages();
+  return json<StageSummary[]>("/api/v1/stages");
+}
+
+export async function stageDetail(stageKey: string): Promise<StageDetail> {
+  if (staticMode) return (await staticProvider()).staticStageDetail(stageKey);
+  return json<StageDetail>(`/api/v1/stages/${encodeURIComponent(stageKey)}`);
+}
+
+export async function teams(
+  cursor: string | null = null,
+  limit = 100,
+): Promise<Page<TeamSummary>> {
+  if (staticMode) return (await staticProvider()).staticTeams(cursor, limit);
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (cursor) params.set("cursor", cursor);
+  return json<Page<TeamSummary>>(`/api/v1/teams?${params}`);
+}
+
+export async function teamDetail(teamKey: string): Promise<TeamDetail> {
+  if (staticMode) return (await staticProvider()).staticTeamDetail(teamKey);
+  return json<TeamDetail>(`/api/v1/teams/${encodeURIComponent(teamKey)}`);
+}
+
+export async function marketDetail(marketId: string): Promise<MarketDetail> {
+  if (staticMode) return (await staticProvider()).staticMarketDetail(marketId);
+  return json<MarketDetail>(`/api/v1/markets/${encodeURIComponent(marketId)}`);
+}
+
+export async function relationshipDetail(proposalId: string): Promise<RelationshipDetail> {
+  if (staticMode) return (await staticProvider()).staticRelationshipDetail(proposalId);
+  return json<RelationshipDetail>(`/api/v1/relationships/${encodeURIComponent(proposalId)}`);
+}
+
+export async function entitySearch(
+  query: string,
+  limit = 12,
+): Promise<EntitySearchResult[]> {
+  if (staticMode) return (await staticProvider()).staticEntitySearch(query, limit);
+  const params = new URLSearchParams({ q: query, limit: String(limit) });
+  return json<EntitySearchResult[]>(`/api/v1/entity-search?${params}`);
+}
+
+export async function compare(
+  source: string,
+  target: string,
+  maxHops = 4,
+): Promise<CompareResult> {
+  if (staticMode) return (await staticProvider()).staticCompare(source, target, maxHops);
+  const params = new URLSearchParams({
+    a: source,
+    b: target,
+    max_hops: String(maxHops),
+  });
+  return json<CompareResult>(`/api/v1/compare?${params}`);
+}
+
+export async function humanHighlights(
+  limit = 6,
+  minConfidence = 0.95,
+): Promise<HumanHighlight[]> {
+  if (staticMode) return (await staticProvider()).staticExploreHome(100, limit).then((home) => home.notable_relationships);
+  const params = new URLSearchParams({
+    limit: String(limit),
+    min_confidence: String(minConfidence),
+  });
+  return json<HumanHighlight[]>(`/api/v1/highlights?${params}`);
 }
 
 export async function overview(
@@ -37,6 +146,7 @@ export async function overview(
   includeCompatible: boolean,
   evidenceTier: EvidenceTier,
   signal?: AbortSignal,
+  edgeMode: EdgeMode = "all",
 ): Promise<GraphView> {
   if (staticMode) {
     return filterGraphView(
@@ -47,13 +157,9 @@ export async function overview(
       evidenceTier,
     );
   }
-  const params = new URLSearchParams({
-    level,
-    min_confidence: String(minConfidence),
-    include_compatible: String(includeCompatible),
-  });
-  if (relation !== "all") params.append("relations", relation);
-  if (evidenceTier !== "all") params.append("evidence_tiers", evidenceTier);
+  const params = graphFilterParameters(relation, minConfidence, evidenceTier, edgeMode);
+  params.set("level", level);
+  params.set("include_compatible", String(includeCompatible));
   return json<GraphView>(`/api/v1/overview?${params}`, signal);
 }
 
@@ -62,7 +168,7 @@ export async function recordingPlan(
   minConfidence = 0.95,
 ): Promise<RecordingPlan> {
   if (staticMode) {
-    throw new Error("Recording requires a manifest-complete graph served locally");
+    throw new Error("Recording requires the original graph directory served locally");
   }
   const params = new URLSearchParams({
     limit: String(limit),
@@ -89,12 +195,12 @@ export function filterGraphView(
 
 export async function neighborhood(node: string, hops = 2): Promise<GraphView> {
   if (staticMode) return (await staticSnapshot()).view;
-  const params = new URLSearchParams({ node, hops: String(hops) });
+  const params = new URLSearchParams({ node, hops: String(hops), edge_mode: "all" });
   return json<GraphView>(`/api/v1/subgraph?${params}`);
 }
 
 export async function search(query: string): Promise<SearchNode[]> {
-  if (staticMode) return searchStatic(query);
+  if (staticMode) return (await staticProvider()).staticSearch(query);
   return json<SearchNode[]>(`/api/v1/search?q=${encodeURIComponent(query)}&limit=12`);
 }
 
@@ -118,10 +224,8 @@ export async function eventGraph(
   evidenceTier: EvidenceTier,
 ): Promise<GraphView> {
   if (staticMode) return (await staticSnapshot()).view;
-  const params = graphFilterParameters(relation, minConfidence, evidenceTier);
-  return json<GraphView>(
-    `/api/v1/event-graph/${encodeURIComponent(event)}?${params}`,
-  );
+  const params = graphFilterParameters(relation, minConfidence, evidenceTier, "all");
+  return json<GraphView>(`/api/v1/event-graph/${encodeURIComponent(event)}?${params}`);
 }
 
 export async function componentGraph(
@@ -131,20 +235,20 @@ export async function componentGraph(
   evidenceTier: EvidenceTier,
 ): Promise<GraphView> {
   if (staticMode) return (await staticSnapshot()).view;
-  const params = graphFilterParameters(relation, minConfidence, evidenceTier);
-  return json<GraphView>(
-    `/api/v1/component-graph/${encodeURIComponent(component)}?${params}`,
-  );
+  const params = graphFilterParameters(relation, minConfidence, evidenceTier, "all");
+  return json<GraphView>(`/api/v1/component-graph/${encodeURIComponent(component)}?${params}`);
 }
 
 function graphFilterParameters(
   relation: Relation | "all",
   minConfidence: number,
   evidenceTier: EvidenceTier,
+  edgeMode: EdgeMode,
 ): URLSearchParams {
   const params = new URLSearchParams({
     min_confidence: String(minConfidence),
     include_compatible: String(relation === "compatible"),
+    edge_mode: edgeMode,
   });
   if (relation !== "all") params.append("relations", relation);
   if (evidenceTier !== "all") params.append("evidence_tiers", evidenceTier);
@@ -165,7 +269,7 @@ export async function edgeDetail(proposal: string): Promise<Record<string, unkno
 }
 
 export async function prove(from: string, to: string): Promise<Record<string, unknown>[]> {
-  if (staticMode) return [];
+  if (staticMode) throw new Error("Proof tools are unavailable in a static snapshot");
   const params = new URLSearchParams({ from_node: from, to_node: to });
   return json<Record<string, unknown>[]>(`/api/v1/prove?${params}`);
 }
@@ -175,7 +279,7 @@ export async function whyNot(
   b: string,
   relation: Relation,
 ): Promise<Record<string, unknown>> {
-  if (staticMode) return { status: "static_snapshot", a, b, relation };
+  if (staticMode) throw new Error("Why-not diagnostics are unavailable in a static snapshot");
   const params = new URLSearchParams({ a, b, relation });
   return json<Record<string, unknown>>(`/api/v1/why-not?${params}`);
 }

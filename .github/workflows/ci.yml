@@ -61,7 +61,7 @@ jobs:
           test ! -e oddsfox_graph/build.py
           test ! -e oddsfox_graph/review.py
           test ! -d oddsfox_graph/taxonomies
-          if rg -ni 'review-export|review-score|benchmark-export|benchmark-compile|benchmark-summary|model-profile|ready_to_scale|pricing-file|pricing_file|review_queue|benchmark\.parquet|evaluation_report|source_format|input_granularity_seconds|wc2026|minutely|hourly|\.\[discovery\]' oddsfox_graph docs README.md pyproject.toml scripts; then
+          if rg -ni 'review-export|review-score|benchmark-export|benchmark-compile|benchmark-summary|model-profile|ready_to_scale|pricing-file|pricing_file|review_queue|benchmark\.parquet|evaluation_report|source_format|input_granularity_seconds|minutely|\.\[discovery\]' oddsfox_graph docs README.md pyproject.toml scripts; then
             echo "Removed compatibility surface detected"
             exit 1
           fi
