@@ -94,6 +94,7 @@ PROPOSITION_COLUMNS = {
     "is_still_alive": "BOOLEAN",
     "opposite_clob_token_id": "VARCHAR",
     "market_volume_usd": "DOUBLE",
+    "market_close_time": "TIMESTAMPTZ",
 }
 
 REJECTED_EDGE_COLUMNS = {

@@ -43,6 +43,11 @@ The explorer input is
 `oddsfox-pipeline` repository's public
 `polymarket_wc2026_graph_token_hourly_odds` mart. It contains both Yes and No
 tokens plus authoritative team, stage, direction, and progression semantics.
+The export must also carry the source market `end_date`; the plotter uses that
+field only for left-to-right placement and never as evidence for a logical edge.
+Pipeline checkouts whose graph mart does not yet expose `end_date` must be updated
+before export; OddsFox Graph rejects those older files instead of inventing a
+closing-time order.
 Do not recreate membership by filtering questions, tags, or slugs.
 
 ```bash

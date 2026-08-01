@@ -437,14 +437,22 @@ class ExplorerStore:
 
     def overview(
         self,
-        level: Literal["component", "event"] = "event",
+        level: Literal["component", "event", "proposition"] = "event",
         filters: GraphFilter | None = None,
         *,
         max_nodes: int = 5_000,
         max_edges: int = 10_000,
+        edge_mode: EdgeMode = "all",
     ) -> GraphView:
         node_limit = _bounded(max_nodes, 1, 5_000, "node limit")
         edge_limit = _bounded(max_edges, 0, 10_000, "edge limit")
+        if level == "proposition":
+            return self._proposition_overview(
+                filters or GraphFilter(),
+                node_limit,
+                edge_limit,
+                edge_mode=edge_mode,
+            )
         if level == "component":
             return self._component_overview(node_limit, edge_limit)
         return self._event_overview(
@@ -559,7 +567,8 @@ class ExplorerStore:
                 SELECT n.*, m.component_id, m.total_degree,
                        m.classification_state, m.classification_status,
                        m.classification_coverage,
-                       p.event_key
+                       p.event_key, p.team_name, p.is_progression,
+                       epoch(p.market_close_time)::BIGINT AS market_close_epoch
                 FROM nodes_table n
                 JOIN node_metrics_v m USING (node_id)
                 JOIN explorer_propositions_v p ON p.proposition_id = n.node_id
@@ -570,7 +579,7 @@ class ExplorerStore:
             )
         finally:
             db.close()
-        nodes = tuple(_proposition_node(row) for row in node_rows)
+        nodes, layout_mode = _proposition_nodes(node_rows)
         edge_rows = sorted(
             edge_by_id.values(),
             key=lambda row: (
@@ -595,8 +604,84 @@ class ExplorerStore:
             truncated_edges=truncated_edges,
             coverage=self.coverage(),
             edge_mode=edge_mode,
+            layout_mode=layout_mode,
             display_stats=graph_display_stats(
                 labels,
+                tuple((edge.source, edge.target) for edge in edges),
+                input_edge_count=input_edge_count,
+            ),
+        )
+
+    def _proposition_overview(
+        self,
+        filters: GraphFilter,
+        node_limit: int,
+        edge_limit: int,
+        *,
+        edge_mode: EdgeMode,
+    ) -> GraphView:
+        if edge_mode not in {"all", "essential"}:
+            raise ValueError("edge_mode must be all or essential")
+        node_where, node_params = _proposition_filter(filters)
+        sql_where = "WHERE " + " AND ".join(node_where) if node_where else ""
+        edge_sql, edge_params = _edge_filter(filters, "e")
+        db = self._db()
+        try:
+            node_rows = db.rows(
+                f"""
+                SELECT n.*, m.component_id, m.total_degree,
+                       m.classification_state, m.classification_status,
+                       m.classification_coverage,
+                       p.event_key, p.team_name, p.is_progression,
+                       epoch(p.market_close_time)::BIGINT AS market_close_epoch
+                FROM nodes_table n
+                JOIN node_metrics_v m USING (node_id)
+                JOIN explorer_propositions_v p ON p.proposition_id = n.node_id
+                {sql_where}
+                ORDER BY p.market_close_time NULLS LAST, p.team_name,
+                         p.market_id, p.is_progression DESC, n.node_id
+                LIMIT ?
+                """,
+                [*node_params, node_limit + 1],
+            )
+            selected = node_rows[:node_limit]
+            node_ids = [str(row["node_id"]) for row in selected]
+            edge_rows = (
+                db.rows(
+                    f"""
+                    SELECT e.*
+                    FROM logic_edges_v e
+                    WHERE e.src_node_id IN (SELECT unnest(?))
+                      AND e.dst_node_id IN (SELECT unnest(?))
+                      {edge_sql}
+                    ORDER BY e.confidence DESC, e.edge_type,
+                             e.src_node_id, e.dst_node_id, e.proposal_id
+                    LIMIT ?
+                    """,
+                    [node_ids, node_ids, *edge_params, edge_limit + 1],
+                )
+                if node_ids
+                else []
+            )
+        finally:
+            db.close()
+        input_edge_count = min(len(edge_rows), edge_limit)
+        selected_edges = edge_rows[:edge_limit]
+        if edge_mode == "essential":
+            selected_edges = essential_relationship_rows(selected_edges)
+        nodes, layout_mode = _proposition_nodes(selected)
+        edges = tuple(_logic_edge(row) for row in selected_edges)
+        return GraphView(
+            level="proposition",
+            nodes=nodes,
+            edges=edges,
+            truncated_nodes=len(node_rows) > node_limit,
+            truncated_edges=len(edge_rows) > edge_limit,
+            coverage=self.coverage(),
+            edge_mode=edge_mode,
+            layout_mode=layout_mode,
+            display_stats=graph_display_stats(
+                tuple(node.label for node in nodes),
                 tuple((edge.source, edge.target) for edge in edges),
                 input_edge_count=input_edge_count,
             ),
@@ -1055,6 +1140,19 @@ def _event_filter(filters: GraphFilter) -> tuple[list[str], list[object]]:
     return clauses, params
 
 
+def _proposition_filter(filters: GraphFilter) -> tuple[list[str], list[object]]:
+    clauses: list[str] = []
+    params: list[object] = []
+    if filters.domains:
+        clauses.append("p.primary_domain IN (SELECT unnest(?))")
+        params.append(list(filters.domains))
+    if filters.active_only:
+        clauses.append("n.is_active")
+    if filters.closed_only:
+        clauses.append("n.is_closed")
+    return clauses, params
+
+
 def _edge_filter(filters: GraphFilter, alias: str) -> tuple[str, list[object]]:
     clauses = [f"{alias}.confidence >= ?"]
     params: list[object] = [filters.min_confidence]
@@ -1127,20 +1225,61 @@ def _proposition_node(row: dict[str, object]) -> ExplorerNode:
     digest = hashlib.sha256(node_id.encode("utf-8")).digest()
     angle = int.from_bytes(digest[:4], "big") / (2**32) * 2 * math.pi
     radius = 40.0 + int.from_bytes(digest[4:8], "big") / (2**32) * 180.0
+    close_epoch = row.get("market_close_epoch")
+    progression = row.get("is_progression")
     return ExplorerNode(
         id=node_id,
         label=str(row["canonical_proposition"]),
         level="proposition",
         parent_id=str(row["event_key"]),
-        x=math.cos(angle) * radius,
-        y=math.sin(angle) * radius,
+        x=_float(row.get("layout_x", math.cos(angle) * radius)),
+        y=_float(row.get("layout_y", math.sin(angle) * radius)),
         size=max(4.0, math.sqrt(_int(row["total_degree"]) + 1) * 3.0),
+        domain=(str(row["team_name"]) if row.get("team_name") else None),
         component_id=str(row["component_id"]),
         market_id=str(row["market_id"]),
         edge_count=_int(row["total_degree"]),
         classification_coverage=_optional_float(row.get("classification_coverage")),
         classification_status=_coverage_status(row),
+        progression_outcome=(None if progression is None else bool(progression)),
+        market_close_epoch=(None if close_epoch is None else _int(close_epoch)),
     )
+
+
+def _proposition_nodes(
+    rows: list[dict[str, object]],
+) -> tuple[tuple[ExplorerNode, ...], Literal["hierarchical", "close_time"]]:
+    if not rows or any(
+        row.get("market_close_epoch") is None or not row.get("team_name") for row in rows
+    ):
+        return tuple(_proposition_node(row) for row in rows), "hierarchical"
+    close_epochs = sorted({_int(row["market_close_epoch"]) for row in rows})
+    close_columns = {epoch: index for index, epoch in enumerate(close_epochs)}
+    teams = sorted({str(row["team_name"]) for row in rows})
+    team_rows = {team: index for index, team in enumerate(teams)}
+    grouped_markets: dict[tuple[str, int], set[str]] = {}
+    for row in rows:
+        key = (str(row["team_name"]), _int(row["market_close_epoch"]))
+        grouped_markets.setdefault(key, set()).add(str(row["market_id"]))
+    market_offsets: dict[str, float] = {}
+    for markets_set in grouped_markets.values():
+        markets = sorted(markets_set)
+        for index, market_id in enumerate(markets):
+            market_offsets[market_id] = index - (len(markets) - 1) / 2
+    positioned = []
+    for row in rows:
+        close_epoch = _int(row["market_close_epoch"])
+        team = str(row["team_name"])
+        positioned.append(
+            {
+                **row,
+                "layout_x": close_columns[close_epoch] * 260,
+                "layout_y": team_rows[team] * 90
+                + market_offsets[str(row["market_id"])] * 18
+                + (0 if bool(row.get("is_progression")) else 8),
+            }
+        )
+    return tuple(_proposition_node(row) for row in positioned), "close_time"
 
 
 def _event_edge(row: dict[str, object]) -> ExplorerEdge:

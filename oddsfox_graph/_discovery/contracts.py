@@ -187,6 +187,7 @@ class PropositionRecord(BaseModel):
     is_still_alive: bool | None = None
     opposite_clob_token_id: str | None = None
     market_volume_usd: float | None = None
+    market_close_time: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -225,6 +226,7 @@ class SourceMarket:
     progression_outcome: str | None = None
     market_status: str | None = None
     is_still_alive: bool | None = None
+    market_close_time: datetime | None = None
 
 
 @dataclass(frozen=True)

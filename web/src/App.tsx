@@ -122,11 +122,12 @@ export function App() {
   const validationStatus = String(metadata.build.validation_status ?? metadata.viewer.validation_status ?? "unknown");
   const classificationStatus = String(metadata.coverage.classification_status ?? "");
   const classificationCoverage = metadata.coverage.classification_coverage;
+  const graphOnly = route.kind === "analyst";
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell${graphOnly ? " graph-shell" : ""}`}>
       <a className="skip-link" href="#main-content">Skip to main content</a>
-      <header className="topbar">
+      {!graphOnly && <header className="topbar">
         <a className="brand" href="#/explore" aria-label="FIFA World Cup 2026 Outcome Map home">
           <span className="brand-mark" aria-hidden="true">OF</span>
           <span>
@@ -141,12 +142,12 @@ export function App() {
           <span>{coverageLabel(classificationStatus, classificationCoverage)}</span>
           {isStatic && <span className="snapshot-badge">Static snapshot</span>}
         </div>
-      </header>
-      <nav className="primary-nav" aria-label="Main navigation">
-        <a href="#/explore" aria-current={route.kind !== "analyst" && route.kind !== "compare" ? "page" : undefined}>Explore</a>
+      </header>}
+      {!graphOnly && <nav className="primary-nav" aria-label="Main navigation">
+        <a href="#/explore" aria-current={route.kind !== "compare" ? "page" : undefined}>Explore</a>
         <a href="#/compare" aria-current={route.kind === "compare" ? "page" : undefined}>Compare outcomes</a>
-        <a href="#/analyst" aria-current={route.kind === "analyst" ? "page" : undefined}>Analyst graph</a>
-      </nav>
+        <a href="#/analyst">Graph</a>
+      </nav>}
       {storyError && <div className="error" role="alert">{storyError}</div>}
       {storyLoading && <div className="global-progress" role="status">Building the presentation story…</div>}
       <main id="main-content" className="main-content" ref={mainRef} tabIndex={-1}>
@@ -154,10 +155,10 @@ export function App() {
           ? <Analyst metadata={metadata} onEnterStory={(confidence) => void enterStory(confidence)} />
           : <Explore route={route} />}
       </main>
-      <footer className="site-footer">
+      {!graphOnly && <footer className="site-footer">
         <span>Outcome logic from the canonical OddsFox pipeline export.</span>
-        <a href="#/analyst">Open technical graph</a>
-      </footer>
+        <a href="#/analyst">Open graph</a>
+      </footer>}
     </div>
   );
 }

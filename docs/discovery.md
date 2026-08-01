@@ -12,7 +12,9 @@ The human explorer consumes only the pipeline's registry-scoped
 `polymarket_wc2026_graph_token_hourly_odds` export. The adapter validates every
 hourly row and collapses it into one market with exactly two Yes/No claims. Team,
 stage, market direction, progression meaning, token orientation, reciprocal
-opposite-token IDs, status, and hourly grain must be complete and unambiguous.
+opposite-token IDs, status, market `end_date`, and hourly grain must be complete
+and unambiguous. Closing time is retained only as plot metadata and is never
+treated as an event interval or rule input.
 Malformed markets fail the build; discovery never skips them or falls back to
 question or slug matching.
 

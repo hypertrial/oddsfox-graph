@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 ExplorerLevel = Literal["component", "event", "proposition"]
+LayoutMode = Literal["hierarchical", "close_time"]
 ExplorerRelation = Literal[
     "compatible",
     "complement",
@@ -54,6 +55,8 @@ class ExplorerNode(BaseModel):
     edge_count: int = 0
     classification_coverage: float | None = None
     classification_status: CoverageStatus = "not_applicable"
+    progression_outcome: bool | None = None
+    market_close_epoch: int | None = None
 
 
 class ExplorerEdge(BaseModel):
@@ -88,6 +91,7 @@ class GraphView(BaseModel):
     truncated_edges: bool = False
     coverage: dict[str, object]
     edge_mode: EdgeMode = "all"
+    layout_mode: LayoutMode = "hierarchical"
     display_stats: GraphDisplayStats | None = None
 
 
@@ -178,6 +182,7 @@ class ClaimSummary(BaseModel):
     is_progression_token: bool
     market_status: str
     is_still_alive: bool | None = None
+    market_close_epoch: int
     technical_canonical_label: str
 
 
@@ -194,6 +199,7 @@ class MarketDetail(BaseModel):
     market_direction: Literal["winner", "advance", "elimination"]
     market_status: str
     is_still_alive: bool | None = None
+    market_close_epoch: int
     claims: tuple[ClaimSummary, ...]
 
 

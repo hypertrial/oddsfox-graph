@@ -33,20 +33,25 @@ and why-not diagnostics are mode-aware. In fast mode, a missing semantic edge
 reports `full_mode_not_run` or `not_applicable_to_deterministic_rules`; it is
 never silently labeled unrelated.
 
-The **Analyst graph** route retains Sigma, semantic zoom, filters, inspection,
-proofs, and why-not tools. Explore requests display-essential edges and reports
-hidden transitive implications. Analyst requests every accepted edge. Dense
-Explore context is grouped instead of drawn; a nearby network is allowed only
-at 15 nodes, 24 edges, density 0.15 or below, label uniqueness 0.50 or above,
-and maximum degree 8 or below.
+The **Graph** route is a standalone plotter: it omits the product header,
+navigation, explanatory sections, and footer so only the graph, its controls,
+and selection inspector remain. It opens on every display-essential relation,
+including the cross-team winner exclusions. Complete live and static views retain
+all teams from the canonical input even when a filter temporarily leaves a team
+without a visible edge. Search focuses the selected outcome and its immediate
+logical neighbor. IDs, proof tools, evidence filters, confidence, layout
+controls, and recording remain progressively disclosed under the selection
+panel or **More** menu.
 
 Sigma and Graphology are constructed once per canvas. Inspection state is
 applied with reducers, so selection and hover do not replace the renderer or
-reset the camera. Analyst component overview is a packed atlas. Event and
-proposition views pack component groups after an exactly 250-iteration,
-worker-backed ForceAtlas2 layout, with deterministic seeds, four-decimal
-coordinates, and a session cache. Reduced-motion clients skip placement
-tweens.
+reset the camera. Complete live and static WC2026 views use frozen team rows with
+market close time increasing from left to right; equal close times are placed
+in stable market-ID order. Source `end_date` is presentation metadata only and
+is excluded from relationship inference. Component overviews remain packed atlases;
+event group views pack component groups after an exactly 250-iteration, worker-backed
+ForceAtlas2 layout, with deterministic seeds, four-decimal coordinates, and a
+session cache. Reduced-motion clients skip placement tweens.
 
 “Auto story” asks the local service for the fingerprint-bound recording plan
 and opens the same presentation used by the recorder. Preview controls provide
@@ -54,9 +59,9 @@ play/pause, seeking, previous/next highlight, regeneration at the current
 confidence threshold, and exit. Intro and outro are text-led; each highlight
 shows only its selected claims and bounded context.
 
-`explorer-export --scope graph` writes a `static-explorer-v3` copy of the
+`explorer-export --scope graph` writes a `static-explorer-v4` copy of the
 complete exported WC2026 scope plus the bundled DuckDB-Wasm client. The static
 manifest declares capabilities explicitly. Hierarchy, search, relationship
-inspection, Analyst graph, and direct comparison remain available; proof,
+inspection, the Graph route, and direct comparison remain available; proof,
 why-not, story regeneration, and recording controls are omitted. Older static
 schemas are rejected with regeneration guidance.

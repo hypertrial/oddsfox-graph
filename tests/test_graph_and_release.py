@@ -137,6 +137,30 @@ def test_explorer_api_is_loopback_bounded_and_cacheable(tmp_path: Path) -> None:
     assert metadata.headers["x-content-type-options"] == "nosniff"
     assert "frame-ancestors 'none'" in metadata.headers["content-security-policy"]
     assert client.get("/api/v1/overview?level=event").json()["nodes"][0]["id"] == "e"
+    proposition_view = client.get(
+        "/api/v1/overview?level=proposition&edge_mode=essential"
+    ).json()
+    assert proposition_view["level"] == "proposition"
+    assert proposition_view["layout_mode"] == "close_time"
+    assert proposition_view["edge_mode"] == "essential"
+    assert {node["domain"] for node in proposition_view["nodes"]} == {
+        "Argentina",
+        "Brazil",
+        "France",
+        "Germany",
+    }
+    close_order = sorted(
+        proposition_view["nodes"], key=lambda node: node["market_close_epoch"]
+    )
+    assert [node["x"] for node in close_order] == sorted(
+        node["x"] for node in close_order
+    )
+    assert {edge["id"] for edge in proposition_view["edges"]} == {
+        "p1",
+        "p2",
+        "p3",
+        "p4",
+    }
     assert client.get("/api/v1/subgraph?node=a&hops=1").status_code == 200
     assert client.get("/api/v1/subgraph?node=a&max_nodes=5").status_code == 422
     bounded_node = TestClient(
@@ -483,7 +507,7 @@ def test_static_explorer_export_contains_bounded_parquet_snapshot(tmp_path: Path
         max_edges=5,
     )
     assert manifest["data_format"] == "duckdb-wasm-parquet"
-    assert manifest["schema_version"] == "static-explorer-v3"
+    assert manifest["schema_version"] == "static-explorer-v4"
     assert manifest["graph_content_fingerprint"] == "fixture"
     assert manifest["build_mode"] == "full"
     assert manifest["validation_status"] == "EXPERIMENTAL_FULL"
@@ -563,6 +587,11 @@ def test_static_explorer_export_contains_bounded_parquet_snapshot(tmp_path: Path
         }
         assert stage_coverage["final"]["classification_status"] == "not_applicable"
         assert stage_coverage["final"]["classification_coverage"] is None
+        assert db.rows(
+            f"SELECT count(DISTINCT canonical_team_name) AS teams, "
+            f"count(*) FILTER (WHERE market_close_epoch IS NULL) AS missing_close "
+            f"FROM read_parquet('{q(destination / 'snapshot_claims.parquet')}')"
+        ) == [{"teams": 4, "missing_close": 0}]
     finally:
         db.close()
 
@@ -919,7 +948,9 @@ def _write_graph(
                    'active'::VARCHAR AS market_status,
                    true::BOOLEAN AS is_still_alive,
                    NULL::VARCHAR AS opposite_clob_token_id,
-                   NULL::DOUBLE AS market_volume_usd
+                   NULL::DOUBLE AS market_volume_usd,
+                   (TIMESTAMPTZ '2026-07-01 00:00:00+00'
+                    + stage_rank * INTERVAL 1 DAY) AS market_close_time
             FROM nodes
             """
         )

@@ -783,6 +783,7 @@ def _fast_proposition_row(
             None,
         ),
         "market_volume_usd": market.volume,
+        "market_close_time": market.market_close_time,
         "expected_tokens": len(market.outcomes),
         "is_active": market.is_active,
         "is_closed": market.is_closed,

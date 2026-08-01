@@ -210,7 +210,7 @@ export function GraphCanvas({
       ref={container}
       role="img"
       aria-hidden={hiddenForStory || undefined}
-      aria-label={`Interactive logic graph with ${view?.nodes.length ?? 0} nodes and ${view?.edges.length ?? 0} relations. Double-click a component or event to zoom in.`}
+      aria-label={`Interactive World Cup logic graph with ${view?.nodes.length ?? 0} outcome${view?.nodes.length === 1 ? "" : "s"} and ${view?.edges.length ?? 0} connection${view?.edges.length === 1 ? "" : "s"}. Select an outcome to inspect nearby logic.`}
     />
   );
 }
@@ -235,8 +235,8 @@ function buildGraph(view: GraphView): Graph {
     graph.addEdgeWithKey(edge.id, edge.source, edge.target, {
       color,
       baseColor: color,
-      size: clamp(Math.log2(edge.count + 1), 0.7, 5),
-      baseSize: clamp(Math.log2(edge.count + 1), 0.7, 5),
+      size: clamp(Math.log2(edge.count + 1) * 1.4, 1.2, 5),
+      baseSize: clamp(Math.log2(edge.count + 1) * 1.4, 1.2, 5),
       type: edge.relation === "implies" ? "curvedArrow" : "curved",
       label: `${edge.relation.replaceAll("_", " ")} · ${edge.count}`,
       confidence: edge.confidence,

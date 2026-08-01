@@ -221,7 +221,7 @@ def create_app(
 
     @app.get("/api/v1/overview")
     def overview(
-        level: Literal["component", "event"] = "event",
+        level: Literal["component", "event", "proposition"] = "event",
         domains: list[str] = Query(default=[]),
         relations: list[Relation] = Query(default=[]),
         min_confidence: float = Query(default=0.0, ge=0.0, le=1.0),
@@ -229,6 +229,7 @@ def create_app(
         closed_only: bool = False,
         include_compatible: bool = False,
         evidence_tiers: list[EvidenceTier] = Query(default=[]),
+        edge_mode: EdgeMode = "all",
         max_nodes: int = Query(default=max_response_nodes, ge=1, le=max_response_nodes),
         max_edges: int = Query(default=max_response_edges, ge=0, le=max_response_edges),
     ) -> dict[str, object]:
@@ -246,6 +247,7 @@ def create_app(
             filters,
             max_nodes=max_nodes,
             max_edges=max_edges,
+            edge_mode=edge_mode,
         ).model_dump(mode="json")
 
     @app.get("/api/v1/events")

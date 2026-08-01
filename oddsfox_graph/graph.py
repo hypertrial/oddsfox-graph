@@ -351,17 +351,19 @@ class Graph:
 
     def overview(
         self,
-        level: Literal["component", "event"] = "event",
+        level: Literal["component", "event", "proposition"] = "event",
         filters: GraphFilter | None = None,
         *,
         max_nodes: int = 5_000,
         max_edges: int = 10_000,
+        edge_mode: EdgeMode = "all",
     ) -> GraphView:
         return self._explorer().overview(
             level,
             filters,
             max_nodes=max_nodes,
             max_edges=max_edges,
+            edge_mode=edge_mode,
         )
 
     def neighborhood(

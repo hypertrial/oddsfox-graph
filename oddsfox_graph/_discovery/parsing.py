@@ -230,6 +230,7 @@ def proposition_row(
         "is_still_alive": market.is_still_alive,
         "opposite_clob_token_id": source.opposite_clob_token_id,
         "market_volume_usd": market.volume,
+        "market_close_time": market.market_close_time,
         "_expected_tokens": len(market.outcomes),
         "_is_active": market.is_active,
         "_is_closed": market.is_closed,

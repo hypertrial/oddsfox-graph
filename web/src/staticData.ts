@@ -2,6 +2,7 @@ import * as duckdb from "@duckdb/duckdb-wasm";
 import duckdbMvp from "@duckdb/duckdb-wasm/dist/duckdb-mvp.wasm?url";
 import mvpWorker from "@duckdb/duckdb-wasm/dist/duckdb-browser-mvp.worker.js?url";
 import { marketsForProgressionStage, relationshipSentence } from "./human";
+import { closeTimeColumns } from "./layout";
 import type {
   ClaimSummary,
   CompareResult,
@@ -15,7 +16,6 @@ import type {
   GraphView,
   HumanHighlight,
   MarketDetail,
-  Page,
   RelationshipDetail,
   RelationshipGroupSummary,
   SearchNode,
@@ -104,10 +104,6 @@ export async function staticExploreHome(
   };
 }
 
-export async function staticStages(): Promise<StageSummary[]> {
-  return (await loadStaticSnapshot()).stages;
-}
-
 export async function staticStageDetail(stageKey: string): Promise<StageDetail> {
   const loaded = await loadStaticSnapshot();
   const summary = loaded.stages.find((item) => item.stage_key === stageKey);
@@ -121,21 +117,6 @@ export async function staticStageDetail(stageKey: string): Promise<StageDetail> 
     summary,
     teams: loaded.teams.filter((team) => teamNames.has(team.canonical_team_name)),
     markets,
-  };
-}
-
-export async function staticTeams(
-  cursor: string | null,
-  limit: number,
-): Promise<Page<TeamSummary>> {
-  const teams = (await loadStaticSnapshot()).teams;
-  const rowsAfterCursor = cursor ? teams.filter((team) => team.team_key > cursor) : teams;
-  const rows = rowsAfterCursor.slice(0, limit);
-  const truncated = rowsAfterCursor.length > limit;
-  return {
-    rows,
-    next_cursor: truncated ? rows.at(-1)?.team_key ?? null : null,
-    truncated,
   };
 }
 
@@ -217,11 +198,26 @@ export async function staticSearch(query: string): Promise<SearchNode[]> {
   const loaded = await loadStaticSnapshot();
   const lowered = query.toLocaleLowerCase();
   const claimById = new Map(loaded.claims.map((claim) => [claim.id, claim]));
+  const seenClaims = new Set<string>();
   return loaded.view.nodes
     .filter((node) => {
       const claim = claimById.get(node.id);
       return `${claim?.plain_claim ?? ""} ${claim?.question ?? ""} ${node.label}`.toLocaleLowerCase().includes(lowered)
         || node.id.toLocaleLowerCase() === lowered;
+    })
+    .sort((left, right) => {
+      const leftClaim = claimById.get(left.id);
+      const rightClaim = claimById.get(right.id);
+      return Number(rightClaim?.is_progression_token ?? false) - Number(leftClaim?.is_progression_token ?? false)
+        || (rightClaim?.normalized_progression_level ?? -1) - (leftClaim?.normalized_progression_level ?? -1)
+        || (leftClaim?.plain_claim ?? left.label).localeCompare(rightClaim?.plain_claim ?? right.label)
+        || left.id.localeCompare(right.id);
+    })
+    .filter((node) => {
+      const label = claimById.get(node.id)?.plain_claim ?? node.label;
+      if (seenClaims.has(label)) return false;
+      seenClaims.add(label);
+      return true;
     })
     .slice(0, 12)
     .map((node) => {
@@ -240,7 +236,7 @@ async function load(): Promise<StaticSnapshot> {
   const manifestResponse = await fetch("./static_manifest.json");
   if (!manifestResponse.ok) throw new Error("Static explorer manifest is unavailable");
   const manifest = (await manifestResponse.json()) as StaticManifest;
-  if (manifest.schema_version !== "static-explorer-v3") {
+  if (manifest.schema_version !== "static-explorer-v4") {
     throw new Error(`Unsupported static explorer schema ${manifest.schema_version}. Regenerate this snapshot with oddsfox-graph 0.12.0.`);
   }
   for (const file of snapshotFiles) {
@@ -253,7 +249,6 @@ async function load(): Promise<StaticSnapshot> {
   const connection = await database.connect();
   try {
     const nodes = await readRows<ExplorerNode>(connection, "snapshot_nodes", "id");
-    const edges = await readRows<ExplorerEdge>(connection, "snapshot_edges", "id");
     const stages = await readRows<StageSummary>(connection, "snapshot_stages", "stage_rank, stage_key");
     const teams = await readRows<TeamSummary>(connection, "snapshot_teams", "team_key");
     const marketRows = await readRows<MarketRow>(connection, "snapshot_markets", "stage_rank, market_id");
@@ -283,15 +278,50 @@ async function load(): Promise<StaticSnapshot> {
         explanation: row.explanation,
       };
     });
-    const displayStats = manifest.display_stats ?? calculateDisplayStats(nodes, edges);
+    const teamRows = new Map(
+      [...new Set(claims.map((claim) => claim.canonical_team_name))]
+        .sort((left, right) => left.localeCompare(right))
+        .map((team, index) => [team, index]),
+    );
+    const closeColumns = closeTimeColumns(claims.map((claim) => claim.market_close_epoch));
+    const marketOffsets = marketCloseOffsets(claims);
+    const humanNodes = nodes.map((node) => {
+      const claim = claimById.get(node.id);
+      return claim ? {
+        ...node,
+        label: claim.plain_claim,
+        parent_id: claim.canonical_team_name,
+        component_id: `team:${claim.canonical_team_name.toLocaleLowerCase()}`,
+        domain: claim.canonical_team_name,
+        progression_outcome: claim.is_progression_token,
+        market_close_epoch: claim.market_close_epoch,
+        x: (closeColumns.get(claim.market_close_epoch) ?? 0) * 260,
+        y: (teamRows.get(claim.canonical_team_name) ?? 0) * 90
+          + (marketOffsets.get(claim.market_id) ?? 0) * 18
+          + (claim.is_progression_token ? 0 : 8),
+      } : node;
+    });
+    const essentialEdges: ExplorerEdge[] = relationships.map((relationship) => ({
+      id: relationship.proposal_id,
+      source: relationship.source.id,
+      target: relationship.target.id,
+      relation: relationship.relation,
+      count: 1,
+      confidence: relationship.confidence,
+      discovery_method: relationship.discovery_method,
+      evidence_tier: relationship.evidence_tier,
+      aggregation_only: false,
+    }));
+    const displayStats = manifest.display_stats ?? calculateDisplayStats(humanNodes, essentialEdges);
     const view: GraphView = {
-      level: nodes[0]?.level ?? "proposition",
-      nodes,
-      edges,
+      level: humanNodes[0]?.level ?? "proposition",
+      nodes: humanNodes,
+      edges: essentialEdges,
       truncated_nodes: false,
       truncated_edges: false,
       coverage: manifest.coverage,
-      edge_mode: "all",
+      edge_mode: "essential",
+      layout_mode: "close_time",
       display_stats: displayStats,
     };
     return {
@@ -324,6 +354,22 @@ async function load(): Promise<StaticSnapshot> {
     await connection.close();
     await database.terminate();
   }
+}
+
+export function marketCloseOffsets(claims: ClaimSummary[]): Map<string, number> {
+  const groups = new Map<string, Set<string>>();
+  for (const claim of claims) {
+    const key = `${claim.canonical_team_name}\u0000${claim.market_close_epoch}`;
+    const markets = groups.get(key) ?? new Set<string>();
+    markets.add(claim.market_id);
+    groups.set(key, markets);
+  }
+  const offsets = new Map<string, number>();
+  for (const markets of groups.values()) {
+    const ordered = [...markets].sort();
+    ordered.forEach((marketId, index) => offsets.set(marketId, index - (ordered.length - 1) / 2));
+  }
+  return offsets;
 }
 
 async function register(database: duckdb.AsyncDuckDB, name: string) {

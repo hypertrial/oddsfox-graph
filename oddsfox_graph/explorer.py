@@ -86,6 +86,7 @@ STATIC_MARKET_COLUMNS = {
     "market_direction": "VARCHAR",
     "market_status": "VARCHAR",
     "is_still_alive": "BOOLEAN",
+    "market_close_epoch": "BIGINT",
 }
 
 STATIC_CLAIM_COLUMNS = {
@@ -101,6 +102,7 @@ STATIC_CLAIM_COLUMNS = {
     "is_progression_token": "BOOLEAN",
     "market_status": "VARCHAR",
     "is_still_alive": "BOOLEAN",
+    "market_close_epoch": "BIGINT",
     "technical_canonical_label": "VARCHAR",
 }
 
@@ -346,7 +348,7 @@ def export_explorer(
         finally:
             snapshot_db.close()
         manifest = {
-            "schema_version": "static-explorer-v3",
+            "schema_version": "static-explorer-v4",
             "package_version": metadata.package_version,
             "source_graph": canonical_json_sha256(metadata.build),
             "graph_content_fingerprint": metadata.viewer[

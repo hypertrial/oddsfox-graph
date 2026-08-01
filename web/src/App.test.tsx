@@ -2,11 +2,27 @@ import { describe, expect, it } from "vitest";
 import { filterGraphView } from "./api";
 import { parseRoute } from "./routes";
 import { coverageLabel, marketsByProgressionLevel, marketsForProgressionStage, relationshipSentenceFromParts, safeClaim } from "./human";
+import { closeTimeColumns } from "./layout";
 import type { GraphView, MarketDetail } from "./types";
 
 const fixture: GraphView = {
   level: "proposition",
-  nodes: [],
+  nodes: ["a", "b", "c", "isolated"].map((id) => ({
+    id,
+    label: id,
+    level: "proposition",
+    parent_id: null,
+    x: 0,
+    y: 0,
+    size: 1,
+    domain: null,
+    component_id: null,
+    market_id: null,
+    proposition_count: 1,
+    edge_count: 0,
+    classification_coverage: null,
+    classification_status: "not_applicable",
+  })),
   edges: [
     {
       id: "implication",
@@ -39,6 +55,11 @@ const fixture: GraphView = {
 };
 
 describe("World Cup outcome explorer", () => {
+  it("assigns market-close columns from earliest to latest", () => {
+    const columns = closeTimeColumns([300, 100, 200, 100]);
+    expect([...columns.entries()]).toEqual([[100, 0], [200, 1], [300, 2]]);
+  });
+
   it("parses dependency-free hash routes and safely falls back home", () => {
     expect(parseRoute("#/explore/team/brazil")).toEqual({ kind: "team", id: "brazil" });
     expect(parseRoute("#/explore/relationship/proposal%201")).toEqual({ kind: "relationship", id: "proposal 1" });
@@ -64,13 +85,35 @@ describe("World Cup outcome explorer", () => {
   });
 
   it("applies relation, confidence, and compatible filters to static exports", () => {
-    expect(filterGraphView(fixture, "all", 0.95, false).edges.map((edge) => edge.id)).toEqual([
+    const implications = filterGraphView(fixture, "all", 0.95, false);
+    expect(implications.edges.map((edge) => edge.id)).toEqual([
       "implication",
     ]);
+    expect(implications.nodes.map((node) => node.id)).toEqual(["a", "b", "c", "isolated"]);
     expect(filterGraphView(fixture, "compatible", 0.98, false).edges.map((edge) => edge.id)).toEqual([
       "compatibility",
     ]);
     expect(filterGraphView(fixture, "implies", 0.98, true).edges).toEqual([]);
+  });
+
+  it("keeps the default World Cup progression view on positive outcomes", () => {
+    const semanticView: GraphView = {
+      ...fixture,
+      nodes: fixture.nodes.map((node) => ({
+        ...node,
+        progression_outcome: node.id === "a" || node.id === "b",
+      })),
+      edges: [
+        fixture.edges[0],
+        { ...fixture.edges[0], id: "negative", source: "c", target: "isolated" },
+      ],
+    };
+    const filtered = filterGraphView(semanticView, "implies", 0.95, false);
+    expect(filtered.edges.map((edge) => edge.id)).toEqual(["implication"]);
+    expect(filtered.nodes.map((node) => node.id)).toEqual(["a", "b"]);
+    const negative = filterGraphView(semanticView, "implies", 0.95, false, "all", false);
+    expect(negative.edges.map((edge) => edge.id)).toEqual(["implication", "negative"]);
+    expect(negative.nodes.map((node) => node.id)).toEqual(["a", "b", "c", "isolated"]);
   });
 
   it("keeps every market at its normalized progression level", () => {
@@ -85,6 +128,7 @@ describe("World Cup outcome explorer", () => {
       market_direction: "elimination",
       market_status: "active",
       is_still_alive: true,
+      market_close_epoch: 1784419200,
       claims: [],
     });
     const grouped = marketsByProgressionLevel([

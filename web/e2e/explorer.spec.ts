@@ -13,6 +13,7 @@ const winnerYes = {
   is_progression_token: true,
   market_status: "active",
   is_still_alive: true,
+  market_close_epoch: 1784419200,
   technical_canonical_label: "Brazil wins the World Cup",
 };
 
@@ -32,6 +33,7 @@ const finalYes = {
   stage_key: "final",
   stage_rank: 4,
   normalized_progression_level: 4,
+  market_close_epoch: 1784332800,
   question: "Will Brazil reach the 2026 FIFA World Cup final?",
   plain_claim: "Brazil reaches the final",
   technical_canonical_label: "Brazil reaches the final",
@@ -57,6 +59,7 @@ const winnerMarket = {
   market_direction: "winner",
   market_status: "active",
   is_still_alive: true,
+  market_close_epoch: 1784419200,
   claims: [winnerYes, winnerNo],
 };
 
@@ -69,6 +72,7 @@ const finalMarket = {
   stage_rank: 4,
   normalized_progression_level: 4,
   market_direction: "advance",
+  market_close_epoch: 1784332800,
   claims: [finalYes, finalNo],
 };
 
@@ -262,7 +266,7 @@ test.beforeEach(async ({ page }) => {
     } else if (url.pathname.endsWith("/compare")) {
       body = { status: "direct", source: winnerYes, target: finalYes, direct: relationship, path: [], explanation: "Winning requires reaching the final." };
     } else if (url.pathname.endsWith("/overview")) {
-      body = { ...graphView, level: "event", nodes: [], edges: [], edge_mode: "all", display_stats: { ...displayStats, input_node_count: 0, input_edge_count: 0, display_node_count: 0, display_edge_count: 0 } };
+      body = { ...graphView, layout_mode: "close_time" };
     } else if (url.pathname.endsWith("/recording-plan")) {
       body = {
         schema_version: "oddsfox-recording-plan-v2",
@@ -376,19 +380,27 @@ test("keeps raw relationship rule identifiers inside Technical details", async (
   await expect(rawBasis).toBeVisible();
 });
 
-test("keeps the complete network and proof tools in Analyst graph", async ({ page }) => {
+test("opens only the graph and its controls with cross-team logic selected", async ({ page }) => {
   await page.goto("/#/analyst");
-  await expect(page.getByRole("heading", { name: "Analyst graph" })).toBeVisible();
+  await expect(page.locator(".topbar, .primary-nav, .site-footer")).toHaveCount(0);
   await expect(page.locator(".graph-canvas")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Proof tools" })).toBeVisible();
-  await page.getByLabel("Search graph nodes").fill("Brazil");
-  await page.getByRole("button", { name: "Search" }).click();
+  await expect(page.getByLabel("Show")).toHaveValue("all");
+  await expect(page.getByText("Earlier market close")).toBeVisible();
+  await expect(page.getByText("Proof tools")).toHaveCount(0);
+  await page.getByLabel("Find a team or outcome").fill("Brazil");
+  await page.getByRole("button", { name: "Find" }).click();
   await page.getByRole("button", { name: /Brazil wins the World Cup/ }).click();
+  await expect(page.getByRole("heading", { name: "Brazil wins the World Cup" })).toBeVisible();
+  await expect(page.getByText(`ID: ${winnerYes.id}`)).not.toBeVisible();
+  await page.getByText("Technical details").click();
   await expect(page.getByText(`ID: ${winnerYes.id}`)).toBeVisible();
+  await page.getByText("Proof tools").click();
+  await expect(page.getByLabel("From outcome ID")).toBeVisible();
 });
 
 test("records a human-captioned, hairball-free deterministic story", async ({ page }) => {
   await page.goto("/#/analyst");
+  await page.getByText("More").click();
   await page.getByRole("button", { name: "Auto story" }).click();
   await expect(page.getByRole("heading", { name: "FIFA World Cup 2026 Outcome Map" })).toBeVisible();
   await expect(page.locator(".presentation-shell")).toHaveClass(/presentation-intro/);
@@ -428,10 +440,9 @@ test("hides live-only tools when metadata declares a static snapshot", async ({ 
     }),
   }));
   await page.goto("/#/analyst");
-  await expect(page.getByText("Static snapshot")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Proof tools" })).toHaveCount(0);
+  await expect(page.locator(".topbar, .primary-nav, .site-footer")).toHaveCount(0);
+  await expect(page.getByText("Proof tools")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Auto story" })).toHaveCount(0);
-  await expect(page.getByText("Proof and why-not diagnostics require the original graph directory.")).toBeVisible();
 });
 
 test("reflows at 390px and honors dark reduced-motion preferences", async ({ page }) => {
@@ -443,4 +454,7 @@ test("reflows at 390px and honors dark reduced-motion preferences", async ({ pag
   expect(await page.locator(".stage-map").evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(" ").length)).toBe(1);
   expect(await page.locator("html").evaluate((element) => getComputedStyle(element).scrollBehavior)).toBe("auto");
   expect(await page.locator("body").evaluate((element) => getComputedStyle(element).backgroundColor)).toBe("rgb(13, 18, 25)");
+  await page.goto("/#/analyst");
+  await expect(page.locator(".graph-canvas")).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });

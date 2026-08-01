@@ -28,6 +28,8 @@ export interface ExplorerNode {
   edge_count: number;
   classification_coverage: number | null;
   classification_status: ClassificationStatus;
+  progression_outcome?: boolean;
+  market_close_epoch?: number;
 }
 
 export interface ExplorerEdge {
@@ -58,6 +60,7 @@ export interface GraphView {
   level: ExplorerLevel;
   nodes: ExplorerNode[];
   edges: ExplorerEdge[];
+  layout_mode?: "hierarchical" | "close_time";
   truncated_nodes: boolean;
   truncated_edges: boolean;
   coverage: Record<string, unknown>;
@@ -115,6 +118,7 @@ export interface ClaimSummary {
   is_progression_token: boolean;
   market_status: string;
   is_still_alive: boolean | null;
+  market_close_epoch: number;
   technical_canonical_label: string;
 }
 
@@ -161,6 +165,7 @@ export interface MarketDetail {
   market_direction: "winner" | "advance" | "elimination";
   market_status: string;
   is_still_alive: boolean | null;
+  market_close_epoch: number;
   claims: ClaimSummary[];
 }
 

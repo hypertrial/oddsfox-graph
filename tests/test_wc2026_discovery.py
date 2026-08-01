@@ -88,6 +88,14 @@ def _write_wc2026(
     break_opposite: bool = False,
     duplicate_grain: bool = False,
 ) -> None:
+    close_epochs = {
+        "round_of_32": 1783036800,
+        "round_of_16": 1783382400,
+        "quarterfinal": 1783728000,
+        "semifinal": 1784073600,
+        "final": 1784419200,
+        "winner": 1784419200,
+    }
     rows: list[tuple[object, ...]] = []
     for market in markets:
         direction = str(market["direction"])
@@ -118,6 +126,10 @@ def _write_wc2026(
                         opposite,
                         "live",
                         True,
+                        datetime.fromtimestamp(
+                            close_epochs[str(market["stage_key"])],
+                            tz=timezone.utc,
+                        ),
                         datetime.fromtimestamp(epoch, tz=timezone.utc),
                         epoch,
                         0.25 + price_offset + hour_index * 0.01,
@@ -150,6 +162,7 @@ def _write_wc2026(
                 opposite_clob_token_id VARCHAR,
                 market_status VARCHAR,
                 is_still_alive BOOLEAN,
+                end_date TIMESTAMPTZ,
                 odds_hour_utc TIMESTAMPTZ,
                 odds_hour_epoch BIGINT,
                 close_price DOUBLE
@@ -157,7 +170,7 @@ def _write_wc2026(
             """
         )
         db.executemany(
-            "INSERT INTO wc VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO wc VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             rows,
         )
         db.execute(f"COPY wc TO '{q(path)}' (FORMAT PARQUET)")
@@ -220,7 +233,11 @@ def test_wc2026_profile_collapses_hours_and_has_price_independent_semantics(
     assert survive.stage_rank == 0
     assert survive.progression_level == 1
     assert next(outcome for outcome in survive.outcomes if outcome.outcome == "No").is_progression
-    assert survive.time_start is None and survive.time_end is None
+    assert survive.time_start is None
+    assert survive.time_end is None
+    assert survive.market_close_time == datetime.fromtimestamp(
+        1783036800, tz=timezone.utc
+    )
     assert first[3]["truncated"] is False
     assert first[3]["teams"] == 2
     assert first[3]["source"] == "oddsfox-pipeline"
@@ -429,9 +446,24 @@ def test_wc2026_profile_rejects_partial_and_malformed_inputs(tmp_path: Path) -> 
             "missing columns: stage_key",
         ),
         (
+            "missing-close-time",
+            "SELECT * EXCLUDE(end_date) FROM {source}",
+            "missing columns: end_date",
+        ),
+        (
             "wrong-type",
             "SELECT * REPLACE (stage_rank::VARCHAR AS stage_rank) FROM {source}",
             "incompatible column types: stage_rank=VARCHAR",
+        ),
+        (
+            "wrong-close-type",
+            "SELECT * REPLACE (end_date::VARCHAR AS end_date) FROM {source}",
+            "incompatible column type: end_date=VARCHAR",
+        ),
+        (
+            "non-finite-close",
+            "SELECT * REPLACE ('infinity'::TIMESTAMPTZ AS end_date) FROM {source}",
+            "non-finite end_date",
         ),
         (
             "token-count",
@@ -483,6 +515,13 @@ def test_wc2026_profile_rejects_partial_and_malformed_inputs(tmp_path: Path) -> 
             "SELECT * REPLACE (CASE WHEN market_id='br-r16' "
             "AND odds_hour_epoch=1782867600 THEN question || ' changed' "
             "ELSE question END AS question) FROM {source}",
+            "expected 2 invariant token rows",
+        ),
+        (
+            "close-time-drift",
+            "SELECT * REPLACE (CASE WHEN market_id='br-r16' "
+            "AND odds_hour_epoch=1782867600 THEN end_date + INTERVAL 1 HOUR "
+            "ELSE end_date END AS end_date) FROM {source}",
             "expected 2 invariant token rows",
         ),
         (
@@ -640,6 +679,7 @@ def test_fast_wc2026_discovery_publishes_structured_rules(tmp_path: Path) -> Non
     assert rules["wc2026.same_progression.v1"] >= 2
     assert rules["wc2026.progression.v1"] >= 2
     assert rules["wc2026.winner_exclusion.v1"] == 1
+    assert not any(rule_id.startswith("time.") for rule_id in rules)
     implications = {
         (str(row["src_node_id"]), str(row["dst_node_id"]))
         for row in implication_rows
@@ -650,6 +690,7 @@ def test_fast_wc2026_discovery_publishes_structured_rules(tmp_path: Path) -> Non
     assert graph.build_mode == "fast"
     assert graph.coverage()["classification_status"] == "not_applicable"
     assert graph.coverage()["classification_coverage"] is None
+    assert graph.market("br-r16").market_close_epoch == 1783382400
     assert [stage.stage_key for stage in graph.stages()] == [
         "round_of_32",
         "round_of_16",

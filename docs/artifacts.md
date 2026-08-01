@@ -7,7 +7,8 @@
   `market_family`, `canonical_proposition`, `proposition_type`,
   `expected_tokens`, `first_seen_ts`, `last_seen_ts`. WC2026 outputs also carry
   authoritative team, stage, normalized progression level, direction,
-  progression meaning/polarity, opposite token, market/team status, and volume.
+  progression meaning/polarity, opposite token, market/team status, volume, and
+  `market_close_time`.
 - `market_groups.parquet`: `market_id`, `event_slug`, `question`,
   `market_family`, `num_tokens`, `token_ids`, `outcome_labels`, `is_active`,
   `is_closed`, `first_seen_ts`, `last_seen_ts`.

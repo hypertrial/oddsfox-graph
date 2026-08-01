@@ -1,5 +1,4 @@
 import type {
-  ClaimSummary,
   ClassificationStatus,
   MarketDetail,
   RecordingHighlight,
@@ -137,10 +136,6 @@ export function validationLabel(status: string, mode?: string): string {
   if (normalized === "EXPERIMENTAL_FULL" || normalized.includes("GENERATIVE")) return "Model-reviewed graph";
   if (normalized.includes("VALID")) return mode === "full" ? "Model-reviewed graph" : "Graph verified";
   return "Graph ready";
-}
-
-export function claimDescription(claim: ClaimSummary): string {
-  return `${claim.canonical_team_name} · ${progressionLabel(claim.normalized_progression_level)} · ${claim.answer}`;
 }
 
 export function safeClaim(value: string): string {

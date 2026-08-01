@@ -164,6 +164,7 @@ _WC2026_REQUIRED_COLUMNS = {
     "opposite_clob_token_id",
     "market_status",
     "is_still_alive",
+    "end_date",
     "odds_hour_utc",
     "odds_hour_epoch",
 }
@@ -291,6 +292,20 @@ def _load_wc2026_markets(
                 "WC2026 graph input has invalid hourly grain or volume for: "
                 + ", ".join(invalid_hours)
             )
+        invalid_close_times = _bounded_values(
+            db,
+            f"""
+            SELECT market_id || '/' || clob_token_id AS value
+            FROM read_parquet('{q(input_path)}')
+            WHERE NOT isfinite(end_date)
+            ORDER BY value
+            """,
+        )
+        if invalid_close_times:
+            raise _wc2026_error(
+                "WC2026 graph input has a non-finite end_date for: "
+                + ", ".join(invalid_close_times)
+            )
         duplicate_grains = _bounded_values(
             db,
             f"""
@@ -326,7 +341,8 @@ def _load_wc2026_markets(
                 is_progression_token::BOOLEAN AS is_progression_token,
                 opposite_clob_token_id::VARCHAR AS opposite_clob_token_id,
                 market_status::VARCHAR AS market_status,
-                is_still_alive::BOOLEAN AS is_still_alive
+                is_still_alive::BOOLEAN AS is_still_alive,
+                end_date::TIMESTAMPTZ AS market_close_time
             FROM read_parquet('{q(input_path)}')
             ORDER BY market_id, outcome_index, clob_token_id
             """
@@ -426,6 +442,11 @@ def _validate_wc2026_column_types(schema: dict[str, str]) -> None:
             "WC2026 graph input has incompatible column type: "
             f"odds_hour_utc={schema['odds_hour_utc']}"
         )
+    if not schema["end_date"].startswith("TIMESTAMP"):
+        raise _wc2026_error(
+            "WC2026 graph input has incompatible column type: "
+            f"end_date={schema['end_date']}"
+        )
 
 
 def _wc2026_invalid_required_rows(db: DuckDB, input_path: Path) -> list[str]:
@@ -512,6 +533,7 @@ def _wc2026_source_markets(
             "progression_outcome_label",
             "market_status",
             "is_still_alive",
+            "market_close_time",
         )
         non_invariant = [
             field
@@ -601,6 +623,7 @@ def _wc2026_source_markets(
                 is_closed=bool(rows[0]["is_closed"]),
                 first_seen_ts=datetime_or_none(observation["first_seen_ts"]),
                 last_seen_ts=datetime_or_none(observation["last_seen_ts"]),
+                market_close_time=datetime_or_none(rows[0]["market_close_time"]),
                 volume=float(cast(float, rows[0]["market_volume_usd"])),
                 input_profile=WC2026_SOURCE_SCHEMA,
                 team_name=str(rows[0]["canonical_team_name"]),
@@ -640,6 +663,7 @@ def _wc2026_market_semantics(market: SourceMarket) -> dict[str, Any]:
         "progression_outcome": market.progression_outcome,
         "market_status": market.market_status,
         "is_still_alive": market.is_still_alive,
+        "market_close_time": market.market_close_time,
         "outcomes": [outcome.__dict__ for outcome in market.outcomes],
     }
 

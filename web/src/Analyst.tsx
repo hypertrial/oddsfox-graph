@@ -1,10 +1,8 @@
-import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import * as api from "./api";
 import { GraphCanvas } from "./GraphCanvas";
-import { coverageLabel } from "./human";
 import type {
   EvidenceTier,
-  ExplorerLevel,
   GraphMetadata,
   GraphView,
   Relation,
@@ -20,6 +18,15 @@ const relations: Array<Relation | "all"> = [
   "compatible",
 ];
 
+const relationLabels: Record<Relation | "all", string> = {
+  all: "All logic + cross-team links",
+  implies: "Progression paths",
+  equivalent: "Same outcome",
+  complement: "Yes / no pairs",
+  mutually_exclusive: "Cross-team winner links",
+  compatible: "Can coexist",
+};
+
 interface Props {
   metadata: GraphMetadata;
   onEnterStory: (confidence: number) => void;
@@ -27,7 +34,7 @@ interface Props {
 
 export function Analyst({ metadata, onEnterStory }: Props) {
   const [view, setView] = useState<GraphView | null>(null);
-  const [level, setLevel] = useState<"component" | "event">("event");
+  const [level, setLevel] = useState<"component" | "event" | "proposition">("proposition");
   const [relation, setRelation] = useState<Relation | "all">("all");
   const [minConfidence, setMinConfidence] = useState(0.95);
   const [evidenceTier, setEvidenceTier] = useState<EvidenceTier>("all");
@@ -42,10 +49,10 @@ export function Analyst({ metadata, onEnterStory }: Props) {
   const [reasonRelation, setReasonRelation] = useState<Relation>("implies");
   const [reasoning, setReasoning] = useState<unknown>(null);
   const [layoutNonce, setLayoutNonce] = useState(0);
-  const [breadcrumbs, setBreadcrumbs] = useState<string[]>(["Analyst graph"]);
+  const [contextLabel, setContextLabel] = useState("All teams");
   const overviewRequest = useRef<AbortController | null>(null);
   const graphFingerprint = String(metadata.viewer.graph_content_fingerprint ?? "unknown");
-  const requestedFilterKey = `${level}:${relation}:${minConfidence.toFixed(2)}:${evidenceTier}:all`;
+  const requestedFilterKey = `${level}:${relation}:${minConfidence.toFixed(2)}:${evidenceTier}:essential`;
   const [viewFilterKey, setViewFilterKey] = useState(requestedFilterKey);
   const isStatic = metadata.viewer.static === true;
 
@@ -60,13 +67,13 @@ export function Analyst({ metadata, onEnterStory }: Props) {
         relation === "compatible",
         evidenceTier,
         signal,
-        "all",
+        "essential",
       );
       setView(next);
       setViewFilterKey(requestedFilterKey);
       setSelectedId(null);
       setDetail(null);
-      setBreadcrumbs(["Analyst graph", level === "component" ? "Components" : "Events"]);
+      setContextLabel(level === "component" ? "Team groups" : level === "event" ? "Market groups" : "All teams");
     } catch (reason) {
       if (reason instanceof DOMException && reason.name === "AbortError") return;
       setError(message(reason));
@@ -127,11 +134,11 @@ export function Analyst({ metadata, onEnterStory }: Props) {
       if (selected.level === "event") {
         setView(await api.eventGraph(id, relation, minConfidence, evidenceTier));
         setViewFilterKey(`event:${id}:${requestedFilterKey}`);
-        setBreadcrumbs(["Analyst graph", "Events", selected.label]);
+        setContextLabel(selected.label);
       } else {
         setView(await api.componentGraph(id, relation, minConfidence, evidenceTier));
         setViewFilterKey(`component:${id}:${requestedFilterKey}`);
-        setBreadcrumbs(["Analyst graph", selected.label, "Events"]);
+        setContextLabel(selected.label);
       }
       setSelectedId(null);
       setDetail(null);
@@ -156,10 +163,18 @@ export function Analyst({ metadata, onEnterStory }: Props) {
     overviewRequest.current?.abort();
     setLoading(true);
     try {
-      const next = await api.neighborhood(result.node_id);
-      setView(next);
-      setViewFilterKey(`search:${result.node_id}:all`);
-      setBreadcrumbs(["Analyst graph", "Search", result.canonical_proposition]);
+      const next = await api.neighborhood(result.node_id, 1);
+      const selected = next.nodes.find((node) => node.id === result.node_id);
+      setView(api.filterGraphView(
+        next,
+        relation,
+        minConfidence,
+        relation === "compatible",
+        evidenceTier,
+        selected?.progression_outcome !== false,
+      ));
+      setViewFilterKey(`search:${result.node_id}:essential`);
+      setContextLabel(result.canonical_proposition);
       setSelectedId(result.node_id);
       if (!reasonFrom) setReasonFrom(result.node_id);
       else if (!reasonTo && reasonFrom !== result.node_id) setReasonTo(result.node_id);
@@ -176,9 +191,18 @@ export function Analyst({ metadata, onEnterStory }: Props) {
     if (!selectedId || !view?.nodes.some((node) => node.id === selectedId)) return;
     setLoading(true);
     try {
-      setView(await api.neighborhood(selectedId, 1));
-      setViewFilterKey(`focus:${selectedId}:all`);
-      setBreadcrumbs(["Analyst graph", "Focused selection"]);
+      const next = await api.neighborhood(selectedId, 1);
+      const selected = next.nodes.find((node) => node.id === selectedId);
+      setView(api.filterGraphView(
+        next,
+        relation,
+        minConfidence,
+        relation === "compatible",
+        evidenceTier,
+        selected?.progression_outcome !== false,
+      ));
+      setViewFilterKey(`focus:${selectedId}:essential`);
+      setContextLabel("Focused selection");
     } catch (reason) {
       setError(message(reason));
     } finally {
@@ -204,45 +228,24 @@ export function Analyst({ metadata, onEnterStory }: Props) {
     }
   }
 
-  const dense = useMemo(() => {
-    const density = view && view.nodes.length > 1
-      ? view.edges.length / (view.nodes.length * (view.nodes.length - 1))
-      : 0;
-    return Boolean(
-      view && (view.nodes.length > 200 || view.edges.length > 500 || density > 0.1),
-    );
-  }, [view]);
-  const coverage = coverageLabel(
-    String(metadata.coverage.classification_status ?? ""),
-    metadata.coverage.classification_coverage,
-  );
+  const selectedNode = view?.nodes.find((node) => node.id === selectedId);
+  const selectedEdge = view?.edges.find((edge) => edge.id === selectedId);
+  const selectionTitle = selectedNode?.label
+    ?? (selectedEdge ? relationLabels[selectedEdge.relation] : "Selected connection");
+  const usesCloseTimeLayout = view?.layout_mode === "close_time";
+  const visibleTeamCount = new Set(
+    view?.nodes.map((node) => node.domain).filter((domain): domain is string => Boolean(domain)),
+  ).size;
 
   return (
     <section className="analyst-page" aria-labelledby="analyst-heading">
-      <header className="page-heading analyst-heading">
-        <div>
-          <p className="eyebrow">Technical workspace</p>
-          <h2 id="analyst-heading">Analyst graph</h2>
-          <p>Inspect every published node and relationship. Double-click an event or component to drill in.</p>
-        </div>
-        <div className="analyst-health">
-          <strong>{coverage}</strong>
-          <span>{view?.nodes.length ?? 0} nodes · {view?.edges.length ?? 0} edges</span>
-        </div>
-      </header>
-
-      <nav className="breadcrumbs" aria-label="Graph location">
-        {breadcrumbs.map((crumb, index) => (
-          <button key={`${crumb}-${index}`} type="button" disabled={index > 0} onClick={() => void loadOverview()}>{crumb}</button>
-        ))}
-      </nav>
-
-      <section className="toolbar" aria-label="Graph controls">
+      <section className="graph-toolbar" aria-label="Graph controls">
+        <h1 id="analyst-heading" className="sr-only">World Cup logic graph</h1>
         <form className="search" onSubmit={submitSearch}>
-          <label htmlFor="graph-search">Search graph nodes</label>
+          <label htmlFor="graph-search">Find a team or outcome</label>
           <div>
             <input id="graph-search" value={query} onChange={(event) => setQuery(event.target.value)} />
-            <button type="submit">Search</button>
+            <button type="submit">Find</button>
           </div>
           {results.length > 0 && (
             <ul className="search-results">
@@ -250,62 +253,64 @@ export function Analyst({ metadata, onEnterStory }: Props) {
                 <li key={result.node_id}>
                   <button type="button" onClick={() => void openResult(result)}>
                     <span>{result.canonical_proposition}</span>
-                    <small>{result.event_slug || result.market_id}</small>
                   </button>
                 </li>
               ))}
             </ul>
           )}
         </form>
-        <label>
-          Level
-          <select
-            value={isStatic ? "static" : level}
-            disabled={isStatic}
-            title={isStatic ? "Static snapshots retain their exported graph level" : undefined}
-            onChange={(event) => setLevel(event.target.value as "component" | "event")}
-          >
-            {isStatic && <option value="static">Snapshot {view?.level ?? "graph"}</option>}
-            <option value="event">Events</option>
-            <option value="component">Components</option>
-          </select>
-        </label>
-        <label>
-          Relation
+        <label className="relation-filter">
+          Show
           <select value={relation} onChange={(event) => setRelation(event.target.value as Relation | "all")}>
-            {relations.map((value) => <option key={value} value={value}>{value.replaceAll("_", " ")}</option>)}
+            {relations.map((value) => <option key={value} value={value}>{relationLabels[value]}</option>)}
           </select>
         </label>
-        <label>
-          Evidence
-          <select value={evidenceTier} onChange={(event) => setEvidenceTier(event.target.value as EvidenceTier)}>
-            <option value="all">all evidence</option>
-            <option value="source_contract">source contract</option>
-            <option value="deterministic_rule">deterministic rule</option>
-            <option value="generative_consensus">generative consensus</option>
-          </select>
-        </label>
-        <label>
-          Minimum confidence <strong>{minConfidence.toFixed(2)}</strong>
-          <input type="range" min="0" max="1" step="0.01" value={minConfidence} onChange={(event) => setMinConfidence(Number(event.target.value))} />
-        </label>
-        <div className="toolbar-actions">
-          <button type="button" className="secondary" onClick={() => void loadOverview()}>Reset view</button>
-          <button type="button" className="secondary" onClick={() => setLayoutNonce((value) => value + 1)}>Re-layout</button>
-          {!isStatic && <button type="button" onClick={() => onEnterStory(minConfidence)}>Auto story</button>}
-        </div>
+        <span className="graph-summary">
+          {contextLabel} · {visibleTeamCount} team{visibleTeamCount === 1 ? "" : "s"} · {view?.nodes.length ?? 0} outcomes · {view?.edges.length ?? 0} links
+        </span>
+        <button type="button" className="secondary reset-graph" onClick={() => void loadOverview()}>Reset</button>
+        <details className="graph-options">
+          <summary>More</summary>
+          <div>
+            <label>
+              Grouping
+              <select
+                value={isStatic ? "static" : level}
+                disabled={isStatic}
+                title={isStatic ? "Static snapshots use their exported graph level" : undefined}
+                onChange={(event) => setLevel(event.target.value as "component" | "event" | "proposition")}
+              >
+                {isStatic && <option value="static">Snapshot layout</option>}
+                <option value="proposition">Outcomes</option>
+                <option value="event">Market groups</option>
+                <option value="component">Team groups</option>
+              </select>
+            </label>
+            <label>
+              Evidence
+              <select value={evidenceTier} onChange={(event) => setEvidenceTier(event.target.value as EvidenceTier)}>
+                <option value="all">All evidence</option>
+                <option value="source_contract">Defined by the market</option>
+                <option value="deterministic_rule">Proven by a logic rule</option>
+                <option value="generative_consensus">Supported by model checks</option>
+              </select>
+            </label>
+            <label>
+              Minimum confidence <strong>{Math.round(minConfidence * 100)}%</strong>
+              <input type="range" min="0" max="1" step="0.01" value={minConfidence} onChange={(event) => setMinConfidence(Number(event.target.value))} />
+            </label>
+            <div className="toolbar-actions">
+              <button type="button" className="secondary" onClick={() => setLayoutNonce((value) => value + 1)}>Re-layout</button>
+              {!isStatic && <button type="button" onClick={() => onEnterStory(minConfidence)}>Auto story</button>}
+            </div>
+          </div>
+        </details>
       </section>
 
       {error && <div className="error" role="alert">{error}</div>}
       {(view?.truncated_nodes || view?.truncated_edges) && <div className="notice">This view is bounded. Search or filter to inspect omitted nodes and edges.</div>}
-      {dense && (
-        <div className="notice dense-notice">
-          <span>This is a dense technical view. Select a node, then focus it to reduce visual overlap.</span>
-          <button type="button" className="secondary" disabled={!selectedId || !view?.nodes.some((node) => node.id === selectedId)} onClick={() => void focusSelection()}>Focus selection</button>
-        </div>
-      )}
 
-      <section className="workspace">
+      <section className={`workspace${selectedId ? " has-inspector" : ""}`}>
         <div className="graph-panel">
           {loading && <div className="loading">Loading graph…</div>}
           <GraphCanvas
@@ -320,46 +325,53 @@ export function Analyst({ metadata, onEnterStory }: Props) {
             onSelectEdge={selectEdge}
             onOpenNode={(id) => void openNode(id)}
           />
+          {usesCloseTimeLayout && (
+            <div className="timeline-guide" aria-hidden="true"><span>Earlier market close</span><span>Later market close →</span></div>
+          )}
           <div className="legend" aria-label="Relation legend">
-            {relations.slice(1).map((value) => <span key={value}><i data-relation={value} />{value.replaceAll("_", " ")}</span>)}
+            {relation === "all"
+              ? relations.slice(1, 5).map((value) => <span key={value}><i data-relation={value} />{relationLabels[value]}</span>)
+              : <span><i data-relation={relation} />{relationLabels[relation]}</span>}
           </div>
         </div>
-        <aside className="inspector" aria-live="polite">
-          <h2>{selectedId ? "Selection" : "Graph run"}</h2>
-          {detail ? (
-            <details className="technical-details">
-              <summary>Technical details</summary>
-              <pre>{JSON.stringify(detail, null, 2)}</pre>
-            </details>
-          ) : (
-            <dl>
-              <div><dt>Visible nodes</dt><dd>{view?.nodes.length ?? 0}</dd></div>
-              <div><dt>Visible relations</dt><dd>{view?.edges.length ?? 0}</dd></div>
-              <div><dt>Level</dt><dd>{(view?.level as ExplorerLevel | undefined) ?? "—"}</dd></div>
-              <div><dt>Graph version</dt><dd>{metadata.package_version}</dd></div>
-            </dl>
-          )}
-          {selectedId && <p className="selection-id">ID: {selectedId}</p>}
-          {!isStatic && (
-            <section className="reasoning" aria-labelledby="reasoning-heading">
-              <h3 id="reasoning-heading">Proof tools</h3>
-              <label>From proposition ID<input value={reasonFrom} onChange={(event) => setReasonFrom(event.target.value)} /></label>
-              <label>To proposition ID<input value={reasonTo} onChange={(event) => setReasonTo(event.target.value)} /></label>
-              <label>
-                Why-not relation
-                <select value={reasonRelation} onChange={(event) => setReasonRelation(event.target.value as Relation)}>
-                  {relations.slice(1).map((value) => <option key={value} value={value}>{value.replaceAll("_", " ")}</option>)}
-                </select>
-              </label>
-              <div className="reason-actions">
-                <button type="button" onClick={() => void runProof()}>Prove path</button>
-                <button type="button" className="secondary" onClick={() => void runWhyNot()}>Explain absence</button>
-              </div>
-              {reasoning !== null && <pre>{JSON.stringify(reasoning, null, 2)}</pre>}
-            </section>
-          )}
-          {isStatic && <p className="snapshot-note">Proof and why-not diagnostics require the original graph directory.</p>}
-        </aside>
+        {selectedId && (
+          <aside className="inspector" aria-live="polite">
+            <header className="inspector-header">
+              <div><small>Selected</small><h2>{selectionTitle}</h2></div>
+              <button type="button" className="close-inspector secondary" aria-label="Close selection" onClick={() => { setSelectedId(null); setDetail(null); }}>×</button>
+            </header>
+            {selectedNode && (
+              <button type="button" className="focus-selection" onClick={() => void focusSelection()}>Show nearby logic only</button>
+            )}
+            {detail && (
+              <details className="technical-details">
+                <summary>Technical details</summary>
+                <p className="selection-id">ID: {selectedId}</p>
+                <pre>{JSON.stringify(detail, null, 2)}</pre>
+              </details>
+            )}
+            {!isStatic && (
+              <details className="reasoning">
+                <summary>Proof tools</summary>
+                <div>
+                  <label>From outcome ID<input value={reasonFrom} onChange={(event) => setReasonFrom(event.target.value)} /></label>
+                  <label>To outcome ID<input value={reasonTo} onChange={(event) => setReasonTo(event.target.value)} /></label>
+                  <label>
+                    Missing relationship
+                    <select value={reasonRelation} onChange={(event) => setReasonRelation(event.target.value as Relation)}>
+                      {relations.slice(1).map((value) => <option key={value} value={value}>{relationLabels[value]}</option>)}
+                    </select>
+                  </label>
+                  <div className="reason-actions">
+                    <button type="button" onClick={() => void runProof()}>Prove path</button>
+                    <button type="button" className="secondary" onClick={() => void runWhyNot()}>Explain absence</button>
+                  </div>
+                  {reasoning !== null && <pre>{JSON.stringify(reasoning, null, 2)}</pre>}
+                </div>
+              </details>
+            )}
+          </aside>
+        )}
       </section>
     </section>
   );

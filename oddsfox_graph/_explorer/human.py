@@ -479,6 +479,7 @@ class HumanExplorer:
                    p.progression_level AS normalized_progression_level,
                    p.market_direction, p.is_progression AS is_progression_token,
                    p.market_status, p.is_still_alive,
+                   epoch(p.market_close_time)::BIGINT AS market_close_epoch,
                    n.outcome_label, n.is_active, n.is_closed
             FROM explorer_propositions_v p
             JOIN nodes_table n ON n.node_id = p.proposition_id
@@ -526,6 +527,7 @@ class HumanExplorer:
                     None if row.get("is_still_alive") is None
                     else bool(row["is_still_alive"])
                 ),
+                market_close_epoch=int(cast(int, row["market_close_epoch"])),
                 technical_canonical_label=str(row["canonical_proposition"]),
             )
             claims[claim.id] = claim
@@ -545,7 +547,8 @@ class HumanExplorer:
                    team_name AS canonical_team_name, stage_key, stage_rank,
                    progression_level AS normalized_progression_level,
                    market_direction,
-                   market_status, is_still_alive
+                   market_status, is_still_alive,
+                   epoch(market_close_time)::BIGINT AS market_close_epoch
             FROM explorer_propositions_v
             WHERE market_id IN (SELECT unnest(?))
             ORDER BY market_id
@@ -579,6 +582,7 @@ class HumanExplorer:
                         None if row.get("is_still_alive") is None
                         else bool(row["is_still_alive"])
                     ),
+                    market_close_epoch=int(cast(int, row["market_close_epoch"])),
                     claims=tuple(
                         sorted(
                             by_market[market_id],
