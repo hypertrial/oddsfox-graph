@@ -4,7 +4,7 @@ Current commands:
 
 - pipeline: `doctor`, `qualify`, `discover`, `release-validate`, `run-summary`;
 - runtime: `model-manifest`, `model-check`;
-- explorer: `serve`, `explorer-export`;
+- explorer: `serve`, `explorer-export`, `record`;
 - graph: `search`, `nodes`, `edges`, `condition`, `explain`, `explain-edge`,
   `prove`, and `why-not`.
 
@@ -36,6 +36,15 @@ default.
 `serve --out OUTPUT` starts a read-only loopback service. `explorer-export
 --out OUTPUT --destination DIRECTORY --scope event|component|neighborhood
 --identifier ID` creates a bounded portable snapshot and fails on truncation.
+
+`record --out OUTPUT --destination NEW_DIRECTORY` automatically ranks logical
+edges, freezes the bounded story graph and layout, renders every addressed
+frame, and publishes a captioned H.264 MP4 bundle. `--highlights` accepts 1–12,
+`--min-confidence` accepts 0–1, even `--width` accepts 640–3840, even
+`--height` accepts 360–2160, and `--fps` accepts 24, 30, or 60. Recording
+progress uses `--progress-format plain|json|quiet` on stderr; the final JSON
+result remains on stdout. The new destination must not exist and must not
+overlap the completed graph directory.
 
 All graph queries accept table, JSON, or JSONL. `prove` takes `--from`, `--to`,
 `--max-hops`, and `--max-paths`. `why-not` includes accepted, solver-rejected,

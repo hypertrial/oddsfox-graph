@@ -93,3 +93,94 @@ class ExplorerMetadata(BaseModel):
     viewer: dict[str, object]
     coverage: dict[str, object]
     build: dict[str, object]
+
+
+class RecordingScoreBreakdown(BaseModel):
+    """Auditable feature and diversity values for one selected edge."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    confidence: float
+    scope: float
+    structural_reach: float
+    evidence_interest: float
+    relation_interest: float
+    confidence_contribution: float
+    scope_contribution: float
+    structural_reach_contribution: float
+    evidence_interest_contribution: float
+    relation_interest_contribution: float
+    base_importance: float
+    same_relation_count: int
+    same_evidence_tier_count: int
+    same_event_pair_count: int
+    shared_endpoint_count: int
+    same_relation_penalty: float
+    same_evidence_tier_penalty: float
+    same_event_pair_penalty: float
+    shared_endpoint_penalty: float
+    total_penalty: float
+    selection_score: float
+
+
+class RecordingHighlight(BaseModel):
+    """One ranked logical edge and the human-facing endpoint context."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    rank: int
+    proposal_id: str
+    source_id: str
+    source_label: str
+    source_market_id: str
+    source_event_key: str
+    source_domain: str
+    target_id: str
+    target_label: str
+    target_market_id: str
+    target_event_key: str
+    target_domain: str
+    relation: ExplorerRelation
+    confidence: float
+    evidence_tier: EvidenceTier
+    discovery_method: str
+    explanation_excerpt: str
+    importance_score: float
+    score_breakdown: RecordingScoreBreakdown
+
+
+class RecordingContextPruning(BaseModel):
+    """Counts proving selected edges survived bounded context construction."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    incident_edge_cap_per_endpoint: int
+    candidate_nodes: int
+    candidate_edges: int
+    retained_nodes: int
+    retained_edges: int
+    pruned_nodes: int
+    pruned_edges: int
+
+
+class RecordingPlan(BaseModel):
+    """Fingerprint-bound deterministic inputs for preview and recording."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["oddsfox-recording-plan-v1"] = (
+        "oddsfox-recording-plan-v1"
+    )
+    ranking_version: Literal["balanced-logic-edge-v1"] = (
+        "balanced-logic-edge-v1"
+    )
+    graph_fingerprint: str
+    mode: Literal["fast", "full"]
+    validation_status: str
+    requested_limit: int
+    min_confidence: float
+    eligible_edge_count: int
+    candidate_pool_size: int
+    highlights: tuple[RecordingHighlight, ...]
+    graph: GraphView
+    context_pruning: RecordingContextPruning

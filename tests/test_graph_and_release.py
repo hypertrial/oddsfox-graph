@@ -143,6 +143,93 @@ def test_explorer_api_is_loopback_bounded_and_cacheable(tmp_path: Path) -> None:
     assert changed_client.get("/api/v1/meta").headers["etag"] != etag
 
 
+def test_recording_plan_is_deterministic_auditable_and_bounded(
+    tmp_path: Path,
+) -> None:
+    graph = Graph.open(_write_graph(tmp_path))
+    first = graph.recording_plan(limit=6, min_confidence=0.95)
+    second = graph.recording_plan(limit=6, min_confidence=0.95)
+    assert first == second
+    assert first.schema_version == "oddsfox-recording-plan-v1"
+    assert first.ranking_version == "balanced-logic-edge-v1"
+    assert first.graph_fingerprint == "fixture"
+    assert first.mode == "full"
+    assert first.requested_limit == 6
+    assert first.eligible_edge_count == 2
+    assert [item.proposal_id for item in first.highlights] == ["p3", "p4"]
+    assert first.highlights[0].score_breakdown.base_importance == pytest.approx(
+        0.8975
+    )
+    assert first.highlights[1].score_breakdown.same_event_pair_penalty == 0.15
+    assert first.highlights[1].score_breakdown.shared_endpoint_penalty == 0.2
+    assert {edge.id for edge in first.graph.edges} >= {"p3", "p4"}
+    assert first.context_pruning.retained_nodes <= 750
+    assert first.context_pruning.retained_edges <= 1_500
+    assert first.context_pruning.pruned_edges == 0
+
+    with pytest.raises(ValueError, match="between 1 and 12"):
+        graph.recording_plan(limit=13)
+
+    empty_out = _write_graph(tmp_path / "empty")
+    empty_db = DuckDB(empty_out / "oddsfox_graph.duckdb")
+    try:
+        empty_db.execute("DELETE FROM edges")
+    finally:
+        empty_db.close()
+    with pytest.raises(ValueError, match="No accepted"):
+        Graph.open(empty_out).recording_plan(min_confidence=0.95, limit=1)
+
+
+def test_recording_plan_api_validates_limits_and_serializes(tmp_path: Path) -> None:
+    client = TestClient(create_explorer_app(_write_graph(tmp_path)))
+    response = client.get(
+        "/api/v1/recording-plan?limit=2&min_confidence=0.95"
+    )
+    assert response.status_code == 200
+    assert response.json()["highlights"][0]["proposal_id"] == "p3"
+    assert client.get("/api/v1/recording-plan?limit=0").status_code == 422
+    assert (
+        client.get("/api/v1/recording-plan?min_confidence=1.1").status_code
+        == 422
+    )
+
+
+def test_component_semantic_zoom_uses_a_component_scoped_event_view(
+    tmp_path: Path,
+) -> None:
+    client = TestClient(create_explorer_app(_write_graph(tmp_path)))
+    response = client.get("/api/v1/component-graph/component-one")
+    assert response.status_code == 200
+    assert response.json()["level"] == "event"
+    assert [node["id"] for node in response.json()["nodes"]] == ["e"]
+    assert client.get("/api/v1/component-graph/missing").status_code == 404
+
+
+def test_recording_plan_collapses_reversed_symmetric_duplicates(
+    tmp_path: Path,
+) -> None:
+    out = _write_graph(tmp_path)
+    db = DuckDB(out / "oddsfox_graph.duckdb")
+    try:
+        db.execute(
+            """
+            INSERT INTO edges
+            SELECT * REPLACE (
+                dst_node_id AS src_node_id,
+                src_node_id AS dst_node_id,
+                'p6' AS proposal_id
+            )
+            FROM edges
+            WHERE proposal_id = 'p4'
+            """
+        )
+    finally:
+        db.close()
+    plan = Graph.open(out).recording_plan(limit=6, min_confidence=0.95)
+    assert plan.eligible_edge_count == 2
+    assert [item.proposal_id for item in plan.highlights] == ["p3", "p4"]
+
+
 def test_neighborhood_enforces_seed_ceiling_without_false_truncation(
     tmp_path: Path,
 ) -> None:
@@ -181,6 +268,7 @@ def test_static_explorer_export_contains_bounded_parquet_snapshot(tmp_path: Path
         max_edges=5,
     )
     assert manifest["data_format"] == "duckdb-wasm-parquet"
+    assert manifest["schema_version"] == "static-explorer-v2"
     assert set(manifest["snapshot_files"]) == {
         "snapshot_nodes.parquet",
         "snapshot_edges.parquet",
@@ -197,6 +285,9 @@ def test_static_explorer_export_contains_bounded_parquet_snapshot(tmp_path: Path
         assert db.rows(
             f"SELECT count(*) AS count FROM read_parquet('{q(destination / 'snapshot_nodes.parquet')}')"
         )[0]["count"] == 4
+        assert db.rows(
+            f"SELECT DISTINCT evidence_tier FROM read_parquet('{q(destination / 'snapshot_edges.parquet')}') ORDER BY evidence_tier"
+        )
     finally:
         db.close()
 

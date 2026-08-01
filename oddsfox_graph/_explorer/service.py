@@ -50,15 +50,16 @@ def create_app(
         raise ValueError("max_response_edges must be between 0 and 10000")
     metadata = graph.metadata()
     static_directory = Path(__file__).resolve().parents[1] / "static" / "explorer"
+    client_fingerprint = (
+        sha256_file(static_directory / "index.html")
+        if (static_directory / "index.html").is_file()
+        else "missing"
+    )
     fingerprint = canonical_json_sha256(
         {
             "graph": metadata.viewer.get("graph_content_fingerprint") or "unknown",
             "build_manifest": sha256_file(out_dir.resolve() / "build_manifest.json"),
-            "client": (
-                sha256_file(static_directory / "index.html")
-                if (static_directory / "index.html").is_file()
-                else "missing"
-            ),
+            "client": client_fingerprint,
         }
     )
     etag = f'"{fingerprint}"'
@@ -105,11 +106,25 @@ def create_app(
 
     @app.get("/api/v1/meta")
     def get_meta() -> dict[str, object]:
-        return metadata.model_dump(mode="json")
+        payload = metadata.model_dump(mode="json")
+        viewer = payload["viewer"]
+        if isinstance(viewer, dict):
+            viewer["client_fingerprint"] = client_fingerprint
+        return payload
 
     @app.get("/api/v1/coverage")
     def get_coverage() -> dict[str, object]:
         return graph.coverage()
+
+    @app.get("/api/v1/recording-plan")
+    def recording_plan(
+        limit: int = Query(default=6, ge=1, le=12),
+        min_confidence: float = Query(default=0.95, ge=0.0, le=1.0),
+    ) -> dict[str, object]:
+        return graph.recording_plan(
+            limit=limit,
+            min_confidence=min_confidence,
+        ).model_dump(mode="json")
 
     @app.get("/api/v1/search")
     def search(q: str, limit: int = Query(default=20, ge=1, le=100)) -> list[dict[str, object]]:
@@ -165,6 +180,46 @@ def create_app(
     @app.get("/api/v1/events/{event_key:path}")
     def event(event_key: str) -> dict[str, object]:
         return graph.event(event_key)
+
+    @app.get("/api/v1/event-graph/{event_key:path}")
+    def event_graph(
+        event_key: str,
+        relations: list[Relation] = Query(default=[]),
+        min_confidence: float = Query(default=0.0, ge=0.0, le=1.0),
+        include_compatible: bool = False,
+        evidence_tiers: list[EvidenceTier] = Query(default=[]),
+    ) -> dict[str, object]:
+        return graph.event_graph(
+            event_key,
+            GraphFilter(
+                relations=tuple(relations),
+                min_confidence=min_confidence,
+                include_compatible=include_compatible,
+                evidence_tiers=tuple(evidence_tiers),
+            ),
+            max_nodes=max_response_nodes,
+            max_edges=max_response_edges,
+        ).model_dump(mode="json")
+
+    @app.get("/api/v1/component-graph/{component_id}")
+    def component_graph(
+        component_id: str,
+        relations: list[Relation] = Query(default=[]),
+        min_confidence: float = Query(default=0.0, ge=0.0, le=1.0),
+        include_compatible: bool = False,
+        evidence_tiers: list[EvidenceTier] = Query(default=[]),
+    ) -> dict[str, object]:
+        return graph.component_graph(
+            component_id,
+            GraphFilter(
+                relations=tuple(relations),
+                min_confidence=min_confidence,
+                include_compatible=include_compatible,
+                evidence_tiers=tuple(evidence_tiers),
+            ),
+            max_nodes=max_response_nodes,
+            max_edges=max_response_edges,
+        ).model_dump(mode="json")
 
     @app.get("/api/v1/components")
     def components(

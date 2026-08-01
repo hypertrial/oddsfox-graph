@@ -20,6 +20,14 @@ candidate set, not all 17.97 billion possible proposition pairs.
 python -m pip install -e '.[dev]'
 ```
 
+Install deterministic MP4 recording separately so ordinary graph queries and
+CLI help do not import a browser runtime:
+
+```bash
+python -m pip install -e '.[recording]'
+python -m playwright install chromium
+```
+
 llama.cpp or vLLM and all model weights remain external. The local wrapper keeps
 models, caches, outputs, logs, and temporary files below `.oddsfox-runtime/` on
 the SSD containing this checkout.
@@ -41,6 +49,7 @@ oddsfox-graph doctor --mode fast --input data/polymarket.parquet --out output/fa
 oddsfox-graph discover --mode fast --input data/polymarket.parquet \
   --out output/fast --deadline-seconds 120 --progress-format plain
 oddsfox-graph serve --out output/fast --open-browser
+oddsfox-graph record --out output/fast --destination recordings/fast-story
 ```
 
 Omitting `--max-propositions` selects the complete valid catalog. A development
@@ -71,4 +80,5 @@ The explorer filters `source_contract`, `deterministic_rule`, and
 See [architecture](docs/architecture.md), [discovery](docs/discovery.md),
 [explorer](docs/explorer.md), [qualification](docs/qualification.md),
 [artifacts](docs/artifacts.md), [CLI](docs/cli.md),
-[performance](docs/performance.md), and [release validation](docs/release.md).
+[recording](docs/recording.md), [performance](docs/performance.md), and
+[release validation](docs/release.md).

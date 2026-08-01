@@ -44,3 +44,18 @@ FastAPI service exposes bounded parameterized queries, never arbitrary SQL.
 React/Sigma starts at component or event summaries, then requests bounded
 proposition neighborhoods. `prove` traverses implication plus bidirectional
 equivalence only; it never materializes transitive closure.
+
+## Presentation and recording
+
+`Graph.recording_plan()` and `GET /api/v1/recording-plan` share the same frozen
+contracts. Ranking and context selection run as bounded, stable DuckDB queries;
+layout remains a browser concern and never adds work to fast or full discovery.
+The browser exposes only `ready`, `getStory()`, `getFrameCount()`, and
+idempotent `seek(frame)` for automation. Each seek synchronously derives the
+camera, reducers, caption, and overlays from the frame number.
+
+The Python recorder starts the existing loopback app on an ephemeral port,
+blocks non-loopback browser requests, and streams each PNG directly to an
+FFmpeg `image2pipe` process. Frames are never accumulated on disk or in memory.
+Chromium, FFmpeg, and the server are closed on failure or cancellation; the
+sibling staging directory is removed unless all validation and hashes succeed.

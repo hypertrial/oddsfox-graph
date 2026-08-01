@@ -147,6 +147,13 @@ def test_fast_mode_publishes_shared_contract_without_inference(tmp_path: Path) -
     graph = Graph.open(first_out)
     assert graph.build_mode == "fast"
     assert graph.metadata().build["build_mode"] == "fast"
+    recording_plan = graph.recording_plan(limit=2, min_confidence=0.95)
+    assert recording_plan.mode == "fast"
+    assert recording_plan.highlights
+    assert all(
+        highlight.evidence_tier in {"source_contract", "deterministic_rule"}
+        for highlight in recording_plan.highlights
+    )
     assert run_summary(first_out)["input_hash"] == manifest["input"]["sha256"]
     assert run_summary(first_out)["stage_timings"]
     assert graph.why_not("alpha-yes", "numeric-yes", "compatible").status in {

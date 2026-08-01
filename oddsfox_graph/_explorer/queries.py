@@ -15,9 +15,143 @@ from .contracts import (
     GraphFilter,
     GraphPage,
     GraphView,
+    RecordingContextPruning,
+    RecordingHighlight,
+    RecordingPlan,
+    RecordingScoreBreakdown,
 )
 from .. import __version__
 from ..queries import DuckDB
+
+
+_RECORDING_CANDIDATES_SQL = """
+WITH qualified AS (
+    SELECT
+        e.*,
+        src_node.canonical_proposition AS src_label,
+        src.market_id AS src_market_id,
+        src.event_key AS src_event_key,
+        src.primary_domain AS src_domain,
+        dst_node.canonical_proposition AS dst_label,
+        dst.market_id AS dst_market_id,
+        dst.event_key AS dst_event_key,
+        dst.primary_domain AS dst_domain,
+        coalesce(src_metric.total_degree, 0)
+            + coalesce(dst_metric.total_degree, 0) AS degree_sum,
+        row_number() OVER (
+            PARTITION BY e.edge_type,
+                CASE WHEN e.edge_type = 'implies'
+                    THEN e.src_node_id
+                    ELSE least(e.src_node_id, e.dst_node_id)
+                END,
+                CASE WHEN e.edge_type = 'implies'
+                    THEN e.dst_node_id
+                    ELSE greatest(e.src_node_id, e.dst_node_id)
+                END
+            ORDER BY e.proposal_id
+        ) AS duplicate_rank
+    FROM logic_edges_v e
+    JOIN explorer_propositions_v src
+      ON src.proposition_id = e.src_node_id
+    JOIN explorer_propositions_v dst
+      ON dst.proposition_id = e.dst_node_id
+    JOIN nodes_table src_node
+      ON src_node.node_id = e.src_node_id
+    JOIN nodes_table dst_node
+      ON dst_node.node_id = e.dst_node_id
+    LEFT JOIN node_metrics_v src_metric
+      ON src_metric.node_id = e.src_node_id
+    LEFT JOIN node_metrics_v dst_metric
+      ON dst_metric.node_id = e.dst_node_id
+    WHERE e.edge_type != 'compatible' AND e.confidence >= ?
+), deduplicated AS (
+    SELECT * EXCLUDE (duplicate_rank)
+    FROM qualified
+    WHERE duplicate_rank = 1
+), features AS (
+    SELECT *,
+        CASE
+            WHEN src_event_key != dst_event_key THEN 1.0
+            WHEN src_market_id != dst_market_id THEN 0.65
+            ELSE 0.25
+        END AS scope,
+        CASE evidence_tier
+            WHEN 'generative_consensus' THEN 1.0
+            WHEN 'deterministic_rule' THEN 0.80
+            WHEN 'source_contract' THEN 0.55
+            ELSE 0.0
+        END AS evidence_interest,
+        CASE edge_type
+            WHEN 'implies' THEN 1.0
+            WHEN 'equivalent' THEN 0.90
+            WHEN 'mutually_exclusive' THEN 0.85
+            WHEN 'complement' THEN 0.60
+            ELSE 0.0
+        END AS relation_interest,
+        CASE
+            WHEN max(degree_sum) OVER () <= 0 THEN 0.0
+            ELSE ln(1.0 + degree_sum) / ln(1.0 + max(degree_sum) OVER ())
+        END AS structural_reach,
+        count(*) OVER () AS eligible_edge_count
+    FROM deduplicated
+), scored AS (
+    SELECT *,
+        0.30 * confidence
+        + 0.25 * scope
+        + 0.20 * structural_reach
+        + 0.15 * evidence_interest
+        + 0.10 * relation_interest AS base_importance
+    FROM features
+)
+SELECT *
+FROM scored
+ORDER BY base_importance DESC, proposal_id
+LIMIT ?
+"""
+
+
+_RECORDING_CONTEXT_SQL = """
+WITH qualified AS (
+    SELECT e.*,
+        row_number() OVER (
+            PARTITION BY e.edge_type,
+                CASE WHEN e.edge_type = 'implies'
+                    THEN e.src_node_id
+                    ELSE least(e.src_node_id, e.dst_node_id)
+                END,
+                CASE WHEN e.edge_type = 'implies'
+                    THEN e.dst_node_id
+                    ELSE greatest(e.src_node_id, e.dst_node_id)
+                END
+            ORDER BY e.proposal_id
+        ) AS duplicate_rank
+    FROM logic_edges_v e
+    WHERE e.edge_type != 'compatible' AND e.confidence >= ?
+), deduplicated AS (
+    SELECT * EXCLUDE (duplicate_rank)
+    FROM qualified
+    WHERE duplicate_rank = 1
+), context_edges AS (
+    SELECT *
+    FROM deduplicated
+    WHERE proposal_id NOT IN (SELECT unnest(?))
+), incident AS (
+    SELECT endpoint.node_id AS context_endpoint, e.*
+    FROM unnest(?) AS endpoint(node_id)
+    JOIN context_edges e
+      ON e.src_node_id = endpoint.node_id OR e.dst_node_id = endpoint.node_id
+), ranked AS (
+    SELECT *, row_number() OVER (
+        PARTITION BY context_endpoint
+        ORDER BY confidence DESC, edge_type, proposal_id
+    ) AS context_rank
+    FROM incident
+)
+SELECT * EXCLUDE (context_endpoint, context_rank)
+FROM ranked
+WHERE context_endpoint IN (SELECT unnest(?)) AND context_rank <= ?
+ORDER BY confidence DESC, edge_type, proposal_id
+"""
 
 
 class ExplorerStore:
@@ -326,6 +460,63 @@ class ExplorerStore:
             raise KeyError(f"Unknown accepted proposal {proposal_id!r}")
         return rows[0]
 
+    def event_graph(
+        self,
+        event_key: str,
+        filters: GraphFilter | None = None,
+        *,
+        max_nodes: int = 5_000,
+        max_edges: int = 10_000,
+    ) -> GraphView:
+        """Return a bounded proposition view for semantic event drill-down."""
+
+        node_limit = _bounded(max_nodes, 1, 5_000, "node limit")
+        db = self._db()
+        try:
+            rows = db.rows(
+                """
+                SELECT proposition_id
+                FROM explorer_propositions_v
+                WHERE event_key = ?
+                ORDER BY proposition_id
+                LIMIT ?
+                """,
+                [event_key, node_limit + 1],
+            )
+        finally:
+            db.close()
+        if not rows:
+            raise KeyError(f"Unknown event {event_key!r}")
+        if len(rows) > node_limit:
+            raise ValueError(
+                f"Event {event_key!r} exceeds the {node_limit}-node response limit"
+            )
+        return self.neighborhood(
+            tuple(str(row["proposition_id"]) for row in rows),
+            hops=1,
+            filters=filters,
+            max_nodes=node_limit,
+            max_edges=max_edges,
+        )
+
+    def component_graph(
+        self,
+        component_id: str,
+        filters: GraphFilter | None = None,
+        *,
+        max_nodes: int = 5_000,
+        max_edges: int = 10_000,
+    ) -> GraphView:
+        """Return the bounded event atlas for one selected component."""
+
+        self.component(component_id)
+        return self._event_overview(
+            filters or GraphFilter(),
+            _bounded(max_nodes, 1, 5_000, "node limit"),
+            _bounded(max_edges, 0, 10_000, "edge limit"),
+            component_id=component_id,
+        )
+
     def diagnostics(
         self,
         *,
@@ -364,13 +555,154 @@ class ExplorerStore:
             truncated=truncated,
         )
 
+    def recording_plan(
+        self,
+        *,
+        limit: int = 6,
+        min_confidence: float = 0.95,
+    ) -> RecordingPlan:
+        """Rank diverse accepted edges and construct their bounded context."""
+
+        bounded_limit = _bounded(limit, 1, 12, "recording highlight limit")
+        if not 0.0 <= min_confidence <= 1.0:
+            raise ValueError("min_confidence must be between 0 and 1")
+        pool_limit = min(10_000, max(1_000, bounded_limit * 200))
+        db = self._db()
+        try:
+            candidates = db.rows(
+                _RECORDING_CANDIDATES_SQL,
+                [min_confidence, pool_limit],
+            )
+            if not candidates:
+                raise ValueError(
+                    "No accepted non-compatible logical edges meet the "
+                    f"{min_confidence:.3f} recording confidence threshold"
+                )
+            selected = _select_recording_highlights(candidates, bounded_limit)
+            endpoint_ids = sorted(
+                {
+                    str(row[key])
+                    for row, _ in selected
+                    for key in ("src_node_id", "dst_node_id")
+                }
+            )
+            context_rows = db.rows(
+                _RECORDING_CONTEXT_SQL,
+                [
+                    min_confidence,
+                    sorted(str(row["proposal_id"]) for row, _ in selected),
+                    endpoint_ids,
+                    endpoint_ids,
+                    25,
+                ],
+            )
+            selected_by_id = {
+                str(row["proposal_id"]): row for row, _ in selected
+            }
+            context_by_id = {
+                str(row["proposal_id"]): row for row in context_rows
+            }
+            context_by_id.update(selected_by_id)
+            retained_edges, retained_nodes = _prune_recording_context(
+                context_by_id,
+                frozenset(selected_by_id),
+                max_nodes=750,
+                max_edges=1_500,
+            )
+            node_rows = db.rows(
+                """
+                SELECT n.*, m.component_id, m.total_degree,
+                       m.classification_state, m.classification_coverage,
+                       p.event_key
+                FROM nodes_table n
+                JOIN node_metrics_v m USING (node_id)
+                JOIN explorer_propositions_v p ON p.proposition_id = n.node_id
+                WHERE n.node_id IN (SELECT unnest(?))
+                ORDER BY n.node_id
+                """,
+                [sorted(retained_nodes)],
+            )
+        finally:
+            db.close()
+
+        metadata = self.metadata()
+        viewer = metadata.viewer
+        graph_fingerprint = str(
+            viewer.get("graph_content_fingerprint") or "unknown"
+        )
+        mode = str(viewer.get("build_mode") or metadata.build.get("build_mode"))
+        if mode not in {"fast", "full"}:
+            raise ValueError("Graph viewer manifest has no valid build mode")
+        validation_status = str(
+            viewer.get("validation_status")
+            or metadata.build.get("validation_status")
+            or "UNKNOWN"
+        )
+        highlights = tuple(
+            _recording_highlight(row, breakdown, rank=index)
+            for index, (row, breakdown) in enumerate(selected, start=1)
+        )
+        edge_rows = sorted(
+            retained_edges,
+            key=lambda row: (
+                -_float(row["confidence"]),
+                str(row["edge_type"]),
+                str(row["proposal_id"]),
+            ),
+        )
+        view = GraphView(
+            level="proposition",
+            nodes=tuple(_proposition_node(row) for row in node_rows),
+            edges=tuple(_logic_edge(row) for row in edge_rows),
+            truncated_nodes=len(retained_nodes) < len(
+                {
+                    str(row[key])
+                    for row in context_by_id.values()
+                    for key in ("src_node_id", "dst_node_id")
+                }
+            ),
+            truncated_edges=len(retained_edges) < len(context_by_id),
+            coverage=self.coverage(),
+        )
+        candidate_nodes = {
+            str(row[key])
+            for row in context_by_id.values()
+            for key in ("src_node_id", "dst_node_id")
+        }
+        eligible_count = _int(candidates[0]["eligible_edge_count"])
+        return RecordingPlan(
+            graph_fingerprint=graph_fingerprint,
+            mode=cast(Literal["fast", "full"], mode),
+            validation_status=validation_status,
+            requested_limit=bounded_limit,
+            min_confidence=min_confidence,
+            eligible_edge_count=eligible_count,
+            candidate_pool_size=len(candidates),
+            highlights=highlights,
+            graph=view,
+            context_pruning=RecordingContextPruning(
+                incident_edge_cap_per_endpoint=25,
+                candidate_nodes=len(candidate_nodes),
+                candidate_edges=len(context_by_id),
+                retained_nodes=len(retained_nodes),
+                retained_edges=len(retained_edges),
+                pruned_nodes=len(candidate_nodes) - len(retained_nodes),
+                pruned_edges=len(context_by_id) - len(retained_edges),
+            ),
+        )
+
     def _event_overview(
         self,
         filters: GraphFilter,
         node_limit: int,
         edge_limit: int,
+        *,
+        component_id: str | None = None,
     ) -> GraphView:
         where, params = _event_filter(filters)
+        if component_id is not None:
+            where.append("l.parent_id = ?")
+            params.append(component_id)
         sql_where = "WHERE " + " AND ".join(where) if where else ""
         edge_sql, edge_params = _aggregate_edge_filter(filters)
         db = self._db()
@@ -656,6 +988,195 @@ def _logic_edge(row: dict[str, object]) -> ExplorerEdge:
             "aggregation_only": False,
         }
     )
+
+
+def _select_recording_highlights(
+    candidates: list[dict[str, object]],
+    limit: int,
+) -> list[tuple[dict[str, object], RecordingScoreBreakdown]]:
+    remaining = list(candidates)
+    selected: list[tuple[dict[str, object], RecordingScoreBreakdown]] = []
+    while remaining and len(selected) < limit:
+        scored = [
+            (row, _recording_score(row, [item[0] for item in selected]))
+            for row in remaining
+        ]
+        winner = min(
+            scored,
+            key=lambda item: (
+                -item[1].selection_score,
+                str(item[0]["proposal_id"]),
+            ),
+        )
+        selected.append(winner)
+        winner_id = str(winner[0]["proposal_id"])
+        remaining = [
+            row for row in remaining if str(row["proposal_id"]) != winner_id
+        ]
+    return selected
+
+
+def _recording_score(
+    row: dict[str, object],
+    selected: list[dict[str, object]],
+) -> RecordingScoreBreakdown:
+    relation = str(row["edge_type"])
+    evidence_tier = str(row["evidence_tier"])
+    event_pair = frozenset(
+        (str(row["src_event_key"]), str(row["dst_event_key"]))
+    )
+    endpoints = frozenset(
+        (str(row["src_node_id"]), str(row["dst_node_id"]))
+    )
+    same_relation_count = sum(
+        str(other["edge_type"]) == relation for other in selected
+    )
+    same_evidence_tier_count = sum(
+        str(other["evidence_tier"]) == evidence_tier for other in selected
+    )
+    same_event_pair_count = sum(
+        frozenset(
+            (str(other["src_event_key"]), str(other["dst_event_key"]))
+        )
+        == event_pair
+        for other in selected
+    )
+    shared_endpoint_count = sum(
+        len(
+            endpoints
+            & frozenset(
+                (str(other["src_node_id"]), str(other["dst_node_id"]))
+            )
+        )
+        for other in selected
+    )
+    confidence = _float(row["confidence"])
+    scope = _float(row["scope"])
+    structural_reach = _float(row["structural_reach"])
+    evidence_interest = _float(row["evidence_interest"])
+    relation_interest = _float(row["relation_interest"])
+    confidence_contribution = 0.30 * confidence
+    scope_contribution = 0.25 * scope
+    structural_reach_contribution = 0.20 * structural_reach
+    evidence_interest_contribution = 0.15 * evidence_interest
+    relation_interest_contribution = 0.10 * relation_interest
+    base_importance = (
+        confidence_contribution
+        + scope_contribution
+        + structural_reach_contribution
+        + evidence_interest_contribution
+        + relation_interest_contribution
+    )
+    same_relation_penalty = 0.08 * same_relation_count
+    same_evidence_tier_penalty = 0.10 * same_evidence_tier_count
+    same_event_pair_penalty = 0.15 * same_event_pair_count
+    shared_endpoint_penalty = 0.20 * shared_endpoint_count
+    total_penalty = (
+        same_relation_penalty
+        + same_evidence_tier_penalty
+        + same_event_pair_penalty
+        + shared_endpoint_penalty
+    )
+    return RecordingScoreBreakdown(
+        confidence=confidence,
+        scope=scope,
+        structural_reach=structural_reach,
+        evidence_interest=evidence_interest,
+        relation_interest=relation_interest,
+        confidence_contribution=confidence_contribution,
+        scope_contribution=scope_contribution,
+        structural_reach_contribution=structural_reach_contribution,
+        evidence_interest_contribution=evidence_interest_contribution,
+        relation_interest_contribution=relation_interest_contribution,
+        base_importance=base_importance,
+        same_relation_count=same_relation_count,
+        same_evidence_tier_count=same_evidence_tier_count,
+        same_event_pair_count=same_event_pair_count,
+        shared_endpoint_count=shared_endpoint_count,
+        same_relation_penalty=same_relation_penalty,
+        same_evidence_tier_penalty=same_evidence_tier_penalty,
+        same_event_pair_penalty=same_event_pair_penalty,
+        shared_endpoint_penalty=shared_endpoint_penalty,
+        total_penalty=total_penalty,
+        selection_score=base_importance - total_penalty,
+    )
+
+
+def _recording_highlight(
+    row: dict[str, object],
+    breakdown: RecordingScoreBreakdown,
+    *,
+    rank: int,
+) -> RecordingHighlight:
+    explanation = " ".join(
+        str(row.get("explanation") or row.get("evidence") or "").split()
+    )[:180]
+    return RecordingHighlight.model_validate(
+        {
+            "rank": rank,
+            "proposal_id": str(row["proposal_id"]),
+            "source_id": str(row["src_node_id"]),
+            "source_label": str(row["src_label"]),
+            "source_market_id": str(row["src_market_id"]),
+            "source_event_key": str(row["src_event_key"]),
+            "source_domain": str(row["src_domain"]),
+            "target_id": str(row["dst_node_id"]),
+            "target_label": str(row["dst_label"]),
+            "target_market_id": str(row["dst_market_id"]),
+            "target_event_key": str(row["dst_event_key"]),
+            "target_domain": str(row["dst_domain"]),
+            "relation": str(row["edge_type"]),
+            "confidence": _float(row["confidence"]),
+            "evidence_tier": str(row["evidence_tier"]),
+            "discovery_method": str(row["discovery_method"]),
+            "explanation_excerpt": explanation,
+            "importance_score": breakdown.base_importance,
+            "score_breakdown": breakdown,
+        }
+    )
+
+
+def _prune_recording_context(
+    edge_by_id: dict[str, dict[str, object]],
+    selected_ids: frozenset[str],
+    *,
+    max_nodes: int,
+    max_edges: int,
+) -> tuple[list[dict[str, object]], set[str]]:
+    selected_edges = [edge_by_id[proposal_id] for proposal_id in selected_ids]
+    selected_edges.sort(key=lambda row: str(row["proposal_id"]))
+    retained = list(selected_edges)
+    retained_ids = set(selected_ids)
+    retained_nodes = {
+        str(row[key])
+        for row in selected_edges
+        for key in ("src_node_id", "dst_node_id")
+    }
+    if len(retained) > max_edges or len(retained_nodes) > max_nodes:
+        raise ValueError("Selected recording highlights exceed context bounds")
+    context_edges = sorted(
+        (
+            row
+            for proposal_id, row in edge_by_id.items()
+            if proposal_id not in selected_ids
+        ),
+        key=lambda row: (
+            -_float(row["confidence"]),
+            str(row["edge_type"]),
+            str(row["proposal_id"]),
+        ),
+    )
+    for row in context_edges:
+        proposal_id = str(row["proposal_id"])
+        nodes = {str(row["src_node_id"]), str(row["dst_node_id"])}
+        if len(retained_ids) >= max_edges:
+            break
+        if len(retained_nodes | nodes) > max_nodes:
+            continue
+        retained.append(row)
+        retained_ids.add(proposal_id)
+        retained_nodes.update(nodes)
+    return retained, retained_nodes
 
 
 def _bounded(value: int, minimum: int, maximum: int, name: str) -> int:

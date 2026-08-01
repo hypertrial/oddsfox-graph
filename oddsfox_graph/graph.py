@@ -16,6 +16,7 @@ from ._explorer.contracts import (
     GraphFilter,
     GraphPage,
     GraphView,
+    RecordingPlan,
 )
 from ._explorer.queries import ExplorerStore
 from .queries import DuckDB
@@ -228,11 +229,53 @@ class Graph:
             max_edges=max_edges,
         )
 
+    def recording_plan(
+        self,
+        limit: int = 6,
+        min_confidence: float = 0.95,
+    ) -> RecordingPlan:
+        """Build a deterministic, balanced recording plan for this graph."""
+
+        return self._explorer().recording_plan(
+            limit=limit,
+            min_confidence=min_confidence,
+        )
+
     def event(self, event_key: str) -> dict[str, object]:
         return self._explorer().event(event_key)
 
+    def event_graph(
+        self,
+        event_key: str,
+        filters: GraphFilter | None = None,
+        *,
+        max_nodes: int = 5_000,
+        max_edges: int = 10_000,
+    ) -> GraphView:
+        return self._explorer().event_graph(
+            event_key,
+            filters,
+            max_nodes=max_nodes,
+            max_edges=max_edges,
+        )
+
     def component(self, component_id: str) -> dict[str, object]:
         return self._explorer().component(component_id)
+
+    def component_graph(
+        self,
+        component_id: str,
+        filters: GraphFilter | None = None,
+        *,
+        max_nodes: int = 5_000,
+        max_edges: int = 10_000,
+    ) -> GraphView:
+        return self._explorer().component_graph(
+            component_id,
+            filters,
+            max_nodes=max_nodes,
+            max_edges=max_edges,
+        )
 
     def diagnostics(
         self,

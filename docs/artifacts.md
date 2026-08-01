@@ -64,3 +64,15 @@ solver, deadline, cutoff, resource use, cache, and incremental execution plan.
 Fast manifests also bind every published database, snapshot, report, public
 artifact, and state file in `published_file_hashes`; incremental reuse rejects
 missing files or any content-hash mismatch before copying the baseline.
+
+## Recording bundle
+
+Recording never changes the discovery output. It atomically publishes a new
+directory containing `recording.mp4`, `story.json`, and
+`recording_manifest.json`. `story.json` uses
+`oddsfox-recording-story-v1` and binds the normalized bounded graph, frozen
+coordinates, highlight score breakdowns, timeline, camera states, theme,
+viewport, and source/client/layout fingerprints. The manifest is written last
+and records graph, story, ordered frame-stream, and MP4 hashes; selected
+proposal IDs; dimensions, FPS, frame count, duration; ranking/layout/client and
+runtime versions; timings; and output bytes.

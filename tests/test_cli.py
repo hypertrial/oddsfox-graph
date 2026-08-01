@@ -35,6 +35,7 @@ def test_cli_contains_current_discovery_and_explorer_workflows() -> None:
         "why-not",
         "serve",
         "explorer-export",
+        "record",
     }
 
 

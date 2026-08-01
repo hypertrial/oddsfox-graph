@@ -47,6 +47,7 @@ STATIC_EDGE_COLUMNS = {
     "count": "BIGINT",
     "confidence": "DOUBLE",
     "discovery_method": "VARCHAR",
+    "evidence_tier": "VARCHAR",
     "aggregation_only": "BOOLEAN",
 }
 
@@ -206,7 +207,7 @@ def export_explorer(
         finally:
             snapshot_db.close()
         manifest = {
-            "schema_version": "static-explorer-v1",
+            "schema_version": "static-explorer-v2",
             "package_version": graph.metadata().package_version,
             "source_graph": canonical_json_sha256(graph.metadata().build),
             "scope": scope,

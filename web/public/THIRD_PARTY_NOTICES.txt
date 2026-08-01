@@ -5,6 +5,9 @@ MIT:
 - React and React DOM 19.2.8 — Copyright Meta Platforms, Inc. and affiliates
 - Sigma.js 3.0.3 — Copyright Alexis Jacomy, Guillaume Plique, Benoît Simard
 - Graphology 0.26.0 — Copyright Guillaume Plique
+- Graphology Layout 0.6.1 — Copyright Guillaume Plique
+- Graphology ForceAtlas2 0.10.1 — Copyright Guillaume Plique
+- Sigma Edge Curve 3.1.0 — Copyright Alexis Jacomy, Guillaume Plique and contributors
 - DuckDB-Wasm 1.32.0 — DuckDB Foundation
 
 Apache License 2.0:

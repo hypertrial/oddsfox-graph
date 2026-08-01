@@ -38,6 +38,7 @@ def test_cli_docs_cover_every_current_subcommand() -> None:
         "why-not",
         "serve",
         "explorer-export",
+        "record",
     }
     for command in sorted(subcommands):
         assert f"`{command}`" in cli_doc

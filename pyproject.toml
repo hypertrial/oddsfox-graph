@@ -32,6 +32,9 @@ Repository = "https://github.com/hypertrial/oddsfox-graph"
 DataPipeline = "https://github.com/hypertrial/oddsfox-pipeline"
 
 [project.optional-dependencies]
+recording = [
+  "playwright>=1.50,<2",
+]
 dev = [
   "build>=1",
   "pytest>=8",

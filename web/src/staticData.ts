@@ -4,6 +4,7 @@ import mvpWorker from "@duckdb/duckdb-wasm/dist/duckdb-browser-mvp.worker.js?url
 import type { ExplorerEdge, ExplorerNode, GraphMetadata, GraphView, SearchNode } from "./types";
 
 interface StaticManifest {
+  schema_version: string;
   package_version: string;
   source_graph: string;
   coverage: Record<string, unknown>;
@@ -40,6 +41,9 @@ async function load(): Promise<StaticSnapshot> {
   const manifestResponse = await fetch("./static_manifest.json");
   if (!manifestResponse.ok) throw new Error("Static explorer manifest is unavailable");
   const manifest = (await manifestResponse.json()) as StaticManifest;
+  if (manifest.schema_version !== "static-explorer-v2") {
+    throw new Error(`Unsupported static explorer schema ${manifest.schema_version}`);
+  }
   const worker = new Worker(mvpWorker);
   const database = new duckdb.AsyncDuckDB(new duckdb.VoidLogger(), worker);
   await database.instantiate(duckdbMvp);

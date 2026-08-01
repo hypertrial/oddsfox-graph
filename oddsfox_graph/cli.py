@@ -96,6 +96,20 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         choices=("event", "component", "neighborhood"),
     )
+
+    record = sub.add_parser("record")
+    record.add_argument("--out", required=True, type=Path)
+    record.add_argument("--destination", required=True, type=Path)
+    record.add_argument("--highlights", type=int, default=6)
+    record.add_argument("--min-confidence", type=float, default=0.95)
+    record.add_argument("--width", type=int, default=1_920)
+    record.add_argument("--height", type=int, default=1_080)
+    record.add_argument("--fps", type=int, default=30)
+    record.add_argument(
+        "--progress-format",
+        choices=("plain", "json", "quiet"),
+        default="plain",
+    )
     explorer_export.add_argument("--identifier", required=True)
     explorer_export.add_argument("--max-nodes", type=int, default=5_000)
     explorer_export.add_argument("--max-edges", type=int, default=10_000)
@@ -168,10 +182,16 @@ def _add_full_discovery_arguments(
     parser.add_argument("--cache-dir", required=required, type=Path)
     parser.add_argument("--automation-profile", type=Path)
     parser.add_argument("--compute-profile", required=required, type=Path)
-    parser.add_argument("--embedding-model", default="sentence-transformers/all-MiniLM-L6-v2")
-    parser.add_argument("--embedding-revision", default="1110a243fdf4706b3f48f1d95db1a4f5529b4d41")
+    parser.add_argument(
+        "--embedding-model", default="sentence-transformers/all-MiniLM-L6-v2"
+    )
+    parser.add_argument(
+        "--embedding-revision", default="1110a243fdf4706b3f48f1d95db1a4f5529b4d41"
+    )
     parser.add_argument("--accept-confidence", type=float, default=0.95)
-    parser.add_argument("--relation-threshold", action="append", default=[], metavar="RELATION=VALUE")
+    parser.add_argument(
+        "--relation-threshold", action="append", default=[], metavar="RELATION=VALUE"
+    )
     parser.add_argument("--parse-confidence", type=float, default=0.95)
     parser.add_argument("--top-k", type=int, default=20)
     parser.add_argument("--embedding-block-size", type=int, default=512)
@@ -223,6 +243,7 @@ def main(argv: list[str] | None = None) -> int:
 def _dispatch(args: argparse.Namespace) -> dict[str, Any] | list[dict[str, Any]]:
     if args.cmd in {"discover", "qualify"}:
         from ._discovery.contracts import DiscoveryConfig
+
         mode = getattr(args, "mode", "full")
         if mode == "fast":
             _reject_fast_only_conflicts(args)
@@ -231,9 +252,7 @@ def _dispatch(args: argparse.Namespace) -> dict[str, Any] | list[dict[str, Any]]
                 incremental_from=args.incremental_from,
                 max_propositions=args.max_propositions,
                 deadline_seconds=(
-                    120.0
-                    if args.deadline_seconds is None
-                    else args.deadline_seconds
+                    120.0 if args.deadline_seconds is None else args.deadline_seconds
                 ),
                 output_format=args.output_format,
                 progress_format=args.progress_format,
@@ -363,14 +382,26 @@ def _dispatch(args: argparse.Namespace) -> dict[str, Any] | list[dict[str, Any]]
             max_nodes=args.max_nodes,
             max_edges=args.max_edges,
         )
+    if args.cmd == "record":
+        from .recording import record_graph
+
+        return record_graph(
+            args.out,
+            args.destination,
+            highlights=args.highlights,
+            min_confidence=args.min_confidence,
+            width=args.width,
+            height=args.height,
+            fps=args.fps,
+            progress_format=args.progress_format,
+        )
     graph = Graph.open(args.out)
     if args.cmd == "nodes":
         return [row.model_dump(mode="json") for row in graph.nodes(args.top)]
     if args.cmd == "edges":
         edge_relation = args.edge_type
         return [
-            row.model_dump(mode="json")
-            for row in graph.edges(edge_relation, args.top)
+            row.model_dump(mode="json") for row in graph.edges(edge_relation, args.top)
         ]
     if args.cmd == "condition":
         return [dict(row) for row in graph.condition(args.a, args.b)]
@@ -379,7 +410,9 @@ def _dispatch(args: argparse.Namespace) -> dict[str, Any] | list[dict[str, Any]]
     if args.cmd == "explain-edge":
         return graph.explain_edge(args.src, args.dst, args.edge_type)
     if args.cmd == "search":
-        return [row.model_dump(mode="json") for row in graph.search(args.query, args.top)]
+        return [
+            row.model_dump(mode="json") for row in graph.search(args.query, args.top)
+        ]
     if args.cmd == "prove":
         return [
             row.model_dump(mode="json")

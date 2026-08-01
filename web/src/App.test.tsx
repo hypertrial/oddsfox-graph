@@ -14,6 +14,7 @@ const fixture: GraphView = {
       count: 1,
       confidence: 0.97,
       discovery_method: "generative_consensus",
+      evidence_tier: "generative_consensus",
       aggregation_only: false,
     },
     {
@@ -24,6 +25,7 @@ const fixture: GraphView = {
       count: 1,
       confidence: 0.99,
       discovery_method: "deterministic",
+      evidence_tier: "source_contract",
       aggregation_only: false,
     },
   ],
