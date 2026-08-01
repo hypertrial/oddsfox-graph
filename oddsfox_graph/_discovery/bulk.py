@@ -16,11 +16,13 @@ def create_and_fill(
     rows: Sequence[dict[str, Any]],
     *,
     chunk_size: int = BULK_INSERT_CHUNK_SIZE,
+    temporary: bool = False,
 ) -> None:
     """Create a typed table and insert rows through DuckDB list-of-struct binding."""
 
     ddl = ", ".join(f"{name} {sql_type}" for name, sql_type in columns.items())
-    db.execute(f"CREATE TABLE {table} ({ddl})")
+    qualifier = "TEMP " if temporary else ""
+    db.execute(f"CREATE {qualifier}TABLE {table} ({ddl})")
     insert_rows(db, table, columns, rows, chunk_size=chunk_size)
 
 

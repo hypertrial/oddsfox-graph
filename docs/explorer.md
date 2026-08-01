@@ -1,47 +1,22 @@
 # Logic Explorer
 
-The explorer is designed for a catalog much larger than a browser can safely
-render at once. It opens at component or event level and drills into bounded
-proposition neighborhoods.
-
-## Local service
-
 ```bash
-oddsfox-graph serve --out output/graph --open-browser
+oddsfox-graph serve --out output/fast --open-browser
 ```
 
-The packaged React/Sigma client provides:
+The header prominently shows `fast / DETERMINISTIC_VALIDATED` or `full /
+EXPERIMENTAL_FULL`. Evidence filters distinguish source-contract facts, strict
+deterministic proofs, and generative consensus. The explorer begins with event
+or component aggregates and requests bounded proposition neighborhoods only.
 
-- event and connected-component overviews with deterministic coordinates;
-- proposition search and bounded one-to-four-hop expansion;
-- relation, confidence, and compatibility filters;
-- coverage and truncation warnings;
-- node, aggregate edge, and accepted-proposal provenance;
-- implication proofs and why-not diagnostics.
+The loopback FastAPI service opens DuckDB read-only, uses parameterized stable
+queries, enforces node/edge ceilings, and exposes no arbitrary SQL or mutation.
+Search, relation/confidence/evidence filters, provenance, proofs, and why-not
+diagnostics are mode-aware. In fast mode, a missing semantic edge reports
+`full_mode_not_run` or `not_applicable_to_deterministic_rules`; it is never
+silently labeled unrelated.
 
-The FastAPI layer opens the final DuckDB file read-only. It uses parameterized
-queries, stable cursor ordering, and hard response ceilings, including node
-detail edge lists and neighborhood seed sets. The host must be
-loopback. Security headers deny framing and external scripts; there is no
-mutation or arbitrary SQL endpoint.
-
-## Static snapshots
-
-`explorer-export` packages the same client with bounded `snapshot_nodes.parquet`
-and `snapshot_edges.parquet`. DuckDB-Wasm loads those files in the browser. The
-export manifest binds the source graph, scope, identifier, ceilings, snapshot
-hash, and coverage. Export fails on truncation so a portable snapshot never
-silently claims completeness. Relation and confidence filters continue to work
-inside a static snapshot; its exported graph level is fixed.
-The destination must be separate from—and not nested inside—the source graph
-directory so export publication cannot modify the completed discovery output.
-Serve the directory over local HTTP; browser worker and Wasm security policies
-do not support opening the generated `index.html` through a `file:` URL.
-
-## Interpretation
-
-Component and event edges are aggregates. They help navigate the graph but do
-not add logical conclusions. Select a proposition edge for complete consensus,
-solver, citation, confidence, and model fingerprints. The coverage indicator is
-the assessed share of eligible retrieved pairs—not the share of all possible
-catalog pairs.
+`explorer-export` writes bounded `snapshot_nodes.parquet` and
+`snapshot_edges.parquet` plus the bundled DuckDB-Wasm client. Export fails on
+truncation. Component/event edges are aggregates for navigation; proofs and
+conditionals always use accepted proposition-level edges.

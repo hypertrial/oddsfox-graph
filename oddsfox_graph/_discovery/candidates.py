@@ -561,7 +561,6 @@ def _embedding_reason_rows(
             model=str(config.embedding_model),
             revision=str(config.embedding_revision),
         )
-    can_reuse_neighbors = bool(baseline_source_ids)
     id_to_index = {
         proposition_id: index for index, proposition_id in enumerate(ids)
     }
@@ -570,6 +569,12 @@ def _embedding_reason_rows(
         for index in range(len(ids))
         if index not in reused_indices
     } | (set(ids) - baseline_source_ids) | changed_source_text_ids
+    # Incremental exact changed-to-all scoring is efficient only for a narrow
+    # delta. Rebuild the ANN index when the affected population is broad so an
+    # incremental run can never degrade into proposition-by-proposition N² work.
+    can_reuse_neighbors = bool(baseline_source_ids) and len(changed_ids) <= max(
+        1, len(ids) // 20
+    )
     block_size = int(getattr(config, "embedding_block_size", 512))
     neighbor_count = min(int(config.top_k), len(ids) - 1)
     neighbor_buffer: list[dict[str, Any]] = []
@@ -822,26 +827,63 @@ def _embedding_reason_rows(
             revision=str(config.embedding_revision),
         )
     else:
+        try:
+            from usearch.index import Index
+        except ImportError as exc:  # pragma: no cover - installation guard
+            raise ImportError(
+                "Full discovery requires usearch==2.26.0; reinstall oddsfox-graph"
+            ) from exc
+        assert dimension is not None
+        ann_index = Index(
+            ndim=int(dimension),
+            metric="cos",
+            dtype="f32",
+            connectivity=32,
+            expansion_add=128,
+            expansion_search=128,
+        )
+        insertion_keys = np.arange(len(ids), dtype=np.uint64)
         for block_start in range(0, len(ids), block_size):
             block_end = min(block_start + block_size, len(ids))
-            similarities = np.round(
-                matrix[block_start:block_end] @ matrix.T,
-                decimals=SIMILARITY_DECIMALS,
+            ann_index.add(
+                insertion_keys[block_start:block_end],
+                np.asarray(matrix[block_start:block_end], dtype=np.float32),
+                threads=1,
             )
-            for block_offset, index in enumerate(
+        query_count = min(65, len(ids))
+        for block_start in range(0, len(ids), block_size):
+            block_end = min(block_start + block_size, len(ids))
+            matches = ann_index.search(
+                np.asarray(matrix[block_start:block_end], dtype=np.float32),
+                count=query_count,
+                threads=1,
+            )
+            match_keys = np.asarray(matches.keys)
+            if match_keys.ndim == 1:
+                match_keys = match_keys.reshape(1, -1)
+            for block_offset, source_index in enumerate(
                 range(block_start, block_end)
             ):
-                scores = similarities[block_offset]
-                scores[index] = -np.inf
-                ranked = _top_k_indices(scores, neighbor_count, np)
+                candidate_indices = sorted(
+                    {
+                        int(index_value)
+                        for index_value in match_keys[block_offset]
+                        if int(index_value) != source_index
+                    }
+                )
+                exact_scores = np.round(
+                    matrix[source_index] @ matrix[candidate_indices].T,
+                    decimals=SIMILARITY_DECIMALS,
+                )
+                ranked_options = sorted(
+                    zip(candidate_indices, exact_scores, strict=True),
+                    key=lambda item: (-float(item[1]), ids[int(item[0])]),
+                )[:neighbor_count]
                 emit(
-                    ids[index],
+                    ids[source_index],
                     [
-                        (
-                            ids[int(other_index)],
-                            float(scores[int(other_index)]),
-                        )
-                        for other_index in ranked
+                        (ids[int(other_index)], float(score))
+                        for other_index, score in ranked_options
                     ],
                     status="recomputed",
                 )
@@ -1197,7 +1239,17 @@ SELECT
     NULL::VARCHAR AS primary_inference_fingerprint,
     NULL::VARCHAR AS verifier_inference_fingerprint,
     NULL::VARCHAR AS consensus_fingerprint,
-    NULL::VARCHAR AS automation_profile_id
+    NULL::VARCHAR AS automation_profile_id,
+    CASE
+        WHEN d.rule_id IS NULL THEN NULL
+        WHEN d.rule_id LIKE 'same_market.%' THEN 'source_contract'
+        ELSE 'deterministic_rule'
+    END AS evidence_tier,
+    NULL::VARCHAR AS extractor_id,
+    NULL::VARCHAR AS extractor_version,
+    NULL::VARCHAR AS source_spans_json,
+    NULL::VARCHAR AS rule_applicability_fingerprint,
+    NULL::VARCHAR AS proof_scope_key
 FROM prioritized p
 LEFT JOIN accepted_deterministic_pairs d USING (
     proposition_a_id,

@@ -1,35 +1,19 @@
 # Automated qualification
 
-Qualification derives all material from the canonical Polymarket catalog. It
-uses no external semantic labels, external datasets, model-authored truth, or proprietary
-outputs.
+Fast rules are independently qualified with at least 100 generated positives and
+100 adversarial negatives per enabled rule. Generators do not call production
+extractor or relation functions. Any failure keeps the rule experimental and its
+edges out of fast publication.
 
-The generator selects 1,000 parse markets—200 each for sports, elections,
-cryptocurrency, economic indicators, and date-based events—and creates 5,000
-controlled pair cases: 500 for every publishable relation, 1,250 difficult
-unrelated cases, and 1,250 deliberately under-specified uncertain cases. Truth
-generators cover binary facts, normalized equivalence, numeric/time/stage
-implication, co-possible events, polarity changes, missing scope, boundary changes,
-and adversarial near misses. They are independent of production rule functions.
-Selection and validation partitions are 60/40 and market-disjoint.
+Full qualification remains an out-of-band command. It derives cases only from
+the canonical catalog, uses no human or model-authored truth, and binds the exact
+Qwen/Granite runtimes, v0.11 extractor, normalization, prompts, request/response
+schemas, sampling, NLI, MiniLM, USearch version/parameters/insertion order, exact
+reranker, and rule registry. The resulting `AUTOMATION_VALIDATED` profile is a
+prerequisite to run full mode, but the resulting graph is still labeled
+`EXPERIMENTAL_FULL` in this release.
 
-The automation profile chooses the lowest per-relation consensus threshold that
-passes the selection precision target, then applies all gates to validation:
-structured validity, ID coverage, authoritative conflicts, parse agreement,
-field/numeric/date agreement, relation precision and recall, retrieval recall,
-support, citations, empty assumptions, and seed stability.
-
-The result is `AUTOMATION_VALIDATED` only if every gate passes. The profile is
-bound to the generated case-set hash, both model manifests and runtimes, prompts,
-request/response schemas, sampling settings, NLI, normalization, and generator.
-The retrieval binding includes the embedding model/revision, retrieval version,
-top-k, block size, and candidate ceiling; changing any of them requires a new
-profile. Retrieval recall is measured by running the generated positive cases
-through the production candidate stage.
-Qualification failure writes diagnostics and blocks graph publication.
-The sibling `<out>.qualification-failure` directory contains the failed profile,
-report, exact cases, and both manifests for reproducible diagnosis.
-
-These controlled metrics certify automated conformance, logical-case accuracy,
-consistency, reproducibility, and performance. They do not independently measure
-real-world semantic accuracy.
+Generated-case metrics certify automated conformance and controlled logical-case
+behavior. They are not an independent real-world semantic-accuracy claim. Live
+Qwen/Granite quality, sustained thermal behavior, and the one-hour M4 target are
+explicitly deferred from the v0.11 fast release gate.

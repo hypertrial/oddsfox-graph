@@ -1,4 +1,4 @@
-"""Installed, content-bound v0.10 release fixture validation."""
+"""Installed, content-bound v0.11 fast-mode release validation."""
 
 from __future__ import annotations
 
@@ -7,48 +7,30 @@ from pathlib import Path
 from typing import Any, cast
 
 from . import __version__
-from ._discovery.cache import InferenceCache
-from ._discovery.inference import (
-    load_automation_profile,
-    load_compute_profile,
-    load_model_manifest,
-    manifest_sha256,
-    validate_consensus_model_pair,
+from ._discovery.provenance import atomic_write_json, canonical_json_sha256, sha256_file
+from ._discovery.versions import (
+    CANONICAL_CATALOG_SHA256,
+    EXTRACTOR_VERSION,
+    PERFORMANCE_BUDGET_VERSION,
+    RELEASE_FIXTURE_SCHEMA_VERSION,
+    RULE_VERSION,
 )
-from ._discovery.provenance import (
-    atomic_write_json,
-    canonical_json_sha256,
-    sha256_file,
-)
-from ._discovery.versions import RELEASE_FIXTURE_SCHEMA_VERSION
-from ._discovery.versions import CANONICAL_CATALOG_SHA256
-from .qualification import (
-    QUALIFICATION_CASE_COLUMNS,
-    qualification_case_set_hash,
-)
-from .queries import DuckDB, q
 
 
 REQUIRED_FILES = (
     "input.parquet",
     "performance_report.json",
-    "compute_profile.json",
-    "primary_model_manifest.json",
-    "verifier_model_manifest.json",
-    "automation_profile.json",
-    "qualification_report.json",
-    "qualification_cases.parquet",
     "expected_artifact_hashes.json",
-    "baselines/5000/build_manifest.json",
-    "baselines/20000/build_manifest.json",
-    "baselines/all/build_manifest.json",
-    "baselines/all/viewer_manifest.json",
-    "baselines/all/coverage_summary.json",
+    "baselines/fast/build_manifest.json",
+    "baselines/fast/viewer_manifest.json",
+    "baselines/fast/coverage_summary.json",
 )
-REQUIRED_TREES = ("cache", "baselines/5000", "baselines/20000", "baselines/all")
+REQUIRED_TREES = ("baselines/fast",)
 
 
 def validate_release_fixture(fixture_root: Path, work_dir: Path) -> dict[str, Any]:
+    """Validate the deterministic fast release without requiring model assets."""
+
     root = fixture_root.resolve()
     raw = _read_json(root / "release-fixture.json")
     if raw.get("schema_version") != RELEASE_FIXTURE_SCHEMA_VERSION:
@@ -63,7 +45,9 @@ def validate_release_fixture(fixture_root: Path, work_dir: Path) -> dict[str, An
         _safe_path(root, relative)
     missing_files = sorted(set(REQUIRED_FILES) - set(files))
     if missing_files:
-        raise ValueError("Release fixture is missing file bindings: " + ", ".join(missing_files))
+        raise ValueError(
+            "Release fixture is missing file bindings: " + ", ".join(missing_files)
+        )
     checked_files: dict[str, str] = {}
     for relative, expected in sorted(files.items()):
         candidate = _safe_path(root, relative)
@@ -84,97 +68,136 @@ def validate_release_fixture(fixture_root: Path, work_dir: Path) -> dict[str, An
         binding = trees.get(relative)
         if not isinstance(binding, dict):
             raise ValueError(f"Release fixture does not bind tree {relative}")
-        directory = _safe_path(root, relative)
-        observed_hash, observed_count = _tree_digest(directory)
-        if observed_hash != binding.get("sha256") or observed_count != binding.get("file_count"):
+        observed_hash, observed_count = _tree_digest(_safe_path(root, relative))
+        if (
+            observed_hash != binding.get("sha256")
+            or observed_count != binding.get("file_count")
+        ):
             raise ValueError(f"Release fixture tree hash mismatch: {relative}")
-        checked_trees[relative] = {"sha256": observed_hash, "file_count": observed_count}
+        checked_trees[relative] = {
+            "sha256": observed_hash,
+            "file_count": observed_count,
+        }
 
-    cache = InferenceCache(root / "cache", offline=True)
-    try:
-        integrity = cache.integrity_check()
-        if integrity != "ok":
-            raise ValueError(f"Release cache integrity failed: {integrity}")
-        cache_stats = cache.stats()
-        cached_profile_ids = cache.qualification_profile_ids()
-    finally:
-        cache.close()
+    baseline_root = root / "baselines" / "fast"
+    manifest = _read_json(baseline_root / "build_manifest.json")
+    if manifest.get("version") != __version__:
+        raise ValueError("The fast baseline version is incompatible")
+    if manifest.get("build_mode") != "fast":
+        raise ValueError("The release baseline is not a fast build")
+    if manifest.get("validation_status") != "DETERMINISTIC_VALIDATED":
+        raise ValueError("The fast baseline is not deterministic validated")
+    manifest_input = manifest.get("input")
+    if (
+        not isinstance(manifest_input, dict)
+        or manifest_input.get("sha256") != CANONICAL_CATALOG_SHA256
+    ):
+        raise ValueError("The fast baseline does not bind the canonical input")
 
-    profile = load_automation_profile(root / "automation_profile.json")
-    primary_manifest = load_model_manifest(root / "primary_model_manifest.json")
-    verifier_manifest = load_model_manifest(root / "verifier_model_manifest.json")
-    validate_consensus_model_pair(primary_manifest, verifier_manifest)
-    load_compute_profile(root / "compute_profile.json")
-    qualification = _read_json(root / "qualification_report.json")
-    if profile.status != "AUTOMATION_VALIDATED" or qualification.get("status") != "AUTOMATION_VALIDATED":
-        raise ValueError("Release fixture qualification is not AUTOMATION_VALIDATED")
-    if qualification.get("profile_id") != profile.profile_id:
-        raise ValueError("Qualification report and automation profile do not match")
-    if profile.primary_manifest_id != primary_manifest.manifest_id:
-        raise ValueError("Primary manifest does not match automation profile")
-    if profile.primary_manifest_sha256 != manifest_sha256(primary_manifest):
-        raise ValueError("Primary manifest content does not match automation profile")
-    if profile.verifier_manifest_id != verifier_manifest.manifest_id:
-        raise ValueError("Verifier manifest does not match automation profile")
-    if profile.verifier_manifest_sha256 != manifest_sha256(verifier_manifest):
-        raise ValueError("Verifier manifest content does not match automation profile")
-    if profile.profile_id not in cached_profile_ids:
-        raise ValueError("Release cache does not contain the automation profile")
-    cases_db = DuckDB()
-    try:
-        case_rows = cases_db.rows(
-            f"SELECT {', '.join(QUALIFICATION_CASE_COLUMNS)} "
-            f"FROM read_parquet('{q(root / 'qualification_cases.parquet')}') "
-            "ORDER BY case_id"
-        )
-    finally:
-        cases_db.close()
-    if qualification_case_set_hash(case_rows) != profile.case_set_hash:
-        raise ValueError("Qualification cases do not match the automation profile")
-    if qualification.get("case_set_hash") != profile.case_set_hash:
-        raise ValueError("Qualification report case set does not match the profile")
+    expected_document = _read_json(root / "expected_artifact_hashes.json")
+    expected_hashes = expected_document.get("fast", expected_document)
+    if not isinstance(expected_hashes, dict) or expected_hashes != manifest.get(
+        "artifact_hashes"
+    ):
+        raise ValueError("The fast baseline artifact hashes do not match")
 
-    expected_hashes = _read_json(root / "expected_artifact_hashes.json")
-    for envelope in ("5000", "20000", "all"):
-        baseline_manifest = _read_json(root / "baselines" / envelope / "build_manifest.json")
-        if baseline_manifest.get("version") != __version__:
-            raise ValueError(f"The {envelope} baseline version is incompatible")
-        inference = baseline_manifest.get("inference")
-        if not isinstance(inference, dict) or inference.get("automation_profile_id") != profile.profile_id:
-            raise ValueError(f"The {envelope} baseline profile does not match")
-        stats = baseline_manifest.get("stats")
-        if not isinstance(stats, dict) or stats.get("qualification_status") != "AUTOMATION_VALIDATED":
-            raise ValueError(f"The {envelope} baseline is not automation validated")
-        expected_artifacts = expected_hashes.get(envelope)
-        if not isinstance(expected_artifacts, dict) or expected_artifacts != baseline_manifest.get("artifact_hashes"):
-            raise ValueError(f"The {envelope} baseline artifact hashes do not match")
-        if envelope == "all":
-            coverage = _read_json(root / "baselines" / envelope / "coverage_summary.json")
-            if coverage.get("all_market_selection") is not True:
-                raise ValueError("The all-market baseline is not a full-catalog selection")
-            selection = coverage.get("input_selection")
-            if (
-                int(coverage.get("markets") or 0) != 94_777
-                or int(coverage.get("propositions") or 0) != 189_570
-                or not isinstance(selection, dict)
-                or int(selection.get("input_market_rows") or 0) != 94_781
-                or int(selection.get("invalid_market_rows") or 0) != 4
-            ):
-                raise ValueError("The all-market baseline catalog counts are not canonical")
-            viewer = _read_json(root / "baselines" / envelope / "viewer_manifest.json")
-            if not viewer.get("graph_content_fingerprint"):
-                raise ValueError("The all-market baseline is missing its viewer fingerprint")
+    coverage = _read_json(baseline_root / "coverage_summary.json")
+    selection = coverage.get("input_selection")
+    if (
+        coverage.get("all_market_selection") is not True
+        or int(coverage.get("markets") or 0) != 94_777
+        or int(coverage.get("propositions") or 0) != 189_570
+        or not isinstance(selection, dict)
+        or int(selection.get("input_market_rows") or 0) != 94_781
+        or int(selection.get("invalid_market_rows") or 0) != 4
+    ):
+        raise ValueError("The fast baseline catalog counts are not canonical")
+
+    stats = manifest.get("stats")
+    if not isinstance(stats, dict):
+        raise ValueError("The fast baseline has no stats")
+    expected_counts = {
+        "same_market_complement_edges": 94_771,
+        "same_market_categorical_exclusion_edges": 54,
+    }
+    for field, expected_count in expected_counts.items():
+        if int(stats.get(field) or 0) != expected_count:
+            raise ValueError(f"The fast baseline has an invalid {field}")
+    if int(stats.get("cross_market_deterministic_edges") or 0) <= 0:
+        raise ValueError("The fast baseline has no cross-market deterministic edges")
+    if int(stats.get("cross_event_deterministic_edges") or 0) <= 0:
+        raise ValueError("The fast baseline has no cross-event deterministic edges")
+    deadline = manifest.get("deadline")
+    if not isinstance(deadline, dict) or deadline.get("met") is not True:
+        raise ValueError("The fast baseline missed its discovery deadline")
+
+    viewer = _read_json(baseline_root / "viewer_manifest.json")
+    if (
+        viewer.get("build_mode") != "fast"
+        or viewer.get("validation_status") != "DETERMINISTIC_VALIDATED"
+        or not viewer.get("graph_content_fingerprint")
+    ):
+        raise ValueError("The fast viewer manifest is incomplete")
+
     performance = _read_json(root / "performance_report.json")
     if performance.get("passed") is not True:
         raise ValueError("Release performance gates did not pass")
+    hardware = performance.get("hardware")
+    budget = performance.get("budget")
+    acceptance = performance.get("acceptance")
+    if (
+        performance.get("schema_version") != PERFORMANCE_BUDGET_VERSION
+        or performance.get("input_sha256") != CANONICAL_CATALOG_SHA256
+        or not isinstance(hardware, dict)
+        or hardware.get("system") != "Darwin"
+        or hardware.get("machine") != "arm64"
+        or "Apple M4" not in str(hardware.get("processor") or "")
+        or not isinstance(budget, dict)
+        or budget.get("schema_version") != PERFORMANCE_BUDGET_VERSION
+        or budget.get("input_sha256") != CANONICAL_CATALOG_SHA256
+        or budget.get("repetitions") != 3
+        or budget.get("selection") != "complete-valid-catalog"
+        or budget.get("extractor_version") != EXTRACTOR_VERSION
+        or budget.get("rule_version") != RULE_VERSION
+        or not isinstance(acceptance, dict)
+        or not all(
+            acceptance.get(name) is True
+            for name in (
+                "every_run_ready_within_budget",
+                "every_discovery_deadline_met",
+                "logical_hashes_identical",
+                "inference_resources_absent",
+            )
+        )
+    ):
+        raise ValueError("Release performance report is not bound to the v0.11 M4 budget")
+    runs = performance.get("runs")
+    if not isinstance(runs, list) or len(runs) != 3:
+        raise ValueError("Release performance requires three isolated runs")
+    logical_hashes: list[object] = []
+    for run in runs:
+        if not isinstance(run, dict):
+            raise ValueError("Release performance run is invalid")
+        ready_seconds = float(run.get("time_to_ready_seconds") or float("inf"))
+        if ready_seconds > 120 or run.get("deadline_met") is not True:
+            raise ValueError("A fast performance repetition missed 120 seconds")
+        run_hashes = run.get("logical_artifact_hashes")
+        if run_hashes != expected_hashes:
+            raise ValueError(
+                "A fast performance repetition does not match the release baseline"
+            )
+        logical_hashes.append(run_hashes)
+    if any(item is None for item in logical_hashes) or len(
+        {canonical_json_sha256(item) for item in logical_hashes}
+    ) != 1:
+        raise ValueError("Fast performance repetitions changed logical hashes")
 
     result = {
         "passed": True,
         "schema_version": RELEASE_FIXTURE_SCHEMA_VERSION,
         "checked_files": checked_files,
         "checked_trees": checked_trees,
-        "cache": cache_stats,
-        "decision": "AUTOMATION_VALIDATED",
+        "decision": "DETERMINISTIC_VALIDATED",
     }
     target = work_dir.resolve()
     target.mkdir(parents=True, exist_ok=True)
@@ -195,7 +218,10 @@ def _read_json(path: Path) -> dict[str, Any]:
 def _string_mapping(value: object, name: str) -> dict[str, str]:
     if not isinstance(value, dict) or not value:
         raise ValueError(f"Release fixture {name} must be a nonempty object")
-    if not all(isinstance(key, str) and isinstance(item, str) for key, item in value.items()):
+    if not all(
+        isinstance(key, str) and isinstance(item, str)
+        for key, item in value.items()
+    ):
         raise ValueError(f"Release fixture {name} must map strings to strings")
     return cast(dict[str, str], value)
 

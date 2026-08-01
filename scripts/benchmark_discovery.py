@@ -3,752 +3,281 @@ from __future__ import annotations
 # ruff: noqa: E402
 
 import argparse
-import hashlib
 import json
+import os
 import platform
-import shutil
-import statistics
+import socket
 import subprocess
 import sys
-import tempfile
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-CANONICAL_SOURCE_SHA256 = (
-    "790bd1595b379472ad65ba0073105b4eb630974d04e7b44d58c8a4929f274aa2"
-)
-
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-import numpy as np
-
-from oddsfox_graph._discovery.contracts import (
-    AtomicPairAssessment,
-    ParsedMarket,
-    ParsedOutcome,
-)
-from oddsfox_graph._discovery.input import load_source_markets
-from oddsfox_graph._discovery.provenance import (
-    atomic_write_json,
-    sha256_file as _sha256,
-)
+from oddsfox_graph._discovery.provenance import atomic_write_json, sha256_file
 from oddsfox_graph._discovery.versions import (
-    FAKE_RUNTIME_VERSION,
+    CANONICAL_CATALOG_SHA256,
+    EXTRACTOR_VERSION,
     PERFORMANCE_BUDGET_VERSION,
+    RULE_VERSION,
 )
-from oddsfox_graph.discovery import DiscoveryConfig, discover
-from oddsfox_graph.qualification import qualify_catalog
-from oddsfox_graph.queries import DuckDB, q
 
 
-class _Response:
-    def __init__(self, parsed: object, model: str) -> None:
-        self.parsed = parsed
-        self.observed_model = model
-        self.usage = {
-            "input_tokens": 20,
-            "output_tokens": 10,
-            "total_tokens": 30,
-        }
-
-
-class _Client:
-    def __init__(self, model: str) -> None:
-        self.model = model
-
-    async def aclose(self) -> None:
-        return None
-
-    async def preflight(self, **_: object) -> dict[str, str]:
-        return {"runtime_version": "test-fixture", "model": self.model}
-
-    async def generate(self, **kwargs: object) -> _Response:
-        payload = kwargs["payload"]
-        if kwargs["response_model"] is ParsedMarket:
-            market = payload
-            return _Response(
-                ParsedMarket(
-                    market_id=str(market["market_id"]),
-                    propositions=[
-                        ParsedOutcome(
-                            outcome=str(outcome["outcome"]),
-                            subject=[str(market["question"])],
-                            predicate="resolve",
-                            object=None,
-                            operator=None,
-                            threshold=None,
-                            unit=None,
-                            time_start=None,
-                            time_end=None,
-                            competition=None,
-                            event_scope=market.get("event_slug"),
-                            jurisdiction=None,
-                            polarity=(
-                                "negative"
-                                if str(outcome["outcome"]).casefold() == "no"
-                                else "positive"
-                            ),
-                            parse_confidence=0.99,
-                            citations=["question", "outcome"],
-                        )
-                        for outcome in market["outcomes"]
-                    ]
-                ),
-                self.model,
-            )
-        identifier = str(payload["proposition_A"]["proposition_id"])
-        relation = next(
-            (
-                value
-                for value in (
-                    "complement",
-                    "equivalent",
-                    "mutually_exclusive",
-                    "implies",
-                    "compatible",
-                    "unrelated",
-                    "uncertain",
-                )
-                if f"-{value}-" in identifier
-            ),
-            "unrelated",
-        )
-        judgments = {
-            "a_implies_b": "no",
-            "b_implies_a": "no",
-            "can_both_be_true": "yes",
-            "must_one_be_true": "no",
-            "logically_related": "yes",
-        }
-        if relation == "complement":
-            judgments.update(can_both_be_true="no", must_one_be_true="yes")
-        elif relation == "equivalent":
-            judgments.update(a_implies_b="yes", b_implies_a="yes")
-        elif relation == "mutually_exclusive":
-            judgments.update(can_both_be_true="no")
-        elif relation == "implies":
-            judgments.update(a_implies_b="yes")
-        elif relation == "unrelated":
-            judgments.update(logically_related="no")
-        elif relation == "uncertain":
-            judgments = {key: "unknown" for key in judgments}
-        supporting = (
-            []
-            if relation in {"unrelated", "uncertain"}
-            else [
-                {
-                    "proposition": side,
-                    "field": "question",
-                    "value": str(payload[f"proposition_{side}"]["question"]),
-                }
-                for side in ("A", "B")
-            ]
-        )
-        return _Response(
-            AtomicPairAssessment(
-                pair_id=str(payload["pair_id"]),
-                **judgments,
-                confidence=0.99,
-                supporting_fields=supporting,
-                assumptions=[],
-                unsupported_assumption=False,
-                requires_review=relation == "uncertain",
-            ),
-            self.model,
-        )
-
-
-def _embeddings(texts: list[str], _: DiscoveryConfig) -> np.ndarray:
-    return np.asarray(
-        [
-            [
-                int.from_bytes(
-                    hashlib.sha256(text.encode("utf-8")).digest()[offset : offset + 4],
-                    "big",
-                )
-                / 2**32
-                for offset in (0, 4, 8, 12, 16, 20, 24, 28)
-            ]
-            for text in texts
-        ],
-        dtype=np.float32,
-    )
-
-
-def _worker(args: argparse.Namespace) -> int:
-    config = DiscoveryConfig(
-        cache_dir=args.cache_dir,
-        incremental_from=args.incremental_from,
-        offline=args.offline,
-        top_k=args.top_k,
-        max_propositions=args.size,
-        max_candidates=args.max_candidates,
-        max_llm_pairs=args.max_llm_pairs,
-        progress_format="quiet",
-    )
-    started = time.perf_counter()
-    stats = discover(
-        args.input,
-        args.out,
-        config=config,
-        _primary_client=_Client("Qwen/Qwen3-4B-GGUF:Q8_0"),
-        _verifier_client=_Client(
-            "ibm-granite/granite-3.3-2b-instruct-GGUF:Q8_0"
-        ),
-        _embedder=_embeddings,
-    )
-    elapsed = time.perf_counter() - started
-    manifest = json.loads(
-        (args.out / "build_manifest.json").read_text(encoding="utf-8")
-    )
-    print(
-        json.dumps(
-            {
-                "wall_seconds": round(elapsed, 6),
-                "peak_rss_mb": stats["peak_rss_mb"],
-                "tokens": stats["tokens"],
-                "propositions_per_second": (
-                    float(stats["tokens"]) / elapsed if elapsed > 0 else None
-                ),
-                "candidate_edges": stats["candidate_edges"],
-                "stage_timings": manifest["stage_timings"],
-                "incremental": stats["incremental"],
-                "artifact_hashes": manifest["artifact_hashes"],
-                "stage_metrics": manifest.get("stage_metrics") or {},
-                "cache": manifest["cache"],
-                "candidate_workspace": stats.get("candidate_workspace") or {},
-                "publication_bytes": stats.get("publication_bytes"),
-                "publication_stage_timings": stats.get(
-                    "publication_stage_timings"
-                )
-                or {},
-            },
-            sort_keys=True,
-        )
-    )
-    return 0
-
-
-def _run_worker(
-    *,
-    input_path: Path,
-    out: Path,
-    cache_dir: Path,
-    size: int,
-    args: argparse.Namespace,
-    incremental_from: Path | None = None,
-    offline: bool = False,
-) -> dict[str, Any]:
-    command = [
-        sys.executable,
-        str(Path(__file__).resolve()),
-        "--worker",
-        "--input",
-        str(input_path),
-        "--out",
-        str(out),
-        "--cache-dir",
-        str(cache_dir),
-        "--size",
-        str(size),
-        "--top-k",
-        str(args.top_k),
-        "--max-candidates",
-        str(args.max_candidates),
-        "--max-llm-pairs",
-        str(args.max_llm_pairs),
-    ]
-    if incremental_from is not None:
-        command.extend(["--incremental-from", str(incremental_from)])
-    if offline:
-        command.append("--offline")
-    completed = subprocess.run(
-        command,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    return json.loads(completed.stdout.strip().splitlines()[-1])
-
-
-def _changed_catalog(input_path: Path, output_path: Path) -> str:
-    _, _, markets, _ = load_source_markets(input_path, max_propositions=500)
-    market_id = markets[0].market_id
-    escaped = market_id.replace("'", "''")
-    db = DuckDB()
-    try:
-        db.execute(
-            f"""
-            COPY (
-                SELECT * REPLACE (
-                    CASE
-                        WHEN CAST(market_id AS VARCHAR) = '{escaped}'
-                            THEN coalesce(description, '')
-                                 || ' Benchmark incremental change.'
-                        ELSE description
-                    END AS description
-                )
-                FROM read_parquet('{q(input_path)}')
-            ) TO '{q(output_path)}' (FORMAT PARQUET)
-            """
-        )
-    finally:
-        db.close()
-    return market_id
-
-
-def _summaries(samples: list[dict[str, Any]]) -> dict[str, Any]:
-    grouped: dict[tuple[int, str], list[dict[str, Any]]] = {}
-    for sample in samples:
-        grouped.setdefault(
-            (int(sample["size"]), str(sample["mode"])),
-            [],
-        ).append(sample)
-    summaries: dict[str, Any] = {}
-    for (size, mode), rows in sorted(grouped.items()):
-        stages = sorted(
-            {
-                stage
-                for row in rows
-                for stage in row.get("stage_metrics", {})
-            }
-        )
-        state_names = sorted(
-            {
-                state
-                for row in rows
-                for state in row["candidate_workspace"].get(
-                    "state_rows",
-                    {},
-                )
-            }
-        )
-        summaries[f"{size}:{mode}"] = {
-            "runs": len(rows),
-            "median_wall_seconds": statistics.median(
-                float(row["wall_seconds"]) for row in rows
-            ),
-            "median_peak_rss_mb": statistics.median(
-                float(row["peak_rss_mb"]) for row in rows
-            ),
-            "median_candidate_seconds": statistics.median(
-                float(row["stage_timings"]["generate_candidates"]) for row in rows
-            ),
-            "median_publication_seconds": statistics.median(
-                float(row["stage_timings"]["publish_artifacts"]) for row in rows
-            ),
-            "median_propositions_per_second": statistics.median(
-                float(row["propositions_per_second"]) for row in rows
-            ),
-            "median_candidate_edges": statistics.median(
-                int(row["candidate_edges"]) for row in rows
-            ),
-            "median_cache_entries": statistics.median(
-                int(row["cache"]["entry_count"]) for row in rows
-            ),
-            "median_cache_bytes": statistics.median(
-                int(row["cache"]["storage_bytes"]) for row in rows
-            ),
-            "median_workspace_bytes": statistics.median(
-                int(row["candidate_workspace"]["database_bytes"])
-                for row in rows
-            ),
-            "median_publication_bytes": statistics.median(
-                int(row["publication_bytes"]) for row in rows
-            ),
-            "median_duckdb_spill_bytes": statistics.median(
-                int(row["candidate_workspace"].get("spill_bytes", 0))
-                for row in rows
-            ),
-            "median_python_rows_materialized": statistics.median(
-                int(
-                    row["candidate_workspace"].get(
-                        "python_rows_materialized",
-                        0,
-                    )
-                )
-                for row in rows
-            ),
-            "median_max_materialized_batch_rows": statistics.median(
-                int(
-                    row["candidate_workspace"].get(
-                        "max_materialized_batch_rows",
-                        0,
-                    )
-                )
-                for row in rows
-            ),
-            "median_state_rows": {
-                state: statistics.median(
-                    int(
-                        row["candidate_workspace"]
-                        .get("state_rows", {})
-                        .get(state, 0)
-                    )
-                    for row in rows
-                )
-                for state in state_names
-            },
-            "median_stage_peak_rss_mb": {
-                stage: statistics.median(
-                    float(
-                        row.get("stage_metrics", {})
-                        .get(stage, {})
-                        .get("peak_rss_mb", 0.0)
-                    )
-                    for row in rows
-                )
-                for stage in stages
-            },
-        }
-    return summaries
-
-
-def _acceptance(
-    summary: dict[str, Any],
-    budget: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    gates: dict[str, bool] = {}
-    ratios: dict[str, float] = {}
-    comparisons: dict[str, dict[str, float | bool | str | None]] = {}
-    sizes = sorted(
-        {
-            int(key.split(":", 1)[0])
-            for key in summary
-        }
-    )
-    for size in sizes:
-        clean = summary.get(f"{size}:clean")
-        incremental = summary.get(f"{size}:one-market-incremental")
-        offline = summary.get(f"{size}:offline")
-        if clean and incremental and size >= 5_000:
-            ratio = (
-                float(incremental["median_candidate_seconds"])
-                / float(clean["median_candidate_seconds"])
-            )
-            ratios[f"{size}:incremental_candidate_ratio"] = ratio
-            gate_name = f"{size}:incremental_candidate_faster"
-            gates[gate_name] = ratio <= 0.95
-            comparisons[gate_name] = {
-                "before": None,
-                "after": ratio,
-                "budget": 0.95,
-                "unit": "ratio",
-                "passed": gates[gate_name],
-            }
-        if clean and offline:
-            ratio = (
-                float(offline["median_candidate_seconds"])
-                / float(clean["median_candidate_seconds"])
-            )
-            ratios[f"{size}:offline_candidate_ratio"] = ratio
-            gate_name = f"{size}:offline_candidate_reuse"
-            gates[gate_name] = ratio <= 0.25
-            comparisons[gate_name] = {
-                "before": None,
-                "after": ratio,
-                "budget": 0.25,
-                "unit": "ratio",
-                "passed": gates[gate_name],
-            }
-    if budget is not None:
-        limits = budget["gates"]
-        clean_5k = summary.get("5000:clean")
-        clean_20k = summary.get("20000:clean")
-        if clean_5k is None or clean_20k is None:
-            raise ValueError(
-                "Performance budget requires clean 5,000 and 20,000 summaries"
-            )
-        budget_gates = {
-            "5000:clean_wall_seconds": (
-                float(clean_5k["median_wall_seconds"]),
-                float(limits["max_5000_clean_wall_seconds"]),
-                "seconds",
-                "5000_clean_wall_seconds",
-            ),
-            "20000:clean_peak_rss_mb": (
-                float(clean_20k["median_peak_rss_mb"]),
-                float(limits["max_20000_clean_peak_rss_mb"]),
-                "MiB",
-                "20000_clean_peak_rss_mb",
-            ),
-            "20000:publication_seconds": (
-                float(clean_20k["median_publication_seconds"]),
-                float(limits["max_20000_publication_seconds"]),
-                "seconds",
-                "20000_publication_seconds",
-            ),
-        }
-        baseline = budget.get("before") or {}
-        for gate_name, (
-            actual,
-            limit,
-            unit,
-            baseline_name,
-        ) in budget_gates.items():
-            gates[gate_name] = actual <= limit
-            before = baseline.get(baseline_name)
-            comparisons[gate_name] = {
-                "before": float(before) if before is not None else None,
-                "after": actual,
-                "budget": limit,
-                "unit": unit,
-                "passed": gates[gate_name],
-            }
-    return {
-        "passed": bool(gates) and all(gates.values()),
-        "gates": gates,
-        "ratios": ratios,
-        "performance_comparison": comparisons,
-    }
+def _read_json(path: Path) -> dict[str, Any]:
+    value = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(value, dict):
+        raise ValueError(f"Expected a JSON object: {path}")
+    return value
 
 
 def _hardware() -> dict[str, str]:
-    hardware = platform.processor()
-    if sys.platform == "darwin":
-        completed = subprocess.run(
+    processor = platform.processor()
+    if platform.system() == "Darwin":
+        observed = subprocess.run(
             ["sysctl", "-n", "machdep.cpu.brand_string"],
-            check=False,
             capture_output=True,
+            check=False,
             text=True,
-        )
-        hardware = completed.stdout.strip() or hardware
-        if "Apple" not in hardware:
-            completed = subprocess.run(
-                [
-                    "system_profiler",
-                    "SPHardwareDataType",
-                    "-detailLevel",
-                    "mini",
-                ],
-                check=False,
+        ).stdout.strip()
+        processor = observed or processor
+        if "Apple" not in processor:
+            profile = subprocess.run(
+                ["system_profiler", "SPHardwareDataType"],
                 capture_output=True,
+                check=False,
                 text=True,
+            ).stdout
+            processor = next(
+                (
+                    line.partition(":")[2].strip()
+                    for line in profile.splitlines()
+                    if line.strip().startswith("Chip:")
+                ),
+                "",
             )
-            for line in completed.stdout.splitlines():
-                label, separator, value = line.strip().partition(":")
-                if separator and label == "Chip" and value.strip():
-                    hardware = value.strip()
-                    break
     return {
         "system": platform.system(),
         "machine": platform.machine(),
-        "processor": hardware,
+        "processor": processor,
     }
 
 
-def _load_budget(
-    path: Path,
-    *,
-    repetitions: int,
-    hardware: dict[str, str],
-) -> dict[str, Any]:
-    budget = json.loads(path.resolve().read_text(encoding="utf-8"))
-    if (
-        budget.get("schema_version") != PERFORMANCE_BUDGET_VERSION
-        or budget.get("input_sha256") != CANONICAL_SOURCE_SHA256
-        or budget.get("fake_runtime_version") != FAKE_RUNTIME_VERSION
-        or int(budget.get("repetitions") or 0) != repetitions
-        or budget.get("system") != hardware["system"]
-        or budget.get("machine") != hardware["machine"]
-        or str(budget.get("processor_contains") or "") not in hardware["processor"]
-    ):
-        raise ValueError(
-            "Performance budget does not match the input, runtime, platform, "
-            "hardware, or repetition count"
-        )
+def _load_budget(path: Path, repetitions: int) -> dict[str, Any]:
+    budget = _read_json(path)
+    hardware = _hardware()
+    bindings = {
+        "schema_version": PERFORMANCE_BUDGET_VERSION,
+        "input_sha256": CANONICAL_CATALOG_SHA256,
+        "system": hardware["system"],
+        "machine": hardware["machine"],
+        "repetitions": repetitions,
+        "extractor_version": EXTRACTOR_VERSION,
+        "rule_version": RULE_VERSION,
+    }
+    for key, expected in bindings.items():
+        if budget.get(key) != expected:
+            raise ValueError(
+                f"Performance budget {key} mismatch: expected {expected!r}, "
+                f"got {budget.get(key)!r}"
+            )
+    processor_contains = str(budget.get("processor_contains") or "")
+    if processor_contains and processor_contains not in hardware["processor"]:
+        raise ValueError("Performance budget processor binding does not match")
     return budget
 
 
-def _collect_samples(
-    args: argparse.Namespace,
-    *,
-    input_path: Path,
-    runs_root: Path,
-    sizes: list[int],
-    modes: list[str],
-) -> tuple[str, list[dict[str, Any]]]:
-    changed_input = runs_root / "one-market-changed.parquet"
-    changed_market_id = _changed_catalog(input_path, changed_input)
-    qualification_cache = runs_root / "qualification-seed-cache"
-    qualify_catalog(
-        input_path,
-        runs_root / "qualification-seed-output",
-        config=DiscoveryConfig(
-            cache_dir=qualification_cache,
-            top_k=args.top_k,
-            max_candidates=args.max_candidates,
-            max_llm_pairs=args.max_llm_pairs,
-            progress_format="quiet",
-        ),
-        _primary_client=_Client("Qwen/Qwen3-4B-GGUF:Q8_0"),
-        _verifier_client=_Client(
-            "ibm-granite/granite-3.3-2b-instruct-GGUF:Q8_0"
-        ),
-        _embedder=_embeddings,
+def _free_port() -> int:
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
+
+
+def _wait_for_meta(out_dir: Path, *, started: float) -> tuple[float, dict[str, Any]]:
+    port = _free_port()
+    process = subprocess.Popen(
+        [
+            sys.executable,
+            "-m",
+            "oddsfox_graph.cli",
+            "serve",
+            "--out",
+            str(out_dir),
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(port),
+        ],
+        cwd=REPO_ROOT,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        env={**os.environ, "PYTHONUNBUFFERED": "1"},
     )
-    samples: list[dict[str, Any]] = []
-    for repetition in range(1, args.repetitions + 1):
-        for size in sizes:
-            run_root = runs_root / f"r{repetition}-{size}"
-            cache = run_root / "cache"
-            shutil.copytree(qualification_cache, cache)
-            clean_out = run_root / "clean"
-            clean = _run_worker(
-                input_path=input_path,
-                out=clean_out,
-                cache_dir=cache,
-                size=size,
-                args=args,
-            )
-            clean.update(
-                {"mode": "clean", "size": size, "repetition": repetition}
-            )
-            if "clean" in modes:
-                samples.append(clean)
-            if "offline" in modes:
-                offline = _run_worker(
-                    input_path=input_path,
-                    out=run_root / "offline",
-                    cache_dir=cache,
-                    size=size,
-                    args=args,
-                    incremental_from=clean_out,
-                    offline=True,
-                )
-                if offline["artifact_hashes"] != clean["artifact_hashes"]:
-                    raise RuntimeError(
-                        "Offline replay logical hashes differ from clean"
-                    )
-                offline.update(
-                    {"mode": "offline", "size": size, "repetition": repetition}
-                )
-                samples.append(offline)
-            if "one-market-incremental" in modes:
-                incremental = _run_worker(
-                    input_path=changed_input,
-                    out=run_root / "incremental",
-                    cache_dir=cache,
-                    size=size,
-                    args=args,
-                    incremental_from=clean_out,
-                )
-                changed_clean = _run_worker(
-                    input_path=changed_input,
-                    out=run_root / "changed-clean",
-                    cache_dir=run_root / "changed-clean-cache",
-                    size=size,
-                    args=args,
-                )
-                if incremental["artifact_hashes"] != changed_clean["artifact_hashes"]:
-                    raise RuntimeError(
-                        "One-market incremental logical hashes differ from clean"
-                    )
-                incremental["equivalent_full_artifact_hashes"] = changed_clean[
-                    "artifact_hashes"
-                ]
-                incremental.update(
-                    {
-                        "mode": "one-market-incremental",
-                        "size": size,
-                        "repetition": repetition,
-                    }
-                )
-                samples.append(incremental)
-    return changed_market_id, samples
+    try:
+        url = f"http://127.0.0.1:{port}/api/v1/meta"
+        deadline = time.monotonic() + 15.0
+        while time.monotonic() < deadline:
+            if process.poll() is not None:
+                raise RuntimeError("Explorer server exited before metadata was ready")
+            try:
+                with urllib.request.urlopen(url, timeout=0.5) as response:
+                    payload = json.loads(response.read())
+                    if response.status == 200 and isinstance(payload, dict):
+                        return time.monotonic() - started, payload
+            except (OSError, urllib.error.URLError, json.JSONDecodeError):
+                time.sleep(0.05)
+        raise RuntimeError("Explorer metadata endpoint was not ready within 15 seconds")
+    finally:
+        process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=5)
+
+
+def _run_once(
+    input_path: Path,
+    out_dir: Path,
+    *,
+    deadline_seconds: float,
+    repetition: int,
+) -> dict[str, Any]:
+    started = time.monotonic()
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "oddsfox_graph.cli",
+            "discover",
+            "--mode",
+            "fast",
+            "--input",
+            str(input_path),
+            "--out",
+            str(out_dir),
+            "--deadline-seconds",
+            str(deadline_seconds),
+            "--progress-format",
+            "json",
+            "--output-format",
+            "json",
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        raise RuntimeError(
+            f"Fast repetition {repetition} failed:\n{completed.stderr[-4000:]}"
+        )
+    time_to_ready, metadata = _wait_for_meta(out_dir, started=started)
+    manifest = _read_json(out_dir / "build_manifest.json")
+    stats = manifest.get("stats")
+    if not isinstance(stats, dict):
+        raise RuntimeError("Fast manifest has no stats")
+    if manifest.get("build_mode") != "fast":
+        raise RuntimeError("Benchmark did not produce a fast graph")
+    forbidden = (
+        "primary_model_manifest.json",
+        "verifier_model_manifest.json",
+        "automation_profile.json",
+        "compute_profile.json",
+    )
+    if any((out_dir / name).exists() for name in forbidden):
+        raise RuntimeError("Fast output unexpectedly contains inference provenance")
+    inference_resources = stats.get("inference_resources_loaded")
+    if inference_resources != []:
+        raise RuntimeError(
+            "Fast mode loaded inference resources: " + str(inference_resources)
+        )
+    return {
+        "repetition": repetition,
+        "time_to_ready_seconds": round(time_to_ready, 6),
+        "deadline_met": bool(manifest.get("deadline", {}).get("met")),
+        "logical_artifact_hashes": manifest.get("artifact_hashes"),
+        "peak_rss_mb": stats.get("peak_rss_mb"),
+        "stage_metrics": stats.get("stage_metrics"),
+        "candidate_edges": stats.get("candidate_edges"),
+        "logic_edges": stats.get("logic_edges"),
+        "cross_market_edges": stats.get("cross_market_deterministic_edges"),
+        "cross_event_edges": stats.get("cross_event_deterministic_edges"),
+        "publication_bytes": stats.get("publication_bytes"),
+        "inference_resources_loaded": inference_resources,
+        "viewer_metadata": metadata,
+    }
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Process-isolated real-catalog discovery benchmark."
+        description="Process-isolated full-catalog fast-mode benchmark."
     )
     parser.add_argument("--input", required=True, type=Path)
-    parser.add_argument("--output", type=Path)
-    parser.add_argument("--sizes", default="5000,20000")
-    parser.add_argument(
-        "--modes",
-        default="clean,offline,one-market-incremental",
-    )
+    parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument("--work-dir", required=True, type=Path)
     parser.add_argument("--repetitions", type=int, default=3)
-    parser.add_argument("--top-k", type=int, default=20)
-    parser.add_argument("--max-candidates", type=int, default=400_000)
-    parser.add_argument("--max-llm-pairs", type=int, default=5_000)
-    parser.add_argument("--performance-budget", type=Path)
+    parser.add_argument("--deadline-seconds", type=float, default=120.0)
+    parser.add_argument("--performance-budget", required=True, type=Path)
     parser.add_argument("--require-gates", action="store_true")
-    parser.add_argument("--worker", action="store_true")
-    parser.add_argument("--out", type=Path)
-    parser.add_argument("--cache-dir", type=Path)
-    parser.add_argument("--size", type=int)
-    parser.add_argument("--incremental-from", type=Path)
-    parser.add_argument("--offline", action="store_true")
     args = parser.parse_args()
-    if args.worker:
-        return _worker(args)
-    if args.output is None:
-        raise ValueError("--output is required")
+
     input_path = args.input.resolve()
-    if _sha256(input_path) != CANONICAL_SOURCE_SHA256:
-        raise ValueError(
-            "Performance validation requires the canonical supplied catalog"
+    if sha256_file(input_path) != CANONICAL_CATALOG_SHA256:
+        raise ValueError("Fast performance validation requires the canonical catalog")
+    if args.repetitions != 3:
+        raise ValueError("The v0.11 release budget requires exactly three repetitions")
+    budget = _load_budget(args.performance_budget.resolve(), args.repetitions)
+    work_dir = args.work_dir.resolve()
+    work_dir.mkdir(parents=True, exist_ok=True)
+    runs: list[dict[str, Any]] = []
+    for repetition in range(1, args.repetitions + 1):
+        run = _run_once(
+            input_path,
+            work_dir / f"fast-run-{repetition}",
+            deadline_seconds=args.deadline_seconds,
+            repetition=repetition,
         )
-    sizes = [int(value) for value in args.sizes.split(",") if value]
-    modes = [value for value in args.modes.split(",") if value]
-    supported = {"clean", "offline", "one-market-incremental"}
-    if not sizes or args.repetitions < 1 or set(modes) - supported:
-        raise ValueError("Invalid sizes, modes, or repetitions")
-    hardware = _hardware()
-    budget = (
-        _load_budget(
-            args.performance_budget,
-            repetitions=args.repetitions,
-            hardware=hardware,
+        runs.append(run)
+        print(
+            json.dumps(
+                {
+                    "repetition": repetition,
+                    "time_to_ready_seconds": run["time_to_ready_seconds"],
+                    "peak_rss_mb": run["peak_rss_mb"],
+                },
+                sort_keys=True,
+            ),
+            file=sys.stderr,
+            flush=True,
         )
-        if args.performance_budget is not None
-        else None
-    )
-    if args.require_gates and budget is None:
-        raise ValueError("--require-gates requires --performance-budget")
-    root = args.output.resolve()
-    root.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(
-        prefix=f".{root.stem}-runs-",
-        dir=root.parent,
-    ) as temporary_runs:
-        changed_market_id, samples = _collect_samples(
-            args,
-            input_path=input_path,
-            runs_root=Path(temporary_runs),
-            sizes=sizes,
-            modes=modes,
-        )
-    summary = _summaries(samples)
-    configuration = {
-        "top_k": args.top_k,
-        "max_candidates": args.max_candidates,
-        "max_llm_pairs": args.max_llm_pairs,
-        "qualification_cache_preseeded": True,
+    max_ready = float(budget["gates"]["max_time_to_ready_seconds"])
+    hashes = [json.dumps(run["logical_artifact_hashes"], sort_keys=True) for run in runs]
+    acceptance = {
+        "every_run_ready_within_budget": all(
+            float(run["time_to_ready_seconds"]) <= max_ready for run in runs
+        ),
+        "every_discovery_deadline_met": all(run["deadline_met"] for run in runs),
+        "logical_hashes_identical": len(set(hashes)) == 1,
+        "inference_resources_absent": all(
+            run.get("inference_resources_loaded") == [] for run in runs
+        ),
     }
-    acceptance = _acceptance(summary, budget)
     result = {
-        "input": str(args.input.resolve()),
-        "changed_market_id": changed_market_id,
-        "sizes": sizes,
-        "modes": modes,
-        "repetitions": args.repetitions,
-        "configuration": configuration,
-        "fake_runtime_version": FAKE_RUNTIME_VERSION,
-        "hardware": hardware,
-        "samples": samples,
-        "summary": summary,
-        "performance_budget": budget,
-        "passed": acceptance["passed"],
+        "schema_version": PERFORMANCE_BUDGET_VERSION,
+        "input_sha256": CANONICAL_CATALOG_SHA256,
+        "hardware": _hardware(),
+        "budget": budget,
+        "runs": runs,
         "acceptance": acceptance,
+        "passed": all(acceptance.values()),
     }
-    atomic_write_json(root, result)
-    return int(args.require_gates and not result["acceptance"]["passed"])
+    atomic_write_json(args.output.resolve(), result)
+    return int(args.require_gates and not result["passed"])
 
 
 if __name__ == "__main__":

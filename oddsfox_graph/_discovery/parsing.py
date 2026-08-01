@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+from collections import Counter
+from collections.abc import Sequence
 from typing import Any
 
 from .contracts import ParsedMarket, ParsedOutcome, SourceMarket, SourceOutcome
 from .input import utc_datetime
 from .protocol import deterministic_extract
+from .extraction import extract_proposition
 from .relations import normalize_text
-from .versions import NORMALIZATION_VERSION, PARSE_PROMPT_VERSION
+from .versions import EXTRACTOR_ID, EXTRACTOR_VERSION, NORMALIZATION_VERSION, PARSE_PROMPT_VERSION
 
 
 _ENTITY_ALIASES = {
@@ -94,16 +97,17 @@ def proposition_row(
     market: SourceMarket,
     source: SourceOutcome,
     parsed: ParsedOutcome | None,
-    primary_model: str,
-    verifier_model: str,
+    primary_model: str | None,
+    verifier_model: str | None,
     source_schema: str,
     error: str | None,
-    primary_fingerprint: str,
-    verifier_fingerprint: str,
-    consensus_fingerprint: str,
+    primary_fingerprint: str | None,
+    verifier_fingerprint: str | None,
+    consensus_fingerprint: str | None,
     automation_profile_id: str | None,
 ) -> dict[str, Any]:
-    original_subject = parsed.subject if parsed else []
+    strict = extract_proposition(market, source)
+    original_subject = parsed.subject if parsed else list(strict.subject)
     object_original = parsed.object if parsed else None
     unit_original = parsed.unit if parsed else None
     competition_original = parsed.competition if parsed else None
@@ -151,7 +155,7 @@ def proposition_row(
                 if normalize_text(subject)
             }
         ),
-        "predicate": normalize_optional(parsed.predicate if parsed else None),
+        "predicate": normalize_optional(parsed.predicate if parsed else strict.predicate),
         "object_original": object_original,
         "object": canonical_entity(object_original) if object_original else None,
         "operator": extracted.get("operator")
@@ -197,12 +201,17 @@ def proposition_row(
         "parse_status": "parsed" if parsed and not error else "failed",
         "primary_parser_model": primary_model,
         "verifier_parser_model": verifier_model,
-        "prompt_version": PARSE_PROMPT_VERSION,
+        "prompt_version": PARSE_PROMPT_VERSION if primary_model else None,
         "primary_parse_fingerprint": primary_fingerprint,
         "verifier_parse_fingerprint": verifier_fingerprint,
         "consensus_fingerprint": consensus_fingerprint,
         "automation_profile_id": automation_profile_id,
         "source_schema": source_schema,
+        "extractor_id": EXTRACTOR_ID,
+        "extractor_version": EXTRACTOR_VERSION,
+        "extraction_status": strict.status,
+        "source_spans_json": strict.spans_json(),
+        "proof_scope_key": strict.proof_scope_key,
         "_expected_tokens": len(market.outcomes),
         "_is_active": market.is_active,
         "_is_closed": market.is_closed,
@@ -227,3 +236,30 @@ def canonical_entity(value: str) -> str:
 def canonical_unit(value: str) -> str:
     normalized = normalize_text(value)
     return _UNIT_ALIASES.get(normalized.casefold(), normalized)
+
+
+def select_model_parse_fallback_markets(
+    markets: Sequence[SourceMarket],
+    *,
+    limit: int,
+) -> tuple[str, ...]:
+    """Select bounded ambiguous parses using only structured candidate value."""
+
+    event_keys = [
+        normalize_text(market.event_id or market.event_slug or "")
+        for market in markets
+    ]
+    event_counts = Counter(key for key in event_keys if key)
+    ranked: list[tuple[int, int, str]] = []
+    for market, event_key in zip(markets, event_keys, strict=True):
+        statuses = {
+            extract_proposition(market, outcome).status
+            for outcome in market.outcomes
+        }
+        ambiguous = "ambiguous" in statuses
+        unmatched = "unmatched" in statuses
+        group_size = event_counts.get(event_key, 0)
+        if not ambiguous and not (unmatched and group_size > 1):
+            continue
+        ranked.append((0 if ambiguous else 1, -group_size, market.market_id))
+    return tuple(row[2] for row in sorted(ranked)[: max(0, limit)])

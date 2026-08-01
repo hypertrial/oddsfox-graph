@@ -18,6 +18,7 @@ PARSE_ASSESSMENT_COLUMNS = {
     "assessment_id": "VARCHAR",
     "proposition_id": "VARCHAR",
     "market_id": "VARCHAR",
+    "assessor_type": "VARCHAR",
     "model_role": "VARCHAR",
     "model_version": "VARCHAR",
     "inference_fingerprint": "VARCHAR",
@@ -262,6 +263,7 @@ def parse_assessment_row(
     content = {
         "proposition_id": proposition_id,
         "market_id": market_id,
+        "assessor_type": f"{role}_model",
         "model_role": role,
         "model_version": model,
         "inference_fingerprint": fingerprint,

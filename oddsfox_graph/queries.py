@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from pathlib import Path
 from typing import cast
 
@@ -39,6 +39,30 @@ class DuckDB:
         if not rows:
             return None
         return cast(str | int | float | None, next(iter(rows[0].values())))
+
+    def iter_rows(
+        self,
+        sql: str,
+        params: Sequence[object] | None = None,
+        *,
+        batch_size: int = 1_024,
+    ) -> Iterator[dict[str, object]]:
+        """Yield bounded query batches without materializing a full result."""
+
+        if batch_size < 1:
+            raise ValueError("batch_size must be positive")
+        relation = (
+            self._conn.execute(sql)
+            if params is None
+            else self._conn.execute(sql, params)
+        )
+        columns = [description[0] for description in relation.description]
+        while True:
+            batch = relation.fetchmany(batch_size)
+            if not batch:
+                return
+            for row in batch:
+                yield dict(zip(columns, row, strict=True))
 
 
 def q(s: str | Path) -> str:

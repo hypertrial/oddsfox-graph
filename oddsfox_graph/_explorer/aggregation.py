@@ -48,6 +48,7 @@ EVENT_RELATION_SUMMARY_COLUMNS = {
     "src_event_key": "VARCHAR",
     "dst_event_key": "VARCHAR",
     "edge_type": "VARCHAR",
+    "evidence_tier": "VARCHAR",
     "edge_count": "BIGINT",
     "min_confidence": "DOUBLE",
     "max_confidence": "DOUBLE",
@@ -291,7 +292,7 @@ def coverage_summary(
                AND status IN ('accepted', 'rejected', 'quarantined'))
                 AS classification_assessed,
             (SELECT count(*) FROM relation_candidates_v
-             WHERE status = 'not_classified_budget') AS unclassified,
+             WHERE status IN ('not_classified_budget','deadline_budget_exhausted')) AS unclassified,
             (SELECT count(*) FROM logic_edges_v) AS accepted_edges,
             (SELECT count(*) FROM rejected_edges_v) AS rejected_edges,
             (SELECT count(*) FROM quarantined_pairs_v) AS quarantined_pairs,
@@ -337,6 +338,7 @@ def _create_event_relation_summary(db: DuckDB) -> None:
                 e.edge_type,
                 e.confidence,
                 e.discovery_method,
+                e.evidence_tier,
                 src.market_id AS src_market_id,
                 dst.market_id AS dst_market_id
             FROM logic_edges_v e
@@ -348,7 +350,7 @@ def _create_event_relation_summary(db: DuckDB) -> None:
         SELECT
             src_event_key,
             dst_event_key,
-            edge_type,
+            edge_type, evidence_tier,
             count(*)::BIGINT AS edge_count,
             min(confidence)::DOUBLE AS min_confidence,
             max(confidence)::DOUBLE AS max_confidence,
@@ -362,8 +364,8 @@ def _create_event_relation_summary(db: DuckDB) -> None:
             count(DISTINCT dst_market_id)::BIGINT AS destination_market_count,
             true AS aggregation_only
         FROM joined
-        GROUP BY src_event_key, dst_event_key, edge_type
-        ORDER BY src_event_key, dst_event_key, edge_type
+        GROUP BY src_event_key, dst_event_key, edge_type, evidence_tier
+        ORDER BY src_event_key, dst_event_key, edge_type, evidence_tier
         """
     )
 
@@ -408,12 +410,17 @@ def _create_event_summary(db: DuckDB) -> None:
             FROM explorer_propositions_v p
             JOIN nodes_table n ON n.node_id = p.proposition_id
             GROUP BY p.event_key
+        ), edge_endpoints AS (
+            SELECT proposal_id, src_node_id AS proposition_id, edge_type,
+                   discovery_method FROM logic_edges_v
+            UNION ALL
+            SELECT proposal_id, dst_node_id AS proposition_id, edge_type,
+                   discovery_method FROM logic_edges_v
         ), edge_touch AS (
             SELECT DISTINCT e.proposal_id, p.event_key, e.edge_type,
                             e.discovery_method
-            FROM logic_edges_v e
-            JOIN explorer_propositions_v p
-              ON p.proposition_id IN (e.src_node_id, e.dst_node_id)
+            FROM edge_endpoints e
+            JOIN explorer_propositions_v p USING (proposition_id)
         ), edge_counts AS (
             SELECT
                 event_key,
@@ -434,20 +441,33 @@ def _create_event_summary(db: DuckDB) -> None:
                 count(*) FILTER (WHERE edge_type = 'compatible')::BIGINT
                     AS compatible_count
             FROM edge_touch GROUP BY event_key
+        ), rejected_endpoints AS (
+            SELECT proposal_id, src_node_id AS proposition_id FROM rejected_edges_v
+            UNION ALL
+            SELECT proposal_id, dst_node_id AS proposition_id FROM rejected_edges_v
         ), rejected_touch AS (
             SELECT p.event_key, count(DISTINCT r.proposal_id)::BIGINT AS count
-            FROM rejected_edges_v r
-            JOIN explorer_propositions_v p
-              ON p.proposition_id IN (r.src_node_id, r.dst_node_id)
+            FROM rejected_endpoints r
+            JOIN explorer_propositions_v p USING (proposition_id)
             GROUP BY p.event_key
+        ), quarantine_endpoints AS (
+            SELECT quarantine_id, proposition_a_id AS proposition_id FROM quarantined_pairs_v
+            UNION ALL
+            SELECT quarantine_id, proposition_b_id AS proposition_id FROM quarantined_pairs_v
+            WHERE proposition_b_id IS NOT NULL
         ), quarantine_touch AS (
             SELECT p.event_key, count(DISTINCT q.quarantine_id)::BIGINT AS count
-            FROM quarantined_pairs_v q
-            JOIN explorer_propositions_v p
-              ON p.proposition_id IN (
-                    q.proposition_a_id, coalesce(q.proposition_b_id, '')
-              )
+            FROM quarantine_endpoints q
+            JOIN explorer_propositions_v p USING (proposition_id)
             GROUP BY p.event_key
+        ), candidate_endpoints AS (
+            SELECT proposition_a_id, proposition_b_id,
+                   proposition_a_id AS proposition_id,
+                   deterministic_relation, status FROM relation_candidates_v
+            UNION ALL
+            SELECT proposition_a_id, proposition_b_id,
+                   proposition_b_id AS proposition_id,
+                   deterministic_relation, status FROM relation_candidates_v
         ), classification_touch AS (
             SELECT p.event_key,
                    count(DISTINCT (
@@ -465,13 +485,10 @@ def _create_event_summary(db: DuckDB) -> None:
                    count(DISTINCT (
                        c.proposition_a_id, c.proposition_b_id
                    )) FILTER (
-                       WHERE c.status = 'not_classified_budget'
+                       WHERE c.status IN ('not_classified_budget','deadline_budget_exhausted')
                    )::BIGINT AS unclassified
-            FROM relation_candidates_v c
-            JOIN explorer_propositions_v p
-              ON p.proposition_id IN (
-                    c.proposition_a_id, c.proposition_b_id
-              )
+            FROM candidate_endpoints c
+            JOIN explorer_propositions_v p USING (proposition_id)
             GROUP BY p.event_key
         )
         SELECT
@@ -567,7 +584,7 @@ def _create_node_metrics(db: DuckDB) -> None:
             SELECT proposition_id,
                    CASE
                        WHEN count(*) FILTER (
-                           WHERE status = 'not_classified_budget'
+                           WHERE status IN ('not_classified_budget','deadline_budget_exhausted')
                        ) > 0 THEN 'partial'
                        WHEN count(*) FILTER (
                            WHERE status IN ('accepted','rejected','quarantined')
@@ -583,7 +600,7 @@ def _create_node_metrics(db: DuckDB) -> None:
                          AND status IN ('accepted','rejected','quarantined')
                    )::BIGINT AS assessed,
                    count(*) FILTER (
-                       WHERE status = 'not_classified_budget'
+                       WHERE status IN ('not_classified_budget','deadline_budget_exhausted')
                    )::BIGINT AS unclassified
             FROM classification_touch
             GROUP BY proposition_id
@@ -740,24 +757,31 @@ def _create_component_summary(db: DuckDB) -> None:
             JOIN explorer_propositions_v p
               ON p.proposition_id = e.src_node_id
             GROUP BY p.component_id
+        ), quarantine_endpoints AS (
+            SELECT quarantine_id, proposition_a_id AS proposition_id FROM quarantined_pairs_v
+            UNION ALL
+            SELECT quarantine_id, proposition_b_id AS proposition_id FROM quarantined_pairs_v
+            WHERE proposition_b_id IS NOT NULL
         ), quarantine AS (
             SELECT p.component_id,
                    count(DISTINCT q.quarantine_id)::BIGINT AS count
-            FROM quarantined_pairs_v q
-            JOIN explorer_propositions_v p
-              ON p.proposition_id IN (
-                   q.proposition_a_id, coalesce(q.proposition_b_id, '')
-              )
+            FROM quarantine_endpoints q
+            JOIN explorer_propositions_v p USING (proposition_id)
             GROUP BY p.component_id
+        ), candidate_endpoints AS (
+            SELECT proposition_a_id, proposition_b_id,
+                   proposition_a_id AS proposition_id,
+                   deterministic_relation, status FROM relation_candidates_v
+            UNION ALL
+            SELECT proposition_a_id, proposition_b_id,
+                   proposition_b_id AS proposition_id,
+                   deterministic_relation, status FROM relation_candidates_v
         ), candidate_touch AS (
             SELECT DISTINCT
                    c.proposition_a_id, c.proposition_b_id,
                    p.component_id, c.deterministic_relation, c.status
-            FROM relation_candidates_v c
-            JOIN explorer_propositions_v p
-              ON p.proposition_id IN (
-                   c.proposition_a_id, c.proposition_b_id
-              )
+            FROM candidate_endpoints c
+            JOIN explorer_propositions_v p USING (proposition_id)
         ), candidate_coverage AS (
             SELECT component_id,
                    count(*) FILTER (
@@ -769,7 +793,7 @@ def _create_component_summary(db: DuckDB) -> None:
                          AND c.status IN ('accepted','rejected','quarantined')
                    )::BIGINT AS assessed,
                    count(*) FILTER (
-                       WHERE c.status = 'not_classified_budget'
+                       WHERE c.status IN ('not_classified_budget','deadline_budget_exhausted')
                    )::BIGINT AS unclassified
             FROM candidate_touch c
             GROUP BY component_id

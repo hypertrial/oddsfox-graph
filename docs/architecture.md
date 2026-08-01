@@ -1,39 +1,46 @@
 # Architecture
 
-The repository has one discovery path and one read-only exploration layer.
+One typed staged pipeline owns both discovery modes:
 
-## Discovery
+1. normalize the compact catalog and create every selected source proposition;
+2. run the strict deterministic extractor with literal source spans;
+3. generate bounded structured candidates in DuckDB;
+4. derive and validate deterministic proofs;
+5. optionally enrich unresolved candidates with ANN, NLI, and dual models;
+6. solve proposal-connected components with RC2;
+7. aggregate explorer summaries and atomically publish the manifest last.
 
-1. Validate and normalize the compact snapshot.
-2. Qualify the exact primary/verifier runtime pair on deterministic cases.
-3. Parse each market with both models and merge exact normalized agreement.
-4. Retrieve structured and exact blockwise-cosine candidate neighborhoods.
-5. Balance the bounded inference queue across event-pair scopes.
-6. Apply NLI vetoes and dual generative classification.
-7. Quarantine disagreement, assumptions, invalid citations, failures, vetoes,
-   and low confidence.
-8. Solve deterministic and consensus proposals with RC2.
-9. Aggregate events and connected components, compute node metrics and stable
-   layouts, then publish DuckDB, sorted Parquet, reports, state, and the final
-   manifest completion marker.
+`FastModePolicy` enables stages 1–4, 6, and 7 and forbids inference resources.
+`FullModePolicy` adds stage 5 and requires an exact automation profile. Mode
+selection happens at the orchestration boundary; the graph, solver, publication,
+query, report, and explorer contracts are shared.
 
-SQLite owns transactional inference caching. DuckDB owns candidates, metrics,
-components, solver state, exploration tables, and public graph tables. Clean,
-cached, offline, and equivalent incremental runs preserve logical artifact hashes.
+## Deterministic core
+
+Authoritative IDs, outcomes, text, event metadata, and timestamps always create
+nodes. Extractors return `exact`, `ambiguous`, or `unmatched` and preserve exact
+question/description spans. Only exact fields participate in cross-market rules.
+Candidates are blocked by market/event, resolution, numeric, temporal, stage,
+and strict singular-winner signatures. Cross-event rules require a complete
+rule-specific proof-scope key; fuzzy entity merging is never used.
+
+## Full enrichment
+
+MiniLM vectors are inserted into a single-threaded USearch HNSW index in stable
+proposition order. The pipeline queries 64 neighbors, recomputes exact cosine
+scores, and deterministically retains the top 20. NLI can prioritize or veto but
+cannot publish. A model edge requires matching Qwen/Granite relation and
+direction, valid citations, no assumptions, calibrated confidence, no NLI veto,
+and solver acceptance.
+
+SQLite owns transactional inference cache entries. DuckDB owns propositions,
+candidates, proofs, solver state, aggregates, layouts, and the public database.
+Incremental baselines are current, manifest-complete v0.11 outputs only.
 
 ## Exploration
 
-`Graph` opens only a manifest-complete current output. `ExplorerStore` creates
-short-lived read-only DuckDB connections and exposes parameterized, cursor-based,
-bounded queries. The FastAPI service binds only to loopback and applies hard
-node/edge limits; it offers no arbitrary SQL endpoint and never mutates the graph.
-
-The React/Sigma client requests component or event summaries before proposition
-details. Search and neighborhood expansion avoid loading the entire graph in the
-browser. Static exports contain only a selected bounded subgraph and use
-DuckDB-Wasm to read the exported Parquet files.
-
-`prove` expands implication and bidirectional equivalence arcs on demand. It
-never traverses complement, exclusion, or compatibility, never materializes a
-transitive closure, and enforces hop, path, generated-state, and per-node
-expansion limits.
+`Graph` and `ExplorerStore` open completed outputs read-only. The loopback-only
+FastAPI service exposes bounded parameterized queries, never arbitrary SQL.
+React/Sigma starts at component or event summaries, then requests bounded
+proposition neighborhoods. `prove` traverses implication plus bidirectional
+equivalence only; it never materializes transitive closure.

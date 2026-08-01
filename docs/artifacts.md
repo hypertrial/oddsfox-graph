@@ -1,75 +1,63 @@
 # Artifacts
 
-## Graph and inference
+## Public graph
 
-- `nodes.parquet`, `market_groups.parquet`, `propositions.parquet`;
-- `relation_candidates.parquet`, `logic_edges.parquet`,
-  `conditional_edges.parquet`, and `rejected_edges.parquet`;
-- `parse_assessments.parquet`, `model_assessments.parquet`,
-  `quarantined_pairs.parquet`, `qualification_cases.parquet`, and
-  `parse_errors.parquet`.
+- `nodes.parquet`: `node_id`, `market_id`, `outcome_index`, `clob_token_id`,
+  `question`, `outcome_label`, `event_slug`, `is_active`, `is_closed`,
+  `market_family`, `canonical_proposition`, `proposition_type`,
+  `expected_tokens`, `first_seen_ts`, `last_seen_ts`.
+- `market_groups.parquet`: `market_id`, `event_slug`, `question`,
+  `market_family`, `num_tokens`, `token_ids`, `outcome_labels`, `is_active`,
+  `is_closed`, `first_seen_ts`, `last_seen_ts`.
+- `conditional_edges.parquet`: `a_node_id`, `b_node_id`, `p_a_given_b`,
+  `method`, `confidence`, `evidence`. Compatible relations are excluded.
+- `propositions.parquet`, `relation_candidates.parquet`,
+  `logic_edges.parquet`, and `rejected_edges.parquet`.
 
 `logic_edges.parquet` contains `src_node_id`, `dst_node_id`, `edge_type`,
-`edge_basis`, `confidence`, source/destination market and event fields,
-`evidence`, `discovery_method`, rule/prompt/solver provenance, `proposal_id`,
-`primary_model_version`, `verifier_model_version`,
-`primary_inference_fingerprint`, `verifier_inference_fingerprint`,
-`consensus_fingerprint`, and `automation_profile_id`. Accepted methods are
-`deterministic` and `generative_consensus`.
+`edge_basis`, `confidence`, `market_id_src`, `market_id_dst`, `event_slug_src`,
+`event_slug_dst`, `evidence`, `discovery_method`, `rule_version`,
+`prompt_version`, `explanation`, `assumptions`, `rule_id`, `proposal_id`,
+`solver_version`, `constraint_version`, `solver_component_id`,
+`primary_model_version`, `verifier_model_version`, `primary_assessment_id`,
+`verifier_assessment_id`, `primary_inference_fingerprint`,
+`verifier_inference_fingerprint`, `consensus_fingerprint`,
+`automation_profile_id`, `evidence_tier`, `extractor_id`, `extractor_version`,
+`source_spans_json`, `rule_applicability_fingerprint`, and `proof_scope_key`.
+Discovery methods are `deterministic` and `generative_consensus`; evidence tiers
+are `source_contract`, `deterministic_rule`, and `generative_consensus`.
 
-`nodes.parquet` contains `node_id`, `market_id`, `outcome_index`,
-`clob_token_id`, `question`, `outcome_label`, `event_slug`, `is_active`,
-`is_closed`, `market_family`, `canonical_proposition`, `proposition_type`,
-`expected_tokens`, `first_seen_ts`, and `last_seen_ts`.
+## Assessments and diagnostics
 
-`market_groups.parquet` contains `market_id`, `event_slug`, `question`,
-`market_family`, `num_tokens`, `token_ids`, `outcome_labels`, `is_active`,
-`is_closed`, `first_seen_ts`, and `last_seen_ts`.
+- `parse_assessments.parquet`: one row per proposition/assessor with
+  `assessor_type=deterministic_extractor|primary_model|verifier_model`; model
+  fields are nullable for deterministic rows.
+- `model_assessments.parquet`: both model-role atomic judgments for selected
+  candidates.
+- `quarantined_pairs.parquet`: pre-solver failure or cutoff reasons.
+- `parse_errors.parquet`: response, schema, omission, validation, and confidence
+  failures.
+- `qualification_cases.parquet`: exact generated cases bound to a full profile;
+  fast emits a schema-valid empty file.
 
-The complete edge provenance names are `market_id_src`, `market_id_dst`,
-`event_slug_src`, `event_slug_dst`, `rule_version`, `prompt_version`,
-`explanation`, `assumptions`, `rule_id`, `solver_version`,
-`constraint_version`, `solver_component_id`, `primary_assessment_id`, and
-`verifier_assessment_id`.
+Fast likewise emits empty schema-valid model-assessment and quarantine files and
+does not fabricate model manifests, compute profiles, or automation profiles.
 
-`conditional_edges.parquet` contains `a_node_id`, `b_node_id`, `p_a_given_b`,
-`method`, `confidence`, and `evidence`; compatible relations are excluded.
+## Explorer and state
 
-## Explorer
+`event_summary.parquet`, `event_relation_summary.parquet`,
+`component_summary.parquet`, `node_metrics.parquet`, and
+`visualization_layout.parquet` support bounded visualization. Event relation
+summaries include `evidence_tier`; aggregate edges are navigation summaries, not
+new logical facts. `coverage_summary.json` and `viewer_manifest.json` record the
+mode, validation status, content fingerprint, limits, and coverage.
 
-- `event_summary.parquet`: event identity/domain, market and proposition counts,
-  accepted/rejected/quarantined/unclassified counts, classification eligibility,
-  assessment and coverage, per-relation counts, components, and time bounds;
-- `event_relation_summary.parquet`: directed event pair, relation, counts,
-  confidence range/mean, provenance counts, touched markets, and the explicit
-  `aggregation_only` marker;
-- `component_summary.parquet`: stable component identity/fingerprint, node,
-  market, event, edge, quarantine, unclassified, coverage, representative nodes,
-  and layout bounds;
-- `node_metrics.parquet`: `node_id`, `market_id`, `event_key`, `component_id`,
-  directional/per-relation degree, rejection/quarantine counts, parse status, and
-  classification state, eligible/assessed/unclassified counts, and
-  `classification_coverage`;
-- `visualization_layout.parquet`: level, object, parent, coordinates, radius,
-  stable rank, layout version, and graph fingerprint;
-- `coverage_summary.json`: full-selection flag and all run-level coverage counts;
-- `viewer_manifest.json`: viewer/API/layout contract versions, source watermark,
-  graph content fingerprint, and response ceilings.
+The output also contains `oddsfox_graph.duckdb`, `graph_snapshot.json`, sorted
+Parquet state under `state/`, and reports `summary.md`,
+`strongest_implications.md`, `strongest_exclusions.md`, `duplicate_edges.md`,
+`coverage.md`, and `conditional_examples.md`. Full outputs add exact primary and
+verifier manifests, automation/qualification files, and a compute profile.
 
-Event relations are summaries for visualization, never additional logical facts.
-Proofs and conditionals use proposition-level accepted edges only.
-
-## Completion and supporting data
-
-The output also contains `oddsfox_graph.duckdb`, `graph_snapshot.json`, model
-manifests, automation/qualification reports, optional compute profile, incremental
-state under `state/`, and Markdown reports under `reports/`.
-The reports are `summary.md`, `strongest_implications.md`,
-`strongest_exclusions.md`, `duplicate_edges.md`, `coverage.md`, and
-`conditional_examples.md`.
-
-`build_manifest.json` is written last and binds every public artifact hash,
-viewer version, input selection, model/runtime identity, cache statistics,
-qualification, limits, timings, resource use, solver/rule metadata, and
-incremental reuse. Quarantine is diagnostic only and never enters publication,
-conditional derivation, or proof traversal.
+`build_manifest.json` is the completion marker and is written last. It binds the
+input, mode, validation status, public/state hashes, versions, evidence, rules,
+solver, deadline, cutoff, resource use, cache, and incremental execution plan.

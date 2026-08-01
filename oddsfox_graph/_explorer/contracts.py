@@ -15,6 +15,9 @@ ExplorerRelation = Literal[
     "implies",
     "mutually_exclusive",
 ]
+EvidenceTier = Literal[
+    "source_contract", "deterministic_rule", "generative_consensus"
+]
 
 
 class GraphFilter(BaseModel):
@@ -26,6 +29,7 @@ class GraphFilter(BaseModel):
     discovery_methods: tuple[
         Literal["deterministic", "generative_consensus"], ...
     ] = ()
+    evidence_tiers: tuple[EvidenceTier, ...] = ()
     active_only: bool = False
     closed_only: bool = False
     include_compatible: bool = False
@@ -59,6 +63,7 @@ class ExplorerEdge(BaseModel):
     count: int = 1
     confidence: float
     discovery_method: str
+    evidence_tier: str
     aggregation_only: bool = False
 
 

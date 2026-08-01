@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import re
 from collections import defaultdict
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -19,13 +19,19 @@ from typing import TYPE_CHECKING, Any, Literal, TypedDict
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from ._discovery.artifact_contracts import QUALIFICATION_CASE_COLUMNS
 from ._discovery.contracts import DiscoveryConfig, PropositionRecord, SourceMarket
 from ._discovery.protocol import PairRequest, market_request, pair_identifier
 from ._discovery.provenance import canonical_json_sha256
 from ._discovery.relations import RULE_REGISTRY, deterministic_relation
+from ._discovery.rule_qualification import (
+    generate_rule_qualification_cases as generate_rule_qualification_cases,
+    qualify_rule_registry as qualify_rule_registry,
+)
 from ._discovery.retrieval import generate_candidate_workspace
 from ._discovery.versions import (
     NORMALIZATION_VERSION,
+    PARSE_FALLBACK_VERSION,
     PARSE_PROMPT_VERSION,
     QUALIFICATION_CASE_SCHEMA_VERSION,
     QUALIFICATION_GENERATOR_VERSION,
@@ -90,21 +96,6 @@ RELATION_PRECISION_TARGETS = {
     "compatible": 0.98,
 }
 
-QUALIFICATION_CASE_COLUMNS = {
-    "schema_version": "VARCHAR",
-    "generator_version": "VARCHAR",
-    "case_id": "VARCHAR",
-    "record_type": "VARCHAR",
-    "partition": "VARCHAR",
-    "domain": "VARCHAR",
-    "expected_relation": "VARCHAR",
-    "source_market_ids": "VARCHAR[]",
-    "source_proposition_ids": "VARCHAR[]",
-    "generator_id": "VARCHAR",
-    "payload_json": "VARCHAR",
-    "case_hash": "VARCHAR",
-}
-
 _DOMAIN_PATTERNS = {
     "elections": re.compile(
         r"\b(election|elected|president|presidential|primary|nominee|"
@@ -165,17 +156,6 @@ class QualificationEvaluation:
     metrics: dict[str, Any]
     gates: dict[str, bool]
     status: Literal["AUTOMATION_VALIDATED", "QUALIFICATION_FAILED"]
-
-
-@dataclass(frozen=True)
-class RuleQualificationCase:
-    rule_id: str
-    case_id: str
-    proposition_a: dict[str, Any]
-    proposition_b: dict[str, Any]
-    expected_relation: str | None
-    expected_src: str | None
-    expected_dst: str | None
 
 
 def assign_domain(market: SourceMarket) -> str:
@@ -321,11 +301,29 @@ def qualification_retrieval_fingerprint(config: DiscoveryConfig) -> str:
             "generator": QUALIFICATION_GENERATOR_VERSION,
             "normalization": NORMALIZATION_VERSION,
             "retrieval": RETRIEVAL_VERSION,
+            "parse_fallback": {
+                "version": PARSE_FALLBACK_VERSION,
+                "max_markets": min(256, config.max_llm_pairs),
+                "priority": "ambiguous_then_authoritative_event_group",
+            },
             "embedding_model": config.embedding_model,
             "embedding_revision": config.embedding_revision,
             "top_k": config.top_k,
             "embedding_block_size": config.embedding_block_size,
             "max_candidates": config.max_candidates,
+            "ann": {
+                "implementation": "usearch",
+                "version": "2.26.0",
+                "metric": "cos",
+                "dtype": "f32",
+                "connectivity": 32,
+                "construction_expansion": 128,
+                "search_expansion": 128,
+                "query_neighbors": 64,
+                "rerank": "exact-cosine-score-id-v1",
+                "insertion_order": "proposition_id",
+                "construction_threads": 1,
+            },
         }
     )
 
@@ -366,182 +364,6 @@ def qualification_retrieved_case_ids(
         return workspace.matching_pair_ids(expected)
     finally:
         workspace.close()
-
-
-def qualify_rule_registry(
-    registry: Mapping[str, Mapping[str, object]],
-    evaluator: Callable[[dict[str, Any], dict[str, Any], float], dict[str, Any] | None],
-) -> dict[str, Any]:
-    enabled: list[str] = []
-    experimental: list[str] = []
-    support: dict[str, dict[str, object]] = {}
-    for rule_id, metadata in sorted(registry.items()):
-        if bool(metadata.get("hard_fact")):
-            enabled.append(rule_id)
-            support[rule_id] = {
-                "source": "authoritative_market_contract",
-                "positive": None,
-                "adversarial": None,
-                "passed": True,
-            }
-            continue
-        cases = generate_rule_qualification_cases(rule_id)
-        positive = [case for case in cases if case.expected_relation is not None]
-        adversarial = [case for case in cases if case.expected_relation is None]
-        positive_passed = sum(
-            _rule_case_passes(case, evaluator(case.proposition_a, case.proposition_b, 0.95))
-            for case in positive
-        )
-        adversarial_passed = sum(
-            evaluator(case.proposition_a, case.proposition_b, 0.95) is None
-            for case in adversarial
-        )
-        passed = (
-            len(positive) >= 10
-            and len(adversarial) >= 10
-            and positive_passed == len(positive)
-            and adversarial_passed == len(adversarial)
-        )
-        (enabled if passed else experimental).append(rule_id)
-        support[rule_id] = {
-            "source": "independent_generated_cases",
-            "positive": len(positive),
-            "positive_passed": positive_passed,
-            "adversarial": len(adversarial),
-            "adversarial_passed": adversarial_passed,
-            "passed": passed,
-        }
-    return {
-        "qualification_kind": "independent_generated_cases",
-        "minimum_positive_examples": 10,
-        "minimum_adversarial_examples": 10,
-        "enabled": enabled,
-        "experimental": experimental,
-        "support": support,
-    }
-
-
-def generate_rule_qualification_cases(rule_id: str) -> list[RuleQualificationCase]:
-    cases: list[RuleQualificationCase] = []
-    for index in range(10):
-        a = _rule_proposition(f"{rule_id}-p-{index}-a", index * 2)
-        b = _rule_proposition(f"{rule_id}-p-{index}-b", index * 2 + 1)
-        negative_a = _rule_proposition(f"{rule_id}-n-{index}-a", 100 + index * 2)
-        negative_b = _rule_proposition(f"{rule_id}-n-{index}-b", 101 + index * 2)
-        if rule_id == "equivalence.normalized_fields.v1":
-            expected = "equivalent"
-            negative_b["event_scope"] = "different-scope"
-            negative_b["event_slug"] = "different-scope"
-        elif rule_id == "threshold.interval_containment.v2":
-            expected = "implies"
-            a.update(operator="greater_than", threshold=100.0 + index, unit="USD")
-            b.update(operator="greater_than", threshold=50.0 + index, unit="USD")
-            negative_a.update(operator="greater_than", threshold=100.0, unit="USD")
-            negative_b.update(operator="less_than", threshold=200.0, unit="USD")
-        elif rule_id == "time.interval_containment.v1":
-            expected = "implies"
-            start = datetime(2030, 1, 1, tzinfo=timezone.utc) + timedelta(days=index)
-            a.update(time_start=start + timedelta(days=2), time_end=start + timedelta(days=8))
-            b.update(time_start=start, time_end=start + timedelta(days=10))
-            negative_a.update(time_start=start, time_end=start + timedelta(days=10))
-            negative_b.update(time_start=start + timedelta(days=5), time_end=start + timedelta(days=15))
-        elif rule_id == "tournament.stage_progression.v1":
-            expected = "implies"
-            a["object"] = "winner"
-            b["object"] = "final"
-            negative_a["object"] = "winner"
-            negative_b["object"] = "final"
-            negative_b["event_scope"] = "different-scope"
-            negative_b["event_slug"] = "different-scope"
-            negative_b["event_id"] = "different-event"
-        elif rule_id == "event.single_winner.v1":
-            expected = "mutually_exclusive"
-            a.update(
-                subject=[f"team-a-{index}"],
-                predicate="win",
-                event_scope="single winner",
-            )
-            b.update(
-                subject=[f"team-b-{index}"],
-                predicate="win",
-                event_scope="single winner",
-            )
-            negative_a.update(
-                subject=[f"medalist-a-{index}"],
-                predicate="win",
-                event_scope="multi winner",
-                description="The event permits multiple winners.",
-            )
-            negative_b.update(
-                subject=[f"medalist-b-{index}"],
-                predicate="win",
-                event_scope="multi winner",
-                description="The event permits multiple winners.",
-            )
-        else:
-            raise ValueError(f"No independent qualification generator for {rule_id}")
-        cases.append(
-            RuleQualificationCase(
-                rule_id,
-                f"{rule_id}:positive:{index}",
-                a,
-                b,
-                expected,
-                str(a["proposition_id"]) if expected == "implies" else min(str(a["proposition_id"]), str(b["proposition_id"])),
-                str(b["proposition_id"]) if expected == "implies" else max(str(a["proposition_id"]), str(b["proposition_id"])),
-            )
-        )
-        cases.append(
-            RuleQualificationCase(
-                rule_id,
-                f"{rule_id}:adversarial:{index}",
-                negative_a,
-                negative_b,
-                None,
-                None,
-                None,
-            )
-        )
-    return cases
-
-
-def _rule_case_passes(
-    case: RuleQualificationCase,
-    observed: dict[str, Any] | None,
-) -> bool:
-    return bool(
-        observed is not None
-        and observed.get("rule_id") == case.rule_id
-        and observed.get("edge_type") == case.expected_relation
-        and observed.get("src_node_id") == case.expected_src
-        and observed.get("dst_node_id") == case.expected_dst
-    )
-
-
-def _rule_proposition(identifier: str, index: int) -> dict[str, Any]:
-    return {
-        "proposition_id": identifier,
-        "market_id": f"generated-market-{index}",
-        "event_id": "generated-event",
-        "event_slug": "generated-scope",
-        "outcome": "Yes",
-        "question": "Will the generated logical event occur?",
-        "description": "A controlled generated qualification case.",
-        "_expected_tokens": 2,
-        "subject": ["generated subject"],
-        "predicate": "occur",
-        "object": None,
-        "operator": None,
-        "threshold": None,
-        "unit": None,
-        "time_start": None,
-        "time_end": None,
-        "competition": "generated competition",
-        "event_scope": "generated-scope",
-        "jurisdiction": None,
-        "polarity": "positive",
-        "parse_confidence": 1.0,
-    }
 
 
 def evaluate_qualification(

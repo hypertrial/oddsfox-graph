@@ -24,7 +24,7 @@ RULE_REGISTRY = {
     "same_market.binary_complement.v1": {
         "version": "1",
         "basis": "same_market",
-        "applicability": "same_market_binary_yes_no",
+        "applicability": "same_market_exactly_two_exhaustive_outcomes",
         "hard_fact": True,
     },
     "same_market.categorical_exclusion.v1": {
@@ -95,14 +95,13 @@ def deterministic_relation(
     b_id = str(b["proposition_id"])
     same_market = a["market_id"] == b["market_id"]
     expected_tokens = int(a["_expected_tokens"])
-    outcomes = {str(a["outcome"]).casefold(), str(b["outcome"]).casefold()}
-    if same_market and expected_tokens == 2 and outcomes == {"yes", "no"}:
+    if same_market and expected_tokens == 2:
         return _rule(
             "complement",
             min(a_id, b_id),
             max(a_id, b_id),
             "same_market",
-            "Yes and No outcomes of one binary market are complements",
+            "The two exhaustive outcomes of one binary market are complements",
             1.0,
             "same_market.binary_complement.v1",
         )

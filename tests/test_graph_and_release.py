@@ -7,13 +7,10 @@ import pytest
 from fastapi.testclient import TestClient
 
 from oddsfox_graph import __version__
-from oddsfox_graph._discovery.cache import InferenceCache
-from oddsfox_graph._discovery.bulk import create_and_fill
 from oddsfox_graph._discovery.contracts import (
     DEFAULT_PRIMARY_MODEL,
     DEFAULT_VERIFIER_MODEL,
 )
-from oddsfox_graph._discovery.inference import load_model_manifest, manifest_sha256
 from oddsfox_graph._discovery.provenance import canonical_json_sha256, sha256_file
 from oddsfox_graph._discovery.versions import RELEASE_FIXTURE_SCHEMA_VERSION
 from oddsfox_graph.graph import Graph
@@ -26,10 +23,6 @@ from oddsfox_graph.queries import DuckDB, q
 from oddsfox_graph import release_validation
 from oddsfox_graph import operability
 from oddsfox_graph.operability import doctor
-from oddsfox_graph.qualification import (
-    QUALIFICATION_CASE_COLUMNS,
-    qualification_case_set_hash,
-)
 from oddsfox_graph.release_validation import validate_release_fixture
 
 
@@ -232,7 +225,7 @@ def test_static_explorer_export_contains_bounded_parquet_snapshot(tmp_path: Path
         )
 
 
-def test_release_fixture_validates_hashes_profiles_and_baselines(
+def test_release_fixture_validates_fast_hashes_counts_and_performance(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -240,145 +233,104 @@ def test_release_fixture_validates_hashes_profiles_and_baselines(
     root.mkdir()
     (root / "input.parquet").write_bytes(b"canonical-test-catalog")
     source_hash = sha256_file(root / "input.parquet")
-    monkeypatch.setattr(
-        release_validation,
-        "CANONICAL_CATALOG_SHA256",
-        source_hash,
-    )
-    primary_path = _write_model_manifest(
-        root / "primary_model_manifest.json", DEFAULT_PRIMARY_MODEL, 8080
-    )
-    verifier_path = _write_model_manifest(
-        root / "verifier_model_manifest.json", DEFAULT_VERIFIER_MODEL, 8081
-    )
-    primary = load_model_manifest(primary_path)
-    verifier = load_model_manifest(verifier_path)
-    case_content = {
-        "schema_version": "qualification-cases-v1",
-        "generator_version": "catalog-qualification-v1",
-        "record_type": "parse",
-        "partition": "selection",
-        "domain": "sports",
-        "expected_relation": None,
-        "source_market_ids": ["m1"],
-        "source_proposition_ids": ["yes", "no"],
-        "generator_id": "fixture",
-        "payload_json": "{}",
-    }
-    case_hash = canonical_json_sha256(case_content)
-    case = {**case_content, "case_id": case_hash, "case_hash": case_hash}
-    case_set_hash = qualification_case_set_hash([case])
-    cases_db = DuckDB()
-    try:
-        create_and_fill(cases_db, "cases", QUALIFICATION_CASE_COLUMNS, [case])
-        cases_db.execute(
-            f"COPY cases TO '{q(root / 'qualification_cases.parquet')}' (FORMAT PARQUET)"
-        )
-    finally:
-        cases_db.close()
-    profile_content = {
-        "status": "AUTOMATION_VALIDATED",
-        "case_set_hash": case_set_hash,
-        "qualification_generator_version": "catalog-qualification-v1",
-        "retrieval_fingerprint": "a" * 64,
-        "primary_manifest_id": primary.manifest_id,
-        "primary_manifest_sha256": manifest_sha256(primary),
-        "verifier_manifest_id": verifier.manifest_id,
-        "verifier_manifest_sha256": manifest_sha256(verifier),
-        "parse_prompt_hash": "b" * 64,
-        "parse_schema_hash": "c" * 64,
-        "classify_prompt_hash": "d" * 64,
-        "classify_schema_hash": "e" * 64,
-        "request_contract_hashes": {"parse": "p", "classify": "c"},
-        "inference_fingerprints": {"consensus": "f" * 64},
-        "relations": {
-            relation: {
-                "enabled": True,
-                "threshold": 0.99,
-                "support": 200,
-                "precision": 1.0,
+    monkeypatch.setattr(release_validation, "CANONICAL_CATALOG_SHA256", source_hash)
+
+    baseline = root / "baselines" / "fast"
+    baseline.mkdir(parents=True)
+    hashes = {"nodes.parquet": "logical-nodes-hash"}
+    (baseline / "build_manifest.json").write_text(
+        json.dumps(
+            {
+                "version": __version__,
+                "build_mode": "fast",
+                "validation_status": "DETERMINISTIC_VALIDATED",
+                "input": {"sha256": source_hash},
+                "stats": {
+                    "same_market_complement_edges": 94_771,
+                    "same_market_categorical_exclusion_edges": 54,
+                    "cross_market_deterministic_edges": 10,
+                    "cross_event_deterministic_edges": 2,
+                },
+                "deadline": {"met": True},
+                "artifact_hashes": hashes,
             }
-            for relation in (
-                "complement",
-                "equivalent",
-                "mutually_exclusive",
-                "implies",
-                "compatible",
-            )
-        },
-        "structured_output_validity": {"primary": 1.0, "verifier": 1.0},
-        "metrics": {"gates": {"fixture": True}},
-    }
-    profile_id = canonical_json_sha256(profile_content)
-    required = {
-        "automation_profile.json": {"profile_id": profile_id, **profile_content},
-        "qualification_report.json": {
-            "status": "AUTOMATION_VALIDATED",
-            "profile_id": profile_id,
-            "case_set_hash": case_set_hash,
-        },
-        "compute_profile.json": {"hardware_hour_usd": 1.0, "currency": "USD"},
-        "performance_report.json": {"passed": True},
-    }
-    for relative, content in required.items():
-        (root / relative).write_text(json.dumps(content), encoding="utf-8")
-    expected_hashes: dict[str, dict[str, str]] = {}
-    for envelope in ("5000", "20000", "all"):
-        baseline = root / "baselines" / envelope
-        baseline.mkdir(parents=True)
-        hashes = {"nodes.parquet": f"hash-{envelope}"}
-        expected_hashes[envelope] = hashes
-        (baseline / "build_manifest.json").write_text(
-            json.dumps(
-                {
-                    "version": __version__,
-                    "inference": {"automation_profile_id": profile_id},
-                    "stats": {"qualification_status": "AUTOMATION_VALIDATED"},
-                    "artifact_hashes": hashes,
-                }
-            ),
-            encoding="utf-8",
-        )
-        if envelope == "all":
-            (baseline / "coverage_summary.json").write_text(
-                json.dumps(
-                    {
-                        "all_market_selection": True,
-                        "markets": 94_777,
-                        "propositions": 189_570,
-                        "input_selection": {
-                            "input_market_rows": 94_781,
-                            "invalid_market_rows": 4,
-                        },
-                    }
-                ),
-                encoding="utf-8",
-            )
-            (baseline / "viewer_manifest.json").write_text(
-                json.dumps({"graph_content_fingerprint": "fixture"}),
-                encoding="utf-8",
-            )
+        ),
+        encoding="utf-8",
+    )
+    (baseline / "coverage_summary.json").write_text(
+        json.dumps(
+            {
+                "all_market_selection": True,
+                "markets": 94_777,
+                "propositions": 189_570,
+                "input_selection": {
+                    "input_market_rows": 94_781,
+                    "invalid_market_rows": 4,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    (baseline / "viewer_manifest.json").write_text(
+        json.dumps(
+            {
+                "build_mode": "fast",
+                "validation_status": "DETERMINISTIC_VALIDATED",
+                "graph_content_fingerprint": "fixture",
+            }
+        ),
+        encoding="utf-8",
+    )
     (root / "expected_artifact_hashes.json").write_text(
-        json.dumps(expected_hashes), encoding="utf-8"
+        json.dumps({"fast": hashes}), encoding="utf-8"
     )
-    cache = InferenceCache(root / "cache")
-    cache.put_qualification_profile(
-        "release-fixture-profile",
-        required["automation_profile.json"],
+    (root / "performance_report.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "performance-budget-v3",
+                "input_sha256": source_hash,
+                "hardware": {
+                    "system": "Darwin",
+                    "machine": "arm64",
+                    "processor": "Apple M4",
+                },
+                "budget": {
+                    "schema_version": "performance-budget-v3",
+                    "input_sha256": source_hash,
+                    "system": "Darwin",
+                    "machine": "arm64",
+                    "processor_contains": "Apple M4",
+                    "repetitions": 3,
+                    "selection": "complete-valid-catalog",
+                    "extractor_version": "strict-catalog-extractor-v1",
+                    "rule_version": "discovery-rules-v6",
+                },
+                "acceptance": {
+                    "every_run_ready_within_budget": True,
+                    "every_discovery_deadline_met": True,
+                    "logical_hashes_identical": True,
+                    "inference_resources_absent": True,
+                },
+                "passed": True,
+                "runs": [
+                    {
+                        "time_to_ready_seconds": 90.0 + index,
+                        "deadline_met": True,
+                        "logical_artifact_hashes": hashes,
+                    }
+                    for index in range(3)
+                ],
+            }
+        ),
+        encoding="utf-8",
     )
-    cache.close()
     bound = [
         "input.parquet",
-        "primary_model_manifest.json",
-        "verifier_model_manifest.json",
-        *required,
-        "qualification_cases.parquet",
+        "performance_report.json",
         "expected_artifact_hashes.json",
-        "baselines/5000/build_manifest.json",
-        "baselines/20000/build_manifest.json",
-        "baselines/all/build_manifest.json",
-        "baselines/all/viewer_manifest.json",
-        "baselines/all/coverage_summary.json",
+        "baselines/fast/build_manifest.json",
+        "baselines/fast/viewer_manifest.json",
+        "baselines/fast/coverage_summary.json",
     ]
     fixture = {
         "schema_version": RELEASE_FIXTURE_SCHEMA_VERSION,
@@ -386,14 +338,26 @@ def test_release_fixture_validates_hashes_profiles_and_baselines(
         "source_sha256": source_hash,
         "files": {name: sha256_file(root / name) for name in bound},
         "trees": {
-            name: _tree_binding(root / name)
-            for name in ("cache", "baselines/5000", "baselines/20000", "baselines/all")
+            "baselines/fast": _tree_binding(root / "baselines" / "fast")
         },
     }
     (root / "release-fixture.json").write_text(json.dumps(fixture), encoding="utf-8")
     result = validate_release_fixture(root, tmp_path / "work")
     assert result["passed"] is True
-    assert result["decision"] == "AUTOMATION_VALIDATED"
+    assert result["decision"] == "DETERMINISTIC_VALIDATED"
+
+    performance_path = root / "performance_report.json"
+    performance = json.loads(performance_path.read_text(encoding="utf-8"))
+    performance["runs"][0]["logical_artifact_hashes"] = {
+        "nodes.parquet": "different-logical-hash"
+    }
+    performance_path.write_text(json.dumps(performance), encoding="utf-8")
+    fixture["files"]["performance_report.json"] = sha256_file(performance_path)
+    (root / "release-fixture.json").write_text(
+        json.dumps(fixture), encoding="utf-8"
+    )
+    with pytest.raises(ValueError, match="does not match the release baseline"):
+        validate_release_fixture(root, tmp_path / "work-mismatch")
 
 
 def test_release_fixture_rejects_path_traversal_and_wrong_status(tmp_path: Path) -> None:
@@ -447,10 +411,29 @@ def test_doctor_reports_nonfatal_warnings_and_required_failures(
     )
     monkeypatch.setattr(operability, "check_model", lambda *_args, **_kwargs: {"passed": True})
     monkeypatch.setattr(operability.importlib.util, "find_spec", lambda _name: object())
+    fast_report = doctor(
+        catalog,
+        tmp_path / "fast-out",
+        "fast",
+        None,
+        None,
+        None,
+        None,
+        "http://127.0.0.1:8080/v1",
+        "http://127.0.0.1:8081/v1",
+        None,
+    )
+    assert fast_report.passed is True
+    assert any(
+        check.name == "fast_performance_budget" and check.status == "pass"
+        for check in fast_report.checks
+    )
     report = doctor(
         catalog,
         tmp_path / "out",
+        "full",
         tmp_path / "cache",
+        tmp_path / "profile.json",
         primary,
         verifier,
         "http://127.0.0.1:8080/v1",
@@ -463,7 +446,9 @@ def test_doctor_reports_nonfatal_warnings_and_required_failures(
     failed = doctor(
         catalog,
         tmp_path / "out",
+        "full",
         tmp_path / "cache",
+        tmp_path / "profile.json",
         primary,
         verifier,
         "http://127.0.0.1:8080/v1",
@@ -500,12 +485,12 @@ def _write_graph(
         db.execute(
             """
             CREATE TABLE edges AS SELECT * FROM (VALUES
-                ('a','b','implies','model',0.9,'m1','m2','e','e','a implies b','generative_consensus',NULL,'p','a implies b',[]::VARCHAR[],NULL,'p1','s','c','sc','pm','vm','pf','vf','cf','ap'),
-                ('b','c','equivalent','model',0.8,'m2','m3','e','e','b equals c','generative_consensus',NULL,'p','b equals c',[]::VARCHAR[],NULL,'p2','s','c','sc','pm','vm','pf','vf','cf','ap'),
-                ('c','d','implies','model',0.95,'m3','m4','e','e','c implies d','generative_consensus',NULL,'p','c implies d',[]::VARCHAR[],NULL,'p3','s','c','sc','pm','vm','pf','vf','cf','ap'),
-                ('b','d','implies','model',0.8,'m2','m4','e','e','b implies d','generative_consensus',NULL,'p','b implies d',[]::VARCHAR[],NULL,'p5','s','c','sc','pm','vm','pf','vf','cf','ap'),
-                ('a','d','mutually_exclusive','same_market',1.0,'m1','m4','e','e','exclusive','deterministic','v',NULL,'exclusive',[]::VARCHAR[],'rule','p4','s','c','sc',NULL,NULL,NULL,NULL,NULL,NULL)
-            ) t(src_node_id,dst_node_id,edge_type,edge_basis,confidence,market_id_src,market_id_dst,event_slug_src,event_slug_dst,evidence,discovery_method,rule_version,prompt_version,explanation,assumptions,rule_id,proposal_id,solver_version,constraint_version,solver_component_id,primary_model_version,verifier_model_version,primary_inference_fingerprint,verifier_inference_fingerprint,consensus_fingerprint,automation_profile_id)
+                ('a','b','implies','model',0.9,'m1','m2','e','e','a implies b','generative_consensus',NULL,'p','a implies b',[]::VARCHAR[],NULL,'p1','s','c','sc','pm','vm','pf','vf','cf','ap','generative_consensus',NULL,NULL,NULL,NULL,NULL),
+                ('b','c','equivalent','model',0.8,'m2','m3','e','e','b equals c','generative_consensus',NULL,'p','b equals c',[]::VARCHAR[],NULL,'p2','s','c','sc','pm','vm','pf','vf','cf','ap','generative_consensus',NULL,NULL,NULL,NULL,NULL),
+                ('c','d','implies','model',0.95,'m3','m4','e','e','c implies d','generative_consensus',NULL,'p','c implies d',[]::VARCHAR[],NULL,'p3','s','c','sc','pm','vm','pf','vf','cf','ap','generative_consensus',NULL,NULL,NULL,NULL,NULL),
+                ('b','d','implies','model',0.8,'m2','m4','e','e','b implies d','generative_consensus',NULL,'p','b implies d',[]::VARCHAR[],NULL,'p5','s','c','sc','pm','vm','pf','vf','cf','ap','generative_consensus',NULL,NULL,NULL,NULL,NULL),
+                ('a','d','mutually_exclusive','same_market',1.0,'m1','m4','e','e','exclusive','deterministic','v',NULL,'exclusive',[]::VARCHAR[],'rule','p4','s','c','sc',NULL,NULL,NULL,NULL,NULL,NULL,'source_contract','strict','v1','[]','rule-fingerprint','scope')
+            ) t(src_node_id,dst_node_id,edge_type,edge_basis,confidence,market_id_src,market_id_dst,event_slug_src,event_slug_dst,evidence,discovery_method,rule_version,prompt_version,explanation,assumptions,rule_id,proposal_id,solver_version,constraint_version,solver_component_id,primary_model_version,verifier_model_version,primary_inference_fingerprint,verifier_inference_fingerprint,consensus_fingerprint,automation_profile_id,evidence_tier,extractor_id,extractor_version,source_spans_json,rule_applicability_fingerprint,proof_scope_key)
             """
         )
         db.execute("CREATE TABLE conditionals AS SELECT 'a' AS a_node_id, 'b' AS b_node_id, 1.0 AS p_a_given_b, 'logic' AS method, 0.9 AS confidence, 'proof' AS evidence")
@@ -571,6 +556,7 @@ def _write_graph(
             CREATE TABLE event_relation_summary_v AS SELECT
                 'e'::VARCHAR AS src_event_key, 'e'::VARCHAR AS dst_event_key,
                 'implies'::VARCHAR AS edge_type, 3::BIGINT AS edge_count,
+                'generative_consensus'::VARCHAR AS evidence_tier,
                 0.8::DOUBLE AS min_confidence, 0.95::DOUBLE AS max_confidence,
                 0.883::DOUBLE AS mean_confidence, 0::BIGINT AS deterministic_count,
                 3::BIGINT AS consensus_count, 3::BIGINT AS source_market_count,
@@ -641,7 +627,12 @@ def _write_graph(
     }
     (out / "coverage_summary.json").write_text(json.dumps(coverage), encoding="utf-8")
     (out / "viewer_manifest.json").write_text(
-        json.dumps({"graph_content_fingerprint": "fixture", "versions": {}}),
+        json.dumps({
+            "graph_content_fingerprint": "fixture",
+            "build_mode": "full",
+            "validation_status": "EXPERIMENTAL_FULL",
+            "versions": {},
+        }),
         encoding="utf-8",
     )
     artifacts = [path.name for path in out.glob("*.parquet")]
@@ -657,6 +648,12 @@ def _write_graph(
             {
                 "command": "discover",
                 "version": __version__,
+                "build_mode": "full",
+                "validation_status": "EXPERIMENTAL_FULL",
+                "stats": {
+                    "build_mode": "full",
+                    "validation_status": "EXPERIMENTAL_FULL",
+                },
                 "artifacts": artifacts,
             }
         ),

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "oddsfox-graph"
-version = "0.10.0"
+version = "0.11.0"
 description = "Discover and explore logical connections across Polymarket market snapshots."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -19,6 +19,7 @@ dependencies = [
   "pytz>=2025.2",
   "python-sat==1.9.dev7",
   "sentence-transformers>=5",
+  "usearch==2.26.0",
   "uvicorn>=0.34",
 ]
 classifiers = [
@@ -44,7 +45,7 @@ files = ["oddsfox_graph"]
 strict = true
 
 [[tool.mypy.overrides]]
-module = ["duckdb", "numpy", "sentence_transformers", "pysat.*"]
+module = ["duckdb", "numpy", "sentence_transformers", "usearch", "pysat.*"]
 ignore_missing_imports = true
 
 [project.scripts]
@@ -54,7 +55,7 @@ oddsfox-graph = "oddsfox_graph.cli:main"
 include = ["oddsfox_graph*"]
 
 [tool.setuptools.package-data]
-oddsfox_graph = ["static/explorer/**/*"]
+oddsfox_graph = ["benchmarks/*.json", "static/explorer/**/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

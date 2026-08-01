@@ -21,8 +21,10 @@ h1 { margin: 0.1rem 0 0; font-size: 1.25rem; font-weight: 600; }
 .run-health { text-align: right; display: grid; gap: 0.1rem; }
 .run-health span { color: light-dark(#66758a, #aeb9ca); font-size: 0.75rem; }
 .run-health strong { font-size: 1.05rem; }
+.mode-badge { display: inline-block; padding: 0.2rem 0.45rem; border-radius: 999px; font-weight: 700; text-transform: uppercase; background: light-dark(#e7eef9, #253148); color: light-dark(#224d82, #b9d4ff) !important; }
+.mode-fast { background: light-dark(#e3f4eb, #17382a); color: light-dark(#17623c, #9be2bb) !important; }
 
-.toolbar { position: relative; display: grid; grid-template-columns: minmax(280px, 1.7fr) repeat(3, minmax(130px, 0.7fr)) auto; gap: 0.8rem; align-items: end; padding: 0.8rem 1.2rem; border-bottom: 1px solid light-dark(#d9e0e9, #2a3342); background: light-dark(#f9fbfd, #141a24); }
+.toolbar { position: relative; display: grid; grid-template-columns: minmax(280px, 1.7fr) repeat(4, minmax(130px, 0.7fr)) auto; gap: 0.8rem; align-items: end; padding: 0.8rem 1.2rem; border-bottom: 1px solid light-dark(#d9e0e9, #2a3342); background: light-dark(#f9fbfd, #141a24); }
 .toolbar label { display: grid; gap: 0.35rem; color: light-dark(#526074, #bac4d2); font-size: 0.76rem; }
 .toolbar select, .toolbar input { min-height: 38px; padding: 0.45rem 0.55rem; color: inherit; background: light-dark(#fff, #1b2330); }
 .search > div { display: flex; gap: 0.4rem; }

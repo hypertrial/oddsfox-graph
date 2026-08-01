@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any
 
@@ -26,9 +27,18 @@ from oddsfox_graph.qualification import (
     evaluate_qualification,
     generate_qualification_cases,
     qualification_case_set_hash,
+    qualification_retrieval_fingerprint,
     qualification_retrieved_case_ids,
     qualify_rule_registry,
 )
+
+
+def test_parse_fallback_limit_is_bound_into_qualification_profile() -> None:
+    config = DiscoveryConfig(max_llm_pairs=5_000)
+    tightened = replace(config, max_llm_pairs=100)
+    assert qualification_retrieval_fingerprint(config) != (
+        qualification_retrieval_fingerprint(tightened)
+    )
 
 
 def _atomic(**changes: Any) -> AtomicPairAssessment:
@@ -242,7 +252,12 @@ def test_generated_rule_cases_gate_unsafe_rules() -> None:
         "event.single_winner.v1",
     } <= set(result["enabled"])
     assert result["experimental"] == []
-    assert result["support"]["event.single_winner.v1"]["adversarial_passed"] == 10
+    for rule_id in RULE_REGISTRY:
+        assert result["support"][rule_id]["positive"] == 100
+        assert result["support"][rule_id]["positive_passed"] == 100
+        assert result["support"][rule_id]["adversarial"] == 100
+        assert result["support"][rule_id]["adversarial_passed"] == 100
+    assert result["support"]["event.single_winner.v1"]["adversarial_passed"] == 100
 
 
 def test_solver_rejects_incompatible_soft_proposal_and_preserves_hard_fact() -> None:

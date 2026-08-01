@@ -1,14 +1,18 @@
 # OddsFox Graph
 
-OddsFox Graph 0.10 discovers a deterministic logical graph across compact
-Polymarket market snapshots and ships a local, interactive explorer for browsing
-the resulting propositions, events, connected components, proofs, and diagnostics.
+OddsFox Graph 0.11 builds and visualizes logical connections across every valid
+proposition in a compact Polymarket catalog. Discovery has two explicit modes:
 
-Inference is self-hosted. Qwen3-4B Q8 and Granite 3.3 2B must independently agree
-before a model-derived relation can publish; NLI may veto consensus but cannot
-publish an edge. `AUTOMATION_VALIDATED` certifies deterministic generated-case
-conformance, reproducibility, and performance for the exact runtime pair. It is
-not an independently measured claim about real-world semantic accuracy.
+- `fast` is model-free, complete in node coverage, and publishes only exact
+  source-contract or strict deterministic-rule edges. It is the release-gated
+  path and targets a ready explorer in under two minutes on an Apple M4 Air.
+- `full` upgrades that deterministic core with local embeddings, USearch ANN,
+  NLI vetoes, and Qwen/Granite consensus. It is functional but carries the
+  `EXPERIMENTAL_FULL` validation status until separate live certification.
+
+Fast mode is deliberately conservative: complete proposition coverage does not
+mean exhaustive relationship recall. Full mode also evaluates a bounded
+candidate set, not all 17.97 billion possible proposition pairs.
 
 ## Install
 
@@ -16,72 +20,55 @@ not an independently measured claim about real-world semantic accuracy.
 python -m pip install -e '.[dev]'
 ```
 
-llama.cpp or vLLM, model weights, MiniLM embeddings, and ModernBERT NLI files are
-external. The installed Python package never downloads or launches a model; the
-explicit repository setup wrapper below can do both for local development.
-
-For the complete local M4 setup, `scripts/local_stack.sh` installs and checks the
-runtime, downloads immutable assets, runs qualification and discovery, and
-serves the explorer. Its default `.oddsfox-runtime/` tree keeps all weights,
-caches (including npm and Playwright), temporary files, logs, and outputs on the
-SSD that contains this checkout. See the
-[local runtime guide](docs/local-runtime.md).
+llama.cpp or vLLM and all model weights remain external. The local wrapper keeps
+models, caches, outputs, logs, and temporary files below `.oddsfox-runtime/` on
+the SSD containing this checkout.
 
 ## Input
 
-The accepted Parquet contract is `polymarket-market-snapshot-v1`:
+The Parquet contract is `polymarket-market-snapshot-v1`:
 
 - required: `market_id`, `question`, `outcomes`, `clob_token_ids`;
 - optional: `event_id`, `event_slug`, `description`, `start_time`, `end_time`,
   `category`, and `tags`;
-- outcomes and token IDs must be nonempty, equal-length arrays, and token IDs
-  must be globally unique.
+- outcome/token arrays must be nonempty and equal length, and token IDs must be
+  globally unique.
 
-## Discover the complete catalog
-
-After creating and checking one Apache-2.0 model manifest per local runtime:
+## Fast graph
 
 ```bash
-oddsfox-graph discover --input data/polymarket.parquet --out output/graph \
-  --cache-dir cache --primary-model-manifest primary.json \
-  --verifier-model-manifest verifier.json --compute-profile compute.json \
-  --all-propositions --progress-format plain
+oddsfox-graph doctor --mode fast --input data/polymarket.parquet --out output/fast
+oddsfox-graph discover --mode fast --input data/polymarket.parquet \
+  --out output/fast --deadline-seconds 120 --progress-format plain
+oddsfox-graph serve --out output/fast --open-browser
 ```
 
-The default remains a bounded 5,000-proposition development run. Use
-`--all-propositions` for the complete catalog. The classification budget is
-balanced across event scopes, and coverage is published explicitly rather than
-implying that every retrieved pair was classified. Cache-complete replay uses
-`--offline`; incremental runs add `--incremental-from <completed-output>`.
-When a run must meet a minimum pair-assessment envelope, set
-`--classification-coverage-target` or `--max-visible-coverage-gap` together with
-a sufficient `--max-llm-pairs` budget.
+Omitting `--max-propositions` selects the complete valid catalog. A development
+run may set it explicitly. Fast mode neither starts nor imports inference,
+embedding, NLI, or cache code.
 
-## Explore
+## Full enrichment
+
+Create and qualify both local model manifests out of band, then run:
 
 ```bash
-oddsfox-graph serve --out output/graph --open-browser
+oddsfox-graph discover --mode full --input data/polymarket.parquet \
+  --out output/full --cache-dir cache \
+  --automation-profile qualification/automation_profile.json \
+  --primary-model-manifest primary.json --verifier-model-manifest verifier.json \
+  --compute-profile compute.json --deadline-seconds 3600
 ```
 
-The loopback-only server opens an interactive WebGL graph. Start at event or
-component level, search for a proposition, expand a bounded neighborhood, filter
-relations and confidence, inspect provenance, prove implications, or explain why
-a requested edge is absent.
+The profile must exactly bind the v0.11 extractor, ANN, NLI, prompts, schemas,
+settings, manifests, and runtime pair. A deadline cutoff stops new model work,
+finishes in-flight requests, and publishes the valid deterministic core plus any
+accepted enrichment; the command exits nonzero when the requested SLA is missed.
 
-Create a portable, bounded snapshot for an event, component, or neighborhood:
-
-```bash
-oddsfox-graph explorer-export --out output/graph --destination export/event \
-  --scope event --identifier <event-key>
-```
-
-Static exports query bundled Parquet with DuckDB-Wasm and never contain the full
-catalog unless the declared scope fits the explicit response ceilings.
-
-Python callers use `oddsfox_graph.graph.Graph` for typed nodes, edges, pages,
-views, proofs, and diagnostics.
+The explorer filters `source_contract`, `deterministic_rule`, and
+`generative_consensus` evidence. Python callers use
+`oddsfox_graph.graph.Graph` for typed queries, proofs, and why-not diagnostics.
 
 See [architecture](docs/architecture.md), [discovery](docs/discovery.md),
 [explorer](docs/explorer.md), [qualification](docs/qualification.md),
-[artifacts](docs/artifacts.md), [CLI](docs/cli.md), and
-[release validation](docs/release.md).
+[artifacts](docs/artifacts.md), [CLI](docs/cli.md),
+[performance](docs/performance.md), and [release validation](docs/release.md).

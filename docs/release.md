@@ -1,25 +1,25 @@
 # Release validation
 
-The installed `release-validate` command validates a content-bound 0.10 fixture.
-It includes the canonical 94,781-market input, SQLite cache, bounded 5,000 and
-20,000 baselines, a complete-catalog baseline, both model manifests, automation
-profile/report/cases, compute profile, expected logical hashes, and performance
-report.
+Version 0.11 certifies fast mode only. The content-bound release fixture includes
+the canonical catalog, a complete fast baseline, expected logical hashes, viewer
+and coverage manifests, and a three-repetition M4 performance report. It does
+not require model weights, inference cache, or an automation profile.
 
-Validation checks every file/tree hash, SQLite integrity, model/profile and case
-bindings, expected artifact hashes, `AUTOMATION_VALIDATED`, and performance gates.
-The complete-catalog baseline must bind all 94,781 input rows, explicitly report
-the 4 invalid rows, select 94,777 valid markets and 189,570 propositions, set
-`all_market_selection=true`, and include a nonempty viewer graph fingerprint.
+Each canonical run must read 94,781 rows, reject four invalid rows, select 94,777
+markets and 189,570 propositions, publish 94,771 binary complements and 54
+same-market categorical exclusions, produce nonzero verified cross-market and
+cross-event deterministic edges, meet the 120-second time-to-ready gate, and
+produce identical logical hashes. RSS is recorded for diagnosis but is not a
+release blocker.
 
-Protected validation runs real dual-model qualification, llama.cpp/Metal and
-vLLM conformance, clean/online/offline/incremental equality, complete-catalog
-discovery, cache integrity, static explorer export, API smoke checks, and browser
-tests. It records discovery and query latency, peak RSS, publication and viewer
-artifact sizes, token use, energy, and compute cost.
+`release-validate --fixture-root ... --work-dir ...` validates fixture paths and
+hashes, package/contract versions, catalog counts, fast mode,
+`DETERMINISTIC_VALIDATED`, expected artifacts, viewer metadata, and the
+performance report. Every reported run is bound to the baseline's expected
+logical hashes, and the report must retain the canonical M4 budget metadata and
+passing gate results. v0.10 fixtures are rejected.
 
-The manual workflow requires an Apple M4 runner with both llama.cpp endpoints and
-a Linux GPU runner with both vLLM endpoints. Runtime-bound manifests and model
-files are external; the repository never downloads or launches weights. Missing
-models, cache coverage, generated cases, or measurements remain explicit release
-prerequisites and are never fabricated or waived.
+Full mode is implemented and network-free tested, but live dual-model
+qualification, semantic gates, sustained thermal runs, and a one-hour acceptance
+run are future prerequisites. Missing full-mode evidence does not block the fast
+release and must never be represented as completed validation.

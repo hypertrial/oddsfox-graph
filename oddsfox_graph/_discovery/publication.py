@@ -27,7 +27,11 @@ def copy_sorted_parquet(
             SELECT {projection}
             FROM {table}
             ORDER BY {order_by}
-        ) TO '{q(path)}' (FORMAT PARQUET)
+        ) TO '{q(path)}' (
+            FORMAT PARQUET,
+            COMPRESSION ZSTD,
+            COMPRESSION_LEVEL 1
+        )
         """
     )
 
@@ -117,7 +121,11 @@ def write_conditionals(db: DuckDB, out_dir: Path) -> None:
             SELECT {artifact_projection("conditional_edges.parquet")}
             FROM conditional_edges_v
             ORDER BY a_node_id, b_node_id, method
-        ) TO '{q(out_dir / "conditional_edges.parquet")}' (FORMAT PARQUET);
+        ) TO '{q(out_dir / "conditional_edges.parquet")}' (
+            FORMAT PARQUET,
+            COMPRESSION ZSTD,
+            COMPRESSION_LEVEL 1
+        );
         """
     )
 

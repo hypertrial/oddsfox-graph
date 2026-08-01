@@ -298,9 +298,9 @@ def test_cache_schema_mismatch_and_corruption_fail_loudly(tmp_path: Path) -> Non
         InferenceCache(directory)
 
 
-def test_cache_version_is_v7() -> None:
-    assert CACHE_ENTRY_VERSION == 7
-    assert CACHE_FILENAME == "inference-cache-v7.sqlite3"
+def test_cache_version_is_v8() -> None:
+    assert CACHE_ENTRY_VERSION == 8
+    assert CACHE_FILENAME == "inference-cache-v8.sqlite3"
 
 
 def test_profile_match_binds_both_models_and_all_fingerprints() -> None:

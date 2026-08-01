@@ -31,6 +31,7 @@ export interface ExplorerEdge {
   count: number;
   confidence: number;
   discovery_method: string;
+  evidence_tier?: string;
   aggregation_only: boolean;
 }
 
@@ -42,6 +43,12 @@ export interface GraphView {
   truncated_edges: boolean;
   coverage: Record<string, unknown>;
 }
+
+export type EvidenceTier =
+  | "all"
+  | "source_contract"
+  | "deterministic_rule"
+  | "generative_consensus";
 
 export interface SearchNode {
   node_id: string;

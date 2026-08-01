@@ -462,7 +462,9 @@ def test_dual_model_online_offline_incremental_and_graph_queries(tmp_path: Path)
     )
     manifest = json.loads((out / "build_manifest.json").read_text(encoding="utf-8"))
     first_hashes = manifest["artifact_hashes"]
-    assert manifest["version"] == "0.10.0"
+    assert manifest["version"] == "0.11.0"
+    assert manifest["build_mode"] == "full"
+    assert manifest["validation_status"] == "EXPERIMENTAL_FULL"
     assert manifest["stats"]["qualification_status"] == "AUTOMATION_VALIDATED"
     assert manifest["inference"]["primary"]["manifest_id"]
     assert manifest["inference"]["verifier"]["manifest_id"]
@@ -472,6 +474,21 @@ def test_dual_model_online_offline_incremental_and_graph_queries(tmp_path: Path)
     assert not (out / "review_queue.parquet").exists()
     assert not (out / "benchmark.parquet").exists()
     assert first["tokens"] == 6
+    db = DuckDB(out / "oddsfox_graph.duckdb", read_only=True)
+    try:
+        assert db.scalar(
+            "SELECT count(*) FROM relation_candidates_v "
+            "WHERE deterministic_relation IS NOT NULL AND ("
+            "evidence_tier IS NULL OR extractor_id IS NULL "
+            "OR source_spans_json IS NULL OR proof_scope_key IS NULL)"
+        ) == 0
+        assert db.scalar(
+            "SELECT count(*) FROM logic_edges_v "
+            "WHERE rule_id LIKE 'same_market.%' "
+            "AND evidence_tier != 'source_contract'"
+        ) == 0
+    finally:
+        db.close()
 
     offline = discover(
         REAL_INPUT,
@@ -509,7 +526,7 @@ def test_dual_model_online_offline_incremental_and_graph_queries(tmp_path: Path)
     assert graph.edges("complement")
     methods = {edge.discovery_method for edge in graph.edges(top=100)}
     assert methods <= {"deterministic", "generative_consensus"}
-    assert graph.metadata().package_version == "0.10.0"
+    assert graph.metadata().package_version == "0.11.0"
     assert graph.events(limit=10).rows
     assert graph.components(limit=10).rows
     assert graph.overview("event").nodes

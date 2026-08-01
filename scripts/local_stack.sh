@@ -17,7 +17,7 @@ qwen_id="Qwen/Qwen3-4B-GGUF:Q8_0"
 granite_id="ibm-granite/granite-3.3-2b-instruct-GGUF:Q8_0"
 
 model_root="$runtime_root/models"
-cache_root="$runtime_root/cache/v10"
+cache_root="$runtime_root/cache/v11"
 output_root="$runtime_root/output"
 manifest_root="$runtime_root/manifests"
 log_root="$runtime_root/logs"
@@ -33,7 +33,8 @@ compute_profile="$repo_root/config/local-compute-profile.json"
 catalog="$repo_root/data/polymarket_all_markets_20260730T093857Z.parquet"
 qualification_out="$output_root/qualification"
 smoke_out="$output_root/smoke"
-graph_out="$output_root/all"
+fast_out="$output_root/fast"
+full_out="$output_root/full"
 
 export HF_HOME="$runtime_root/huggingface"
 export HF_HUB_CACHE="$HF_HOME/hub"
@@ -254,7 +255,8 @@ check_stack() {
   require_file "$primary_manifest"
   require_file "$verifier_manifest"
   run_cli doctor \
-    --input "$catalog" --out "$graph_out" --cache-dir "$cache_root" \
+    --mode full --input "$catalog" --out "$full_out" --cache-dir "$cache_root" \
+    --automation-profile "$qualification_out/automation_profile.json" \
     --primary-model-manifest "$primary_manifest" \
     --verifier-model-manifest "$verifier_manifest" \
     --primary-base-url http://127.0.0.1:8080/v1 \
@@ -291,14 +293,23 @@ run_qualification() {
 
 run_smoke() {
   read_common_args
-  run_cli_awake discover "${common_args[@]}" --out "$smoke_out" \
+  run_cli_awake discover --mode full "${common_args[@]}" --out "$smoke_out" \
+    --automation-profile "$qualification_out/automation_profile.json" \
     --max-propositions 5000 --progress-format plain --output-format json
 }
 
-run_discovery() {
+run_fast() {
+  run_cli discover --mode fast --input "$catalog" --out "$fast_out" \
+    --deadline-seconds 120 --progress-format plain --output-format json
+}
+
+run_full() {
+  require_file "$qualification_out/automation_profile.json"
+  start_models
   read_common_args
-  run_cli_awake discover "${common_args[@]}" --out "$graph_out" \
-    --all-propositions --progress-format plain --output-format json
+  run_cli_awake discover --mode full "${common_args[@]}" --out "$full_out" \
+    --automation-profile "$qualification_out/automation_profile.json" \
+    --deadline-seconds 3600 --progress-format plain --output-format json
 }
 
 run_web_checks() {
@@ -356,7 +367,8 @@ show_paths() {
   printf 'HF cache:   %s\n' "$HF_HOME"
   printf 'cache:      %s\n' "$cache_root"
   printf 'outputs:    %s\n' "$output_root"
-  printf 'graph:      %s\n' "$graph_out"
+  printf 'fast graph: %s\n' "$fast_out"
+  printf 'full graph: %s\n' "$full_out"
   printf 'viewer:     http://127.0.0.1:8765\n'
 }
 
@@ -375,11 +387,13 @@ Commands:
   manifests   Create runtime-bound primary and verifier manifests.
   check       Run doctor, including both model conformance checks.
   qualify     Run automated catalog-derived qualification.
+  fast        Build the complete deterministic catalog graph without models.
+  full        Upgrade to the experimental ANN/NLI/dual-model graph.
+  serve-fast  Serve the completed fast graph.
+  serve-full  Serve the completed full graph.
   smoke       Run a 5,000-proposition discovery build.
-  discover    Run the complete 189,570-eligible-proposition catalog build.
   web-check   Build and test the explorer using SSD-resident browser/npm caches.
-  summary     Print the completed all-market run summary.
-  serve       Serve the completed graph at http://127.0.0.1:8765.
+  summary     Print the completed fast all-market run summary.
 EOF
 }
 
@@ -396,9 +410,11 @@ case "${1:-}" in
   check) check_stack ;;
   qualify) run_qualification ;;
   smoke) run_smoke ;;
-  discover) run_discovery ;;
+  fast) run_fast ;;
+  full) run_full ;;
   web-check) run_web_checks ;;
-  summary) run_cli run-summary --out "$graph_out" --output-format json ;;
-  serve) run_cli serve --out "$graph_out" --host 127.0.0.1 --port 8765 --open-browser ;;
+  summary) run_cli run-summary --out "$fast_out" --output-format json ;;
+  serve-fast) run_cli serve --out "$fast_out" --host 127.0.0.1 --port 8765 --open-browser ;;
+  serve-full) run_cli serve --out "$full_out" --host 127.0.0.1 --port 8765 --open-browser ;;
   *) usage; exit 2 ;;
 esac

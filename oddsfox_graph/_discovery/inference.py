@@ -86,7 +86,7 @@ class QualifiedRelation(BaseModel):
 class AutomationProfile(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal["automation-profile-v1"] = (
+    schema_version: Literal["automation-profile-v2"] = (
         AUTOMATION_PROFILE_SCHEMA_VERSION
     )
     profile_id: str

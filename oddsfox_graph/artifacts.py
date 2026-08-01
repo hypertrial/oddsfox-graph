@@ -70,6 +70,12 @@ ARTIFACT_COLUMNS = {
         "verifier_inference_fingerprint",
         "consensus_fingerprint",
         "automation_profile_id",
+        "evidence_tier",
+        "extractor_id",
+        "extractor_version",
+        "source_spans_json",
+        "rule_applicability_fingerprint",
+        "proof_scope_key",
     ],
     "conditional_edges.parquet": [
         "a_node_id",

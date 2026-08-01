@@ -1,40 +1,58 @@
 # Discovery
 
-Discovery requires two Apache-2.0 manifests and two conforming self-hosted Chat
-Completions endpoints. Loopback ports 8080 and 8081 are defaults. Remote
-self-hosted inference requires explicit opt-in; credentials, query strings,
-fragments, and implicit cloud fallbacks are rejected.
+`discover` requires `--mode fast|full`; there is no implicit mode. When
+`--max-propositions` is absent, both modes select the complete valid catalog in
+stable market order. The canonical release file has 94,781 rows, four rejected
+invalid rows, 94,777 selected markets, and 189,570 propositions.
 
-## Catalog selection
+## Fast mode
 
-The default 5,000-proposition envelope is intended for development. Production
-all-market discovery uses `--all-propositions`, selects whole markets in stable
-source-hash order, and records the selected market/proposition counts and
-truncation status. The canonical release file contains 94,781 rows: 94,777 valid
-complete markets, 4 invalid rows excluded with explicit counts, and 189,570
-selected propositions.
+Fast accepts `--input`, `--out`, optional `--incremental-from`, optional
+`--max-propositions`, `--deadline-seconds` (default 120), `--progress-format`,
+and `--output-format`. It rejects cache, profile, model, embedding, NLI,
+classification, and offline flags.
 
-Candidate generation remains bounded. Deterministic candidates are retained
-first. Unresolved classification is scheduled round-robin across canonical
-event-pair scopes in stable hashed order to avoid lexical catalog bias, then by
-structured evidence and semantic score. The manifest,
-`coverage_summary.json`, event/component summaries, and node metrics report
-eligible, assessed, unclassified, quarantined, accepted, and rejected counts.
-Coverage targets are publication gates, not estimates.
+The strict extractor recognizes polarity and market structure; numeric operators,
+thresholds, currencies, percentages, counts, and bounded buckets; UTC times and
+deadlines; allowlisted tournament stages; strict singular-winner templates; and
+canonical subject, competition, season, jurisdiction, and resolution signatures.
+Ambiguous or unmatched semantic fields remain nullable and never remove a node.
 
-## Consensus and cache
+Fast publishes every two-outcome market pair as `complement`, categorical
+outcomes as `mutually_exclusive`, plus independently qualified exact equivalence,
+numeric containment/disjointness, time containment, stage implication, and
+strict single-winner exclusion. Each enabled rule requires 100 positive and 100
+adversarial generated cases with no false acceptance.
 
-Both models must return every source outcome exactly once. Authoritative IDs,
-metadata, polarity, numeric values, units, and dates cannot be overridden.
-Semantic fields publish only on normalized agreement. Pair classification uses
-the shared atomic relation contract, valid citations, empty assumptions, matching
-direction, calibrated confidence, and no NLI veto.
+## Full mode
 
-The cache is `<cache-dir>/inference-cache-v7.sqlite3`. Online transient failures
-are retried and replaceable; stable successes are immutable. Offline mode is
-read-only and reports missing role/task counts. Outputs and state created before
-0.10 are incompatible and require clean regeneration.
+Full requires `--cache-dir`, `--automation-profile`, both model manifests and
+endpoints, and `--compute-profile`. It uses USearch 2.26.0 HNSW with cosine/f32,
+connectivity 32, construction/search expansion 128, sorted single-threaded
+insertion, 64 retrieved neighbors, exact reranking, and exact top 20 retention.
+The embedding model/revision, ANN parameters, insertion order, reranker, NLI,
+and inference protocols are profile bindings.
 
-Incremental baselines must be distinct, manifest-complete 0.10 outputs with exact
-model-pair, automation profile, protocol, normalization, retrieval, rule,
-explorer-artifact, and state bindings. Threshold-only runs reuse raw predictions.
+Both Apache-2.0 models must agree on relation and direction and supply valid
+source-field citations with empty assumptions. NLI is veto-only. Full stops
+scheduling model requests 300 seconds before its monotonic deadline, drains
+in-flight work, marks the remainder `deadline_budget_exhausted`, solves, and
+publishes. Unassessed pairs are never described as unrelated.
+
+Nodes and authoritative fields always come from deterministic extraction. Full
+mode selects at most 256 ambiguous or unmatched markets for dual-model semantic
+fallback, prioritizing ambiguous extraction and repeated authoritative event
+groups. The selection contract is profile-bound, cached by model role, and must
+replay identically offline.
+
+The cache is `<cache-dir>/inference-cache-v8.sqlite3`. Offline replay is
+read-only and requires complete role/task coverage. v0.10 caches, profiles,
+state, outputs, and release fixtures are incompatible.
+
+## Coverage and provenance
+
+Every output records `build_mode`, `validation_status`, evidence tier, extractor
+and rule bindings, source spans, proof scope, assessed/unassessed counts, cutoff,
+deadline state, stage wall time, RSS, DuckDB/spill bytes, component sizes, and
+publication bytes. `DETERMINISTIC_VALIDATED` applies only to fast outputs;
+v0.11 full outputs are always `EXPERIMENTAL_FULL`.

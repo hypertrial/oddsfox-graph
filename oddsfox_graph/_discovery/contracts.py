@@ -8,6 +8,26 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 
+Operator = Literal[
+    "greater_than",
+    "greater_than_or_equal",
+    "less_than",
+    "less_than_or_equal",
+    "equal",
+]
+CitationField = Literal[
+    "question",
+    "description",
+    "outcome",
+    "event_id",
+    "event_slug",
+    "category",
+    "tags",
+    "time_start",
+    "time_end",
+]
+
+
 DEFAULT_EMBEDDING_REVISION = "1110a243fdf4706b3f48f1d95db1a4f5529b4d41"
 DEFAULT_NLI_MODEL = "tasksource/ModernBERT-base-nli"
 DEFAULT_NLI_REVISION = "975123f23a50424f9ca95d5382504d24d9ed9fd2"
@@ -50,19 +70,10 @@ class ParsedOutcome(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     outcome: str
-    subject: list[str] = Field(min_length=1)
+    subject: list[str]
     predicate: str | None
     object: str | None
-    operator: (
-        Literal[
-            "greater_than",
-            "greater_than_or_equal",
-            "less_than",
-            "less_than_or_equal",
-            "equal",
-        ]
-        | None
-    )
+    operator: Operator | None
     threshold: float | None
     unit: str | None
     time_start: datetime | None
@@ -72,19 +83,7 @@ class ParsedOutcome(BaseModel):
     jurisdiction: str | None
     polarity: Literal["positive", "negative"]
     parse_confidence: float = Field(ge=0.0, le=1.0)
-    citations: list[
-        Literal[
-            "question",
-            "description",
-            "outcome",
-            "event_id",
-            "event_slug",
-            "category",
-            "tags",
-            "time_start",
-            "time_end",
-        ]
-    ] = Field(min_length=1)
+    citations: list[CitationField] = Field(min_length=1)
 
 
 class ParsedMarket(BaseModel):
@@ -134,16 +133,7 @@ class PropositionRecord(BaseModel):
     predicate: str | None
     object_original: str | None
     object: str | None
-    operator: (
-        Literal[
-            "greater_than",
-            "greater_than_or_equal",
-            "less_than",
-            "less_than_or_equal",
-            "equal",
-        ]
-        | None
-    )
+    operator: Operator | None
     threshold: float | None
     unit_original: str | None
     unit: str | None
@@ -158,14 +148,19 @@ class PropositionRecord(BaseModel):
     polarity: Literal["positive", "negative"]
     parse_confidence: float = Field(ge=0.0, le=1.0)
     parse_status: Literal["parsed", "failed", "quarantined"]
-    primary_parser_model: str
-    verifier_parser_model: str
-    prompt_version: str
+    primary_parser_model: str | None
+    verifier_parser_model: str | None
+    prompt_version: str | None
     primary_parse_fingerprint: str | None
     verifier_parse_fingerprint: str | None
     consensus_fingerprint: str | None
     automation_profile_id: str | None
     source_schema: str
+    extractor_id: str | None = None
+    extractor_version: str | None = None
+    extraction_status: Literal["exact", "ambiguous", "unmatched"] | None = None
+    source_spans_json: str | None = None
+    proof_scope_key: str | None = None
 
 
 @dataclass(frozen=True)
@@ -197,9 +192,11 @@ class SourceMarket:
 
 @dataclass(frozen=True)
 class DiscoveryConfig:
+    mode: Literal["fast", "full"] = "full"
     cache_dir: Path | None = None
     incremental_from: Path | None = None
     compute_profile: Path | None = None
+    automation_profile: Path | None = None
     primary_model_manifest: Path | None = None
     verifier_model_manifest: Path | None = None
     offline: bool = False
@@ -226,7 +223,7 @@ class DiscoveryConfig:
     parse_confidence: float = 0.95
     top_k: int = 20
     embedding_block_size: int = 512
-    max_propositions: int | None = 5_000
+    max_propositions: int | None = None
     max_candidates: int = 400_000
     max_llm_pairs: int = 5_000
     classification_coverage_target: float = 0.0
@@ -234,8 +231,13 @@ class DiscoveryConfig:
     llm_concurrency: int = 2
     output_format: Literal["table", "json", "jsonl"] = "table"
     progress_format: Literal["auto", "plain", "json", "quiet"] = "auto"
+    deadline_seconds: float = 3_600.0
 
     def validate(self) -> None:
+        if self.mode not in {"fast", "full"}:
+            raise ValueError("mode must be fast or full")
+        if self.deadline_seconds <= 0:
+            raise ValueError("deadline_seconds must be positive")
         if not 0.0 <= self.accept_confidence <= 1.0:
             raise ValueError("accept_confidence must be between 0 and 1")
         if not 0.0 <= self.parse_confidence <= 1.0:

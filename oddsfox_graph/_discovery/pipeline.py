@@ -94,6 +94,7 @@ from .parsing import (
     canonical_unit,
     normalize_optional,
     proposition_row as _proposition_row,
+    select_model_parse_fallback_markets,
 )
 from .retrieval import generate_candidate_workspace
 from .metrics import RunState, StageRecorder
@@ -140,6 +141,7 @@ from .versions import (
     EXECUTION_PLAN_VERSION,
     NLI_INFERENCE_VERSION,
     NORMALIZATION_VERSION,
+    PARSE_FALLBACK_VERSION,
     PARSE_PROMPT_VERSION,
     PUBLICATION_VERSION,
     RETRIEVAL_VERSION,
@@ -151,7 +153,6 @@ from .versions import (
     VISUALIZATION_LAYOUT_VERSION,
 )
 from ..qualification import (
-    QUALIFICATION_CASE_COLUMNS,
     QualificationPrediction,
     evaluate_qualification,
     generate_qualification_cases,
@@ -176,6 +177,23 @@ from .workspace import (
     SEMANTIC_NEIGHBOR_STATE_COLUMNS,
     CandidateStore,
 )
+from .artifact_contracts import (
+    CANDIDATE_COMPONENT_STATE_COLUMNS,
+    DISCOVERY_JSON_ARTIFACTS,
+    DISCOVERY_PARQUET_ARTIFACTS,
+    GRAPH_DATABASE_ARTIFACT,
+    LOGIC_EDGE_COLUMNS,
+    MARKET_GROUP_COLUMNS,
+    MARKET_STATE_COLUMNS,
+    NODE_COLUMNS,
+    PARSE_ERROR_COLUMNS,
+    PROPOSITION_COLUMNS,
+    PROPOSITION_FINGERPRINT_COLUMNS,
+    QUALIFICATION_CASE_COLUMNS,
+    REJECTED_EDGE_COLUMNS,
+    SOLVER_COMPONENT_STATE_COLUMNS,
+    STATE_ARTIFACTS,
+)
 from .. import __version__
 from ..artifacts import ARTIFACT_COLUMNS, reports
 from ..graph_snapshot import GRAPH_SNAPSHOT_ARTIFACT, write_graph_snapshot
@@ -183,215 +201,10 @@ from ..queries import DuckDB, q
 from ..reports import write_reports, write_summary_report
 
 
-DISCOVERY_PARQUET_ARTIFACTS = (
-    "nodes.parquet",
-    "market_groups.parquet",
-    "propositions.parquet",
-    "relation_candidates.parquet",
-    "logic_edges.parquet",
-    "conditional_edges.parquet",
-    "parse_assessments.parquet",
-    "model_assessments.parquet",
-    "quarantined_pairs.parquet",
-    "qualification_cases.parquet",
-    "rejected_edges.parquet",
-    "parse_errors.parquet",
-    "event_summary.parquet",
-    "event_relation_summary.parquet",
-    "component_summary.parquet",
-    "node_metrics.parquet",
-    "visualization_layout.parquet",
-)
-DISCOVERY_JSON_ARTIFACTS = (
-    "coverage_summary.json",
-    "viewer_manifest.json",
-)
-GRAPH_DATABASE_ARTIFACT = "oddsfox_graph.duckdb"
 _ACTIVE_PROGRESS: ContextVar[StageRecorder | None] = ContextVar(
     "oddsfox_graph_progress",
     default=None,
 )
-STATE_ARTIFACTS = (
-    "state/market_state.parquet",
-    "state/proposition_fingerprints.parquet",
-    "state/proposition_embeddings.parquet",
-    "state/semantic_neighbors.parquet",
-    "state/candidate_components.parquet",
-    "state/candidate_blocks.parquet",
-    "state/candidate_reason_rows.parquet",
-    "state/solver_components.parquet",
-    "state/execution_plan.parquet",
-)
-
-PROPOSITION_COLUMNS = {
-    "proposition_id": "VARCHAR",
-    "market_id": "VARCHAR",
-    "event_id": "VARCHAR",
-    "event_slug": "VARCHAR",
-    "clob_token_id": "VARCHAR",
-    "outcome_index": "INTEGER",
-    "outcome": "VARCHAR",
-    "question": "VARCHAR",
-    "description": "VARCHAR",
-    "market_source_hash": "VARCHAR",
-    "normalization_version": "VARCHAR",
-    "category": "VARCHAR",
-    "tags": "VARCHAR[]",
-    "subject_original": "VARCHAR[]",
-    "subject": "VARCHAR[]",
-    "predicate": "VARCHAR",
-    "object_original": "VARCHAR",
-    "object": "VARCHAR",
-    "operator": "VARCHAR",
-    "threshold": "DOUBLE",
-    "unit_original": "VARCHAR",
-    "unit": "VARCHAR",
-    "time_start": "TIMESTAMPTZ",
-    "time_end": "TIMESTAMPTZ",
-    "competition_original": "VARCHAR",
-    "competition": "VARCHAR",
-    "event_scope_original": "VARCHAR",
-    "event_scope": "VARCHAR",
-    "jurisdiction_original": "VARCHAR",
-    "jurisdiction": "VARCHAR",
-    "polarity": "VARCHAR",
-    "parse_confidence": "DOUBLE",
-    "parse_status": "VARCHAR",
-    "primary_parser_model": "VARCHAR",
-    "verifier_parser_model": "VARCHAR",
-    "prompt_version": "VARCHAR",
-    "primary_parse_fingerprint": "VARCHAR",
-    "verifier_parse_fingerprint": "VARCHAR",
-    "consensus_fingerprint": "VARCHAR",
-    "automation_profile_id": "VARCHAR",
-    "source_schema": "VARCHAR",
-}
-
-REJECTED_EDGE_COLUMNS = {
-    "proposal_id": "VARCHAR",
-    "src_node_id": "VARCHAR",
-    "dst_node_id": "VARCHAR",
-    "edge_type": "VARCHAR",
-    "edge_basis": "VARCHAR",
-    "confidence": "DOUBLE",
-    "discovery_method": "VARCHAR",
-    "rule_id": "VARCHAR",
-    "rule_version": "VARCHAR",
-    "prompt_version": "VARCHAR",
-    "rejection_reason": "VARCHAR",
-    "conflicting_proposal_ids": "VARCHAR[]",
-    "conflicting_constraint_ids": "VARCHAR[]",
-    "solver_component_id": "VARCHAR",
-    "primary_model_version": "VARCHAR",
-    "verifier_model_version": "VARCHAR",
-    "primary_assessment_id": "VARCHAR",
-    "verifier_assessment_id": "VARCHAR",
-    "primary_inference_fingerprint": "VARCHAR",
-    "verifier_inference_fingerprint": "VARCHAR",
-    "consensus_fingerprint": "VARCHAR",
-    "automation_profile_id": "VARCHAR",
-}
-
-PARSE_ERROR_COLUMNS = {
-    "error_id": "VARCHAR",
-    "proposition_id": "VARCHAR",
-    "market_id": "VARCHAR",
-    "error_kind": "VARCHAR",
-    "error_message": "VARCHAR",
-    "cache_state": "VARCHAR",
-    "error_type": "VARCHAR",
-    "status_code": "INTEGER",
-    "response_json": "VARCHAR",
-    "question": "VARCHAR",
-    "description": "VARCHAR",
-    "parse_confidence": "DOUBLE",
-    "market_source_hash": "VARCHAR",
-    "model_role": "VARCHAR",
-    "parser_model": "VARCHAR",
-    "prompt_version": "VARCHAR",
-    "schema_version": "VARCHAR",
-    "normalization_version": "VARCHAR",
-}
-
-MARKET_STATE_COLUMNS = {
-    "market_id": "VARCHAR",
-    "source_hash": "VARCHAR",
-    "parse_model": "VARCHAR",
-    "parse_prompt_version": "VARCHAR",
-    "normalization_version": "VARCHAR",
-    "rule_version": "VARCHAR",
-}
-
-PROPOSITION_FINGERPRINT_COLUMNS = {
-    "proposition_id": "VARCHAR",
-    "market_id": "VARCHAR",
-    "market_source_hash": "VARCHAR",
-    "parse_fingerprint": "VARCHAR",
-    "normalization_version": "VARCHAR",
-}
-
-CANDIDATE_COMPONENT_STATE_COLUMNS = {
-    "component_id": "VARCHAR",
-    "component_fingerprint": "VARCHAR",
-    "pair_count": "INTEGER",
-    "candidate_version": "VARCHAR",
-}
-
-SOLVER_COMPONENT_STATE_COLUMNS = {
-    "solver_component_id": "VARCHAR",
-    "proposal_hash": "VARCHAR",
-    "accepted_proposal_ids": "VARCHAR[]",
-    "rejected_proposal_ids": "VARCHAR[]",
-    "proposal_count": "INTEGER",
-    "hard_clause_count": "INTEGER",
-    "soft_clause_count": "INTEGER",
-    "objective_cost": "BIGINT",
-    "solver_version": "VARCHAR",
-    "constraint_version": "VARCHAR",
-}
-
-NODE_COLUMNS = {
-    "node_id": "VARCHAR",
-    "market_id": "VARCHAR",
-    "outcome_index": "INTEGER",
-    "clob_token_id": "VARCHAR",
-    "question": "VARCHAR",
-    "outcome_label": "VARCHAR",
-    "event_slug": "VARCHAR",
-    "is_active": "BOOLEAN",
-    "is_closed": "BOOLEAN",
-    "market_family": "VARCHAR",
-    "canonical_proposition": "VARCHAR",
-    "proposition_type": "VARCHAR",
-    "expected_tokens": "INTEGER",
-    "first_seen_ts": "TIMESTAMPTZ",
-    "last_seen_ts": "TIMESTAMPTZ",
-}
-
-MARKET_GROUP_COLUMNS = {
-    "market_id": "VARCHAR",
-    "event_slug": "VARCHAR",
-    "question": "VARCHAR",
-    "market_family": "VARCHAR",
-    "num_tokens": "INTEGER",
-    "token_ids": "VARCHAR[]",
-    "outcome_labels": "VARCHAR[]",
-    "is_active": "BOOLEAN",
-    "is_closed": "BOOLEAN",
-    "first_seen_ts": "TIMESTAMPTZ",
-    "last_seen_ts": "TIMESTAMPTZ",
-}
-
-LOGIC_EDGE_COLUMNS = {
-    name: (
-        "DOUBLE"
-        if name == "confidence"
-        else "VARCHAR[]" if name == "assumptions" else "VARCHAR"
-    )
-    for name in ARTIFACT_COLUMNS["logic_edges.parquet"]
-}
-
-
 @dataclass(frozen=True)
 class _InferenceContext:
     primary_manifest: ModelManifest
@@ -441,8 +254,13 @@ def _prepare_inference_context(
         verifier_manifest,
     )
     profile = None
-    if config.offline and (provenance_root / "automation_profile.json").is_file():
-        profile = load_automation_profile(provenance_root / "automation_profile.json")
+    qualification_report: dict[str, Any] | None = None
+    profile_path = config.automation_profile
+    if profile_path is None and config.offline and (provenance_root / "automation_profile.json").is_file():
+        profile_path = provenance_root / "automation_profile.json"
+    if profile_path is not None:
+        profile_path = profile_path.resolve()
+        profile = load_automation_profile(profile_path)
         validate_automation_profile_match(
             profile,
             primary_manifest,
@@ -458,6 +276,15 @@ def _prepare_inference_context(
             classify_prompt_hash=_text_hash(_CLASSIFY_PROMPT),
             classify_schema_hash=_model_schema_hash(AtomicPairAssessment),
         )
+        report_path = profile_path.parent / "qualification_report.json"
+        if not report_path.is_file():
+            raise ValueError(
+                "Full mode requires qualification_report.json beside --automation-profile"
+            )
+        loaded_report = json.loads(report_path.read_text(encoding="utf-8"))
+        if not isinstance(loaded_report, dict):
+            raise ValueError("qualification_report.json must contain a JSON object")
+        qualification_report = {str(key): value for key, value in loaded_report.items()}
     primary_client, owns_primary = _role_client(
         config,
         primary_origin,
@@ -486,6 +313,7 @@ def _prepare_inference_context(
         verifier_client=verifier_client,
         owns_primary_client=owns_primary,
         owns_verifier_client=owns_verifier,
+        qualification_report=qualification_report,
     )
 
 
@@ -1390,21 +1218,27 @@ def _discover_impl(
     cache_dir = (config.cache_dir or Path(str(out_dir) + ".cache")).resolve()
     cache = InferenceCache(cache_dir, offline=config.offline)
     resources.callback(cache.close)
-    inference = recorder.run(
-        "automated_qualification",
-        lambda: _ensure_automation_profile(
-            input_path,
-            out_dir,
-            markets,
-            config,
-            cache,
-            inference,
-            injected=(
-                _primary_client is not None and _verifier_client is not None
-            ),
-            embedder=_embedder or _embed_texts,
-        ),
-    )
+    if inference.profile is None:
+        if _primary_client is not None and _verifier_client is not None:
+            # Private dependency injection keeps network-free conformance tests
+            # self-contained. The installed CLI never takes this path.
+            inference = recorder.run(
+                "automated_qualification_test_fixture",
+                lambda: _ensure_automation_profile(
+                    input_path,
+                    out_dir,
+                    markets,
+                    config,
+                    cache,
+                    inference,
+                    injected=True,
+                    embedder=_embedder or _embed_texts,
+                ),
+            )
+        else:
+            raise ValueError(
+                "Full mode requires an exact precomputed --automation-profile; run qualify separately"
+            )
     recorder.event(
         "qualification_complete",
         status=(inference.profile.status if inference.profile else "QUALIFICATION_FAILED"),
@@ -1649,6 +1483,7 @@ def _discover_impl(
         propositions,
         config,
     )
+    candidate_store.update_deterministic_rows(deterministic_candidates)
     deterministic_edges = recorder.run(
         "derive_deterministic_relations",
         lambda: _derive_deterministic_edges(
@@ -1829,6 +1664,17 @@ def _discover_impl(
         ),
     )
 
+    # Publication promotes the workspace database and seals this connection.
+    # Capture scheduling coverage before that ownership transfer.
+    coverage_state = candidate_store.classification_coverage()
+    deadline_unassessed = int(
+        candidate_store.db.scalar(
+            "SELECT count(*) FROM relation_candidates_work "
+            "WHERE status='deadline_budget_exhausted'"
+        )
+        or 0
+    )
+
     staging = Path(
         tempfile.mkdtemp(prefix=f".{out_dir.name}.discovery-", dir=out_dir.parent)
     )
@@ -1856,6 +1702,14 @@ def _discover_impl(
                 inference=inference,
             ),
         )
+        # Qualification truth is immutable for an exact profile. Reuse the
+        # baseline bytes during offline/incremental replay so physical Parquet
+        # encoding cannot create a false logical-hash difference.
+        replay_root = config.incremental_from or (out_dir if config.offline else None)
+        if replay_root is not None:
+            replay_cases = replay_root.resolve() / "qualification_cases.parquet"
+            if replay_cases.is_file():
+                shutil.copyfile(replay_cases, staging / "qualification_cases.parquet")
         stats = publication_result.stats
         shutil.rmtree(staging / ".duckdb-spill", ignore_errors=True)
         input_hash = recorder.run("hash_input", lambda: _sha256(input_path))
@@ -1865,6 +1719,16 @@ def _discover_impl(
         stats["qualification_status"] = (
             inference.profile.status if inference.profile else "QUALIFICATION_FAILED"
         )
+        stats["build_mode"] = "full"
+        stats["validation_status"] = "EXPERIMENTAL_FULL"
+        stats["deadline"] = {
+            "seconds": config.deadline_seconds,
+            "elapsed_seconds": recorder.runtime_seconds(),
+            "met": recorder.runtime_seconds() <= config.deadline_seconds,
+            "cutoff_triggered": deadline_unassessed > 0,
+            "assessed_pairs": coverage_state["assessed"],
+            "unassessed_pairs": deadline_unassessed,
+        }
         artifact_hashes = recorder.run(
             "hash_artifacts",
             lambda: {
@@ -1899,9 +1763,21 @@ def _discover_impl(
             lambda: publish_directory_atomically(staging, out_dir),
         )
         try:
-            stats["runtime_seconds"] = recorder.runtime_seconds()
+            # The deadline covers the manifest-complete graph, not merely the
+            # inference cutoff. Finalize it after atomic directory publication.
+            elapsed_seconds = recorder.runtime_seconds()
+            stats["runtime_seconds"] = elapsed_seconds
             stats["peak_rss_mb"] = _peak_rss_mb()
             stats["stage_metrics"] = recorder.stage_metrics
+            stats["deadline"] = {
+                "seconds": config.deadline_seconds,
+                "elapsed_seconds": elapsed_seconds,
+                "met": elapsed_seconds <= config.deadline_seconds,
+                "cutoff_triggered": deadline_unassessed > 0,
+                "assessed_pairs": coverage_state["assessed"],
+                "unassessed_pairs": deadline_unassessed,
+            }
+            write_summary_report(out_dir, stats)
             manifest = _discovery_manifest(
                 input_path,
                 input_hash,
@@ -2418,16 +2294,43 @@ def _parse_propositions(
     state: RunState,
     inference: _InferenceContext,
 ) -> ParsingStageResult:
+    # Installed full discovery bounds model parsing to ambiguous or unmatched
+    # markets with structured candidate value. Injected clients intentionally
+    # exercise every market in the network-free conformance tests.
+    if config.offline and _dual_parse_cache_complete(markets, cache, inference):
+        dual_markets = list(markets)
+        deterministic_markets = []
+    elif inference.owns_primary_client or config.offline:
+        fallback_ids = frozenset(
+            select_model_parse_fallback_markets(
+                markets,
+                limit=min(256, config.max_llm_pairs),
+            )
+        )
+        dual_markets = [
+            market for market in markets if market.market_id in fallback_ids
+        ]
+        deterministic_markets = [
+            market for market in markets if market.market_id not in fallback_ids
+        ]
+    else:
+        dual_markets = list(markets)
+        deterministic_markets = []
+    deterministic = _deterministic_parse_propositions(
+        deterministic_markets, source_schema, inference
+    )
+    if not dual_markets:
+        return deterministic
     primary_entries = _parse_role_entries(
-        markets, "primary", config, cache, state, inference
+        dual_markets, "primary", config, cache, state, inference
     )
     verifier_entries = _parse_role_entries(
-        markets, "verifier", config, cache, state, inference
+        dual_markets, "verifier", config, cache, state, inference
     )
-    propositions: list[dict[str, Any]] = []
-    assessments: list[dict[str, Any]] = []
-    quarantines: list[dict[str, Any]] = []
-    for market in markets:
+    propositions = list(deterministic.propositions)
+    assessments = list(deterministic.parse_assessments)
+    quarantines = list(deterministic.quarantines)
+    for market in dual_markets:
         primary_entry = primary_entries[market.market_id]
         verifier_entry = verifier_entries[market.market_id]
         primary_market, primary_error = _validated_parse_entry(market, primary_entry)
@@ -2542,6 +2445,103 @@ def _parse_propositions(
         ),
         parse_assessments=sorted(assessments, key=lambda row: str(row["assessment_id"])),
         quarantines=quarantines,
+    )
+
+
+def _dual_parse_cache_complete(
+    markets: Sequence[SourceMarket],
+    cache: InferenceCache,
+    inference: _InferenceContext,
+) -> bool:
+    keys: list[str] = []
+    for role in ("primary", "verifier"):
+        task = f"{role}_parse"
+        fingerprint = inference.fingerprints[task]
+        for market in markets:
+            payload = _market_payload(market)
+            keys.append(
+                cache.key(
+                    task,
+                    fingerprint,
+                    PARSE_PROMPT_VERSION,
+                    _text_hash(_PARSE_PROMPT),
+                    _model_schema_hash(ParsedMarket),
+                    payload,
+                )
+            )
+    return bool(keys) and len(cache.contains_many(keys)) == len(set(keys))
+
+
+def _deterministic_parse_propositions(
+    markets: Sequence[SourceMarket],
+    source_schema: str,
+    inference: _InferenceContext,
+) -> ParsingStageResult:
+    from .extraction import extract_proposition
+
+    propositions: list[dict[str, Any]] = []
+    assessments: list[dict[str, Any]] = []
+    for market in markets:
+        for source_outcome in market.outcomes:
+            extracted = extract_proposition(market, source_outcome)
+            parsed = ParsedOutcome(
+                outcome=source_outcome.outcome,
+                subject=list(extracted.subject),
+                predicate=extracted.predicate,
+                object=None,
+                operator=extracted.operator,
+                threshold=extracted.threshold,
+                unit=extracted.unit,
+                time_start=extracted.time_start,
+                time_end=extracted.time_end,
+                competition=extracted.competition,
+                event_scope=extracted.event_scope,
+                jurisdiction=extracted.jurisdiction,
+                polarity=extracted.polarity,
+                parse_confidence=1.0,
+                citations=sorted({span.field for span in extracted.spans}),
+            )
+            proposition = _proposition_row(
+                market,
+                source_outcome,
+                parsed,
+                None,
+                None,
+                source_schema,
+                None,
+                None,
+                None,
+                None,
+                inference.profile.profile_id if inference.profile else None,
+            )
+            propositions.append(proposition)
+            content = {
+                "proposition_id": source_outcome.clob_token_id,
+                "market_id": market.market_id,
+                "assessor_type": "deterministic_extractor",
+                "model_role": None,
+                "model_version": None,
+                "inference_fingerprint": None,
+                "status": extracted.status,
+                "confidence": 1.0 if extracted.status == "exact" else 0.0,
+                "parsed_json": json.dumps(
+                    parsed.model_dump(mode="json"), sort_keys=True, default=str
+                ),
+                "citations": list(parsed.citations),
+                "validation_error": None,
+                "authoritative_conflicts": [],
+            }
+            assessments.append(
+                {"assessment_id": canonical_json_sha256(content), **content}
+            )
+    return ParsingStageResult(
+        propositions=sorted(
+            propositions, key=lambda row: str(row["proposition_id"])
+        ),
+        parse_assessments=sorted(
+            assessments, key=lambda row: str(row["assessment_id"])
+        ),
+        quarantines=[],
     )
 
 
@@ -2740,6 +2740,80 @@ def _hydrate_deterministic_candidates(
                 "Candidate workspace deterministic identity does not match current rules"
             )
         row["_deterministic"] = relation
+        a = by_id[str(row["proposition_a_id"])]
+        b = by_id[str(row["proposition_b_id"])]
+        rule_id = str(relation["rule_id"])
+        proof_scope_key = _deterministic_proof_scope(rule_id, a, b)
+        source_spans_json = json.dumps(
+            {
+                "A": _decoded_source_spans(a.get("source_spans_json")),
+                "B": _decoded_source_spans(b.get("source_spans_json")),
+            },
+            sort_keys=True,
+        )
+        applicability_fingerprint = _text_hash(
+            "|".join(
+                (
+                    str(a.get("proof_scope_key") or ""),
+                    str(b.get("proof_scope_key") or ""),
+                    rule_id,
+                )
+            )
+        )
+        evidence_tier = (
+            "source_contract"
+            if rule_id.startswith("same_market.")
+            else "deterministic_rule"
+        )
+        relation.update(
+            _evidence_tier=evidence_tier,
+            _source_spans_json=source_spans_json,
+            _rule_applicability_fingerprint=applicability_fingerprint,
+            _proof_scope_key=proof_scope_key,
+        )
+        row.update(
+            evidence_tier=evidence_tier,
+            extractor_id=a.get("extractor_id") or b.get("extractor_id"),
+            extractor_version=(
+                a.get("extractor_version") or b.get("extractor_version")
+            ),
+            source_spans_json=source_spans_json,
+            rule_applicability_fingerprint=applicability_fingerprint,
+            proof_scope_key=proof_scope_key,
+        )
+
+
+def _deterministic_proof_scope(
+    rule_id: str,
+    a: dict[str, Any],
+    b: dict[str, Any],
+) -> str:
+    """Bind a deterministic proof to both propositions and its exact rule."""
+
+    fields = (
+        "market_id",
+        "event_id",
+        "event_slug",
+        "subject",
+        "predicate",
+        "object",
+        "operator",
+        "threshold",
+        "unit",
+        "time_start",
+        "time_end",
+        "competition",
+        "event_scope",
+        "jurisdiction",
+        "polarity",
+    )
+    return canonical_json_sha256(
+        {
+            "rule_id": rule_id,
+            "A": {field: a.get(field) for field in fields},
+            "B": {field: b.get(field) for field in fields},
+        }
+    )
 
 
 def _automated_rule_gates() -> dict[str, Any]:
@@ -2926,7 +3000,23 @@ def _score_nli_candidate_batches(
             config.nli_model,
             config.nli_revision,
         )
+    recorder = _ACTIVE_PROGRESS.get()
+    cutoff = (
+        recorder.started + config.deadline_seconds - 300.0
+        if recorder is not None
+        else None
+    )
     for batch in candidate_store.inference_batches(batch_size=512):
+        if cutoff is not None and time.perf_counter() >= cutoff:
+            exhausted = candidate_store.mark_deadline_exhausted()
+            if recorder is not None:
+                recorder.event(
+                    "deadline_cutoff",
+                    stage="nli",
+                    unassessed_pairs=exhausted,
+                    deadline_seconds=config.deadline_seconds,
+                )
+            break
         _apply_nli_scores(
             batch,
             propositions,
@@ -2958,7 +3048,29 @@ def _classify_candidate_batches(
     edges: list[dict[str, Any]] = []
     assessments: list[dict[str, Any]] = []
     quarantines: list[dict[str, Any]] = []
-    for batch in candidate_store.inference_batches(batch_size=512):
+    recorder = _ACTIVE_PROGRESS.get()
+    cutoff = (
+        recorder.started + config.deadline_seconds - 300.0
+        if recorder is not None
+        else None
+    )
+    # Cutoff checks must happen frequently enough that one admitted dual-model
+    # batch can drain inside the five-minute reserve on a local M4. Throughput
+    # still comes from bounded HTTP concurrency and server-side batching.
+    scheduling_batch_size = max(1, min(16, config.llm_concurrency * 2))
+    for batch in candidate_store.inference_batches(
+        batch_size=scheduling_batch_size
+    ):
+        if cutoff is not None and time.perf_counter() >= cutoff:
+            exhausted = candidate_store.mark_deadline_exhausted()
+            if recorder is not None:
+                recorder.event(
+                    "deadline_cutoff",
+                    stage="generative_consensus",
+                    unassessed_pairs=exhausted,
+                    deadline_seconds=config.deadline_seconds,
+                )
+            break
         result = _classify_candidates(
             batch,
             propositions,
@@ -3114,6 +3226,34 @@ def _classify_candidates(
                 "automation_profile_id": (
                     inference.profile.profile_id if inference.profile else None
                 ),
+                "evidence_tier": (
+                    "generative_consensus" if consensus.status == "agreed" else None
+                ),
+                "extractor_id": by_id[a_id].get("extractor_id")
+                or by_id[b_id].get("extractor_id"),
+                "extractor_version": by_id[a_id].get("extractor_version")
+                or by_id[b_id].get("extractor_version"),
+                "source_spans_json": json.dumps(
+                    {
+                        "A": _decoded_source_spans(
+                            by_id[a_id].get("source_spans_json")
+                        ),
+                        "B": _decoded_source_spans(
+                            by_id[b_id].get("source_spans_json")
+                        ),
+                    },
+                    sort_keys=True,
+                ),
+                "rule_applicability_fingerprint": inference.fingerprints[
+                    "consensus"
+                ],
+                "proof_scope_key": canonical_json_sha256(
+                    {
+                        "pair_id": pair_id,
+                        "relation": relation,
+                        "consensus": inference.fingerprints["consensus"],
+                    }
+                ),
             }
         )
         accepted_label = relation not in {None, "unrelated", "uncertain"}
@@ -3154,6 +3294,14 @@ def _classify_candidates(
                 primary,
                 relation,
                 confidence,
+            )
+            relation_row.update(
+                _evidence_tier="generative_consensus",
+                _source_spans_json=candidate.get("source_spans_json"),
+                _rule_applicability_fingerprint=candidate.get(
+                    "rule_applicability_fingerprint"
+                ),
+                _proof_scope_key=candidate.get("proof_scope_key"),
             )
             edges.append(
                 _logic_edge_row(
@@ -3505,7 +3653,49 @@ def _logic_edge_row(
         "verifier_inference_fingerprint": verifier_inference_fingerprint,
         "consensus_fingerprint": consensus_fingerprint,
         "automation_profile_id": automation_profile_id,
+        "evidence_tier": (
+            relation.get("_evidence_tier")
+            or (
+                "generative_consensus"
+                if discovery_method == "generative_consensus"
+                else "deterministic_rule"
+            )
+        ),
+        "extractor_id": src.get("extractor_id") or dst.get("extractor_id"),
+        "extractor_version": src.get("extractor_version") or dst.get("extractor_version"),
+        "source_spans_json": relation.get("_source_spans_json")
+        or json.dumps(
+            {
+                "src": _decoded_source_spans(src.get("source_spans_json")),
+                "dst": _decoded_source_spans(dst.get("source_spans_json")),
+            },
+            sort_keys=True,
+        ),
+        "rule_applicability_fingerprint": relation.get(
+            "_rule_applicability_fingerprint"
+        )
+        or _text_hash(
+            "|".join(
+                (
+                    str(src.get("proof_scope_key") or ""),
+                    str(dst.get("proof_scope_key") or ""),
+                    str(rule_id or discovery_method),
+                )
+            )
+        ),
+        "proof_scope_key": relation.get("_proof_scope_key")
+        or src.get("proof_scope_key")
+        or dst.get("proof_scope_key"),
     }
+
+
+def _decoded_source_spans(value: object) -> object:
+    if not isinstance(value, str):
+        return []
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError:
+        return []
 
 
 def _solve_logic_edges(
@@ -4148,6 +4338,8 @@ def _write_discovery_artifacts(
                 "schema_version": VIEWER_ARTIFACT_VERSION,
                 "api_version": VIEWER_API_VERSION,
                 "layout_version": VISUALIZATION_LAYOUT_VERSION,
+                "build_mode": "full",
+                "validation_status": "EXPERIMENTAL_FULL",
                 "source_watermark": source_watermark,
                 "graph_content_fingerprint": canonical_json_sha256(
                     {
@@ -4178,7 +4370,7 @@ def _write_discovery_artifacts(
                     "WHERE discovery_method = 'generative_consensus'"
                 ),
                 "unclassified_budget_pairs": (
-                    "WHERE status = 'not_classified_budget'"
+                    "WHERE status IN ('not_classified_budget','deadline_budget_exhausted')"
                 ),
             }.items()
         }
@@ -4523,6 +4715,63 @@ def _validate_discovery_artifacts(db: DuckDB, directory: Path) -> None:
         raise RuntimeError(
             "execution_plan.parquet contains invalid reuse evidence"
         )
+    invalid_edge_provenance = int(
+        db.scalar(
+            """
+            SELECT count(*) FROM logic_edges_v
+            WHERE evidence_tier NOT IN (
+                    'source_contract','deterministic_rule','generative_consensus'
+                  )
+               OR source_spans_json IS NULL
+               OR proof_scope_key IS NULL
+               OR (
+                    discovery_method='deterministic'
+                    AND (
+                        rule_id IS NULL OR extractor_id IS NULL
+                        OR rule_applicability_fingerprint IS NULL
+                        OR (
+                            rule_id LIKE 'same_market.%'
+                            AND evidence_tier!='source_contract'
+                        )
+                    )
+               )
+               OR (
+                    discovery_method='generative_consensus'
+                    AND (
+                        evidence_tier!='generative_consensus'
+                        OR primary_model_version IS NULL
+                        OR verifier_model_version IS NULL
+                        OR primary_inference_fingerprint IS NULL
+                        OR verifier_inference_fingerprint IS NULL
+                        OR consensus_fingerprint IS NULL
+                        OR automation_profile_id IS NULL
+                    )
+               )
+            """
+        )
+        or 0
+    )
+    invalid_candidate_provenance = int(
+        db.scalar(
+            """
+            SELECT count(*) FROM relation_candidates_v
+            WHERE deterministic_relation IS NOT NULL
+              AND (
+                    evidence_tier IS NULL OR extractor_id IS NULL
+                    OR extractor_version IS NULL OR source_spans_json IS NULL
+                    OR rule_applicability_fingerprint IS NULL
+                    OR proof_scope_key IS NULL
+                  )
+            """
+        )
+        or 0
+    )
+    if invalid_edge_provenance or invalid_candidate_provenance:
+        raise RuntimeError(
+            "Discovery provenance validation failed: "
+            f"edges={invalid_edge_provenance}, "
+            f"candidates={invalid_candidate_provenance}"
+        )
 
 
 def _discovery_manifest(
@@ -4554,6 +4803,9 @@ def _discovery_manifest(
     manifest = {
         "command": "discover",
         "version": __version__,
+        "build_mode": "full",
+        "validation_status": "EXPERIMENTAL_FULL",
+        "deadline": stats.get("deadline"),
         "input": str(input_path),
         "input_hash": input_hash,
         "input_schema": source_schema,
@@ -4636,6 +4888,19 @@ def _discovery_manifest(
             "domain_taxonomy": DOMAIN_TAXONOMY_VERSION,
             "rules": RULE_VERSION,
             "retrieval": RETRIEVAL_VERSION,
+            "parse_fallback": PARSE_FALLBACK_VERSION,
+            "ann": {
+                "implementation": "usearch",
+                "version": "2.26.0",
+                "metric": "cos",
+                "dtype": "f32",
+                "connectivity": 32,
+                "construction_expansion": 128,
+                "search_expansion": 128,
+                "query_neighbors": 64,
+                "exact_reranking": "exact-cosine-score-id-v1",
+                "construction_threads": 1,
+            },
             "candidate_state": CANDIDATE_STATE_VERSION,
             "execution_plan": EXECUTION_PLAN_VERSION,
             "publication": PUBLICATION_VERSION,

@@ -58,15 +58,19 @@ class DoctorReport(BaseModel):
 def doctor(
     input_path: Path,
     out_dir: Path,
-    cache_dir: Path,
-    primary_manifest_path: Path,
-    verifier_manifest_path: Path,
+    mode: Literal["fast", "full"],
+    cache_dir: Path | None,
+    automation_profile_path: Path | None,
+    primary_manifest_path: Path | None,
+    verifier_manifest_path: Path | None,
     primary_base_url: str,
     verifier_base_url: str,
-    compute_profile: Path,
+    compute_profile: Path | None,
     *,
     allow_remote: bool = False,
 ) -> DoctorReport:
+    if mode not in {"fast", "full"}:
+        raise ValueError("doctor mode must be fast or full")
     checks: list[Check] = []
     estimates: dict[str, object] = {}
     try:
@@ -103,6 +107,65 @@ def doctor(
         )
     except Exception as exc:
         checks.append(Check(name="input_schema", status="fail", message=str(exc)))
+
+    for package, check_name in (("duckdb", "catalog_database"), ("pysat", "solver")):
+        available = importlib.util.find_spec(package) is not None
+        checks.append(
+            Check(
+                name=check_name,
+                status="pass" if available else "fail",
+                message=f"{package} {'available' if available else 'is not installed'}",
+            )
+        )
+    capacity_root = out_dir.parent.resolve()
+    while not capacity_root.exists() and capacity_root != capacity_root.parent:
+        capacity_root = capacity_root.parent
+    usage = shutil.disk_usage(capacity_root)
+    estimates["disk_free_bytes"] = usage.free
+    checks.append(
+        Check(
+            name="output_capacity",
+            status="pass" if usage.free >= 5 * 1024**3 else "warn",
+            message=f"{usage.free} bytes free",
+        )
+    )
+    if mode == "fast":
+        budget = (
+            Path(__file__).resolve().parent
+            / "benchmarks"
+            / "m4-v0.11-fast-performance-budget.json"
+        )
+        checks.append(
+            Check(
+                name="fast_performance_budget",
+                status="pass" if budget.is_file() else "warn",
+                message=("compatible v0.11 budget is present" if budget.is_file() else "no local M4 fast performance budget found"),
+            )
+        )
+        return DoctorReport(
+            passed=not any(check.status == "fail" for check in checks),
+            checks=tuple(checks),
+            estimates=estimates,
+        )
+
+    if any(path is None for path in (cache_dir, automation_profile_path, primary_manifest_path, verifier_manifest_path, compute_profile)):
+        checks.append(
+            Check(
+                name="full_mode_configuration",
+                status="fail",
+                message="full mode requires cache, automation profile, both manifests, and compute profile",
+            )
+        )
+        return DoctorReport(
+            passed=False,
+            checks=tuple(checks),
+            estimates=estimates,
+        )
+    assert cache_dir is not None
+    assert automation_profile_path is not None
+    assert primary_manifest_path is not None
+    assert verifier_manifest_path is not None
+    assert compute_profile is not None
 
     for role, path, endpoint in (
         ("primary", primary_manifest_path, primary_base_url),
@@ -143,7 +206,7 @@ def doctor(
             Check(name="consensus_model_pair", status="fail", message=str(exc))
         )
 
-    profile_path = out_dir / "automation_profile.json"
+    profile_path = automation_profile_path
     if profile_path.is_file():
         try:
             profile = load_automation_profile(profile_path)
@@ -198,7 +261,7 @@ def doctor(
             Check(
                 name="automation_profile",
                 status="warn",
-                message="qualification will create a new automation profile",
+                message="full discovery requires an exact precomputed automation profile",
             )
         )
 
@@ -241,7 +304,7 @@ def doctor(
 
     for package, check_name in (
         ("sentence_transformers", "embedding_and_nli"),
-        ("pysat", "solver"),
+        ("usearch", "ann_retrieval"),
     ):
         available = importlib.util.find_spec(package) is not None
         checks.append(
@@ -263,18 +326,6 @@ def doctor(
             )
         except ValueError as exc:
             checks.append(Check(name="compute_profile", status="fail", message=str(exc)))
-    capacity_root = out_dir.parent.resolve()
-    while not capacity_root.exists() and capacity_root != capacity_root.parent:
-        capacity_root = capacity_root.parent
-    usage = shutil.disk_usage(capacity_root)
-    estimates["disk_free_bytes"] = usage.free
-    checks.append(
-        Check(
-            name="output_capacity",
-            status="pass" if usage.free >= 5 * 1024**3 else "warn",
-            message=f"{usage.free} bytes free",
-        )
-    )
     return DoctorReport(
         passed=not any(check.status == "fail" for check in checks),
         checks=tuple(checks),
@@ -288,15 +339,26 @@ def run_summary(out_dir: Path) -> dict[str, Any]:
     if not manifest_path.is_file():
         raise ValueError("Discovery output is incomplete")
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    input_metadata = manifest.get("input")
+    stats = manifest.get("stats")
     result = {
         "version": manifest.get("version"),
-        "input_hash": manifest.get("input_hash"),
+        "build_mode": manifest.get("build_mode"),
+        "validation_status": manifest.get("validation_status"),
+        "deadline": manifest.get("deadline"),
+        "input_hash": manifest.get("input_hash") or (
+            input_metadata.get("sha256")
+            if isinstance(input_metadata, dict)
+            else None
+        ),
         "qualification": manifest.get("qualification"),
         "models": manifest.get("models"),
-        "stats": manifest.get("stats"),
+        "stats": stats,
         "cache": manifest.get("cache"),
         "compute": manifest.get("compute"),
-        "stage_timings": manifest.get("stage_timings"),
+        "stage_timings": manifest.get("stage_timings") or (
+            stats.get("stage_metrics") if isinstance(stats, dict) else None
+        ),
     }
     for name, key in (
         ("coverage_summary.json", "coverage"),

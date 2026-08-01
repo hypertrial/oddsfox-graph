@@ -71,6 +71,8 @@ def test_removed_commands_are_rejected(command: str) -> None:
 def test_removed_discovery_flags_are_rejected(flag: str) -> None:
     required = [
         "discover",
+        "--mode",
+        "full",
         "--input",
         "input.parquet",
         "--out",
@@ -89,22 +91,34 @@ def test_removed_discovery_flags_are_rejected(flag: str) -> None:
     assert exc.value.code == 2
 
 
-def test_discovery_all_propositions_is_explicit_and_exclusive() -> None:
-    required = [
+def test_discovery_requires_an_explicit_mode_and_defaults_to_full_catalog() -> None:
+    common = [
         "discover",
         "--input", "input.parquet",
         "--out", "out",
+    ]
+    with pytest.raises(SystemExit) as exc:
+        build_parser().parse_args(common)
+    assert exc.value.code == 2
+
+    fast = build_parser().parse_args([*common, "--mode", "fast"])
+    assert fast.mode == "fast"
+    assert fast.max_propositions is None
+
+    full = [
+        *common,
+        "--mode", "full",
         "--cache-dir", "cache",
+        "--automation-profile", "profile.json",
         "--primary-model-manifest", "primary.json",
         "--verifier-model-manifest", "verifier.json",
         "--compute-profile", "compute.json",
     ]
-    args = build_parser().parse_args([*required, "--all-propositions"])
-    assert args.all_propositions is True
+    args = build_parser().parse_args(full)
+    assert args.mode == "full"
+    assert args.max_propositions is None
     with pytest.raises(SystemExit) as exc:
-        build_parser().parse_args(
-            [*required, "--all-propositions", "--max-propositions", "10"]
-        )
+        build_parser().parse_args([*common, "--mode", "fast", "--all-propositions"])
     assert exc.value.code == 2
 
 

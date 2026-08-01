@@ -525,6 +525,9 @@ def _edge_filter(filters: GraphFilter, alias: str) -> tuple[str, list[object]]:
     if filters.discovery_methods:
         clauses.append(f"{alias}.discovery_method IN (SELECT unnest(?))")
         params.append(list(filters.discovery_methods))
+    if filters.evidence_tiers:
+        clauses.append(f"{alias}.evidence_tier IN (SELECT unnest(?))")
+        params.append(list(filters.evidence_tiers))
     return " AND " + " AND ".join(clauses), params
 
 
@@ -536,6 +539,9 @@ def _aggregate_edge_filter(filters: GraphFilter) -> tuple[str, list[object]]:
         params.append(list(filters.relations))
     elif not filters.include_compatible:
         clauses.append("edge_type != 'compatible'")
+    if filters.evidence_tiers:
+        clauses.append("evidence_tier IN (SELECT unnest(?))")
+        params.append(list(filters.evidence_tiers))
     return " AND " + " AND ".join(clauses), params
 
 
@@ -598,7 +604,7 @@ def _event_edge(row: dict[str, object]) -> ExplorerEdge:
     target = str(row["dst_event_key"])
     relation = cast(str, row["edge_type"])
     identity = json.dumps(
-        [source, target, relation],
+        [source, target, relation, row.get("evidence_tier")],
         ensure_ascii=False,
         separators=(",", ":"),
     )
@@ -611,6 +617,7 @@ def _event_edge(row: dict[str, object]) -> ExplorerEdge:
             "count": _int(row["edge_count"]),
             "confidence": _float(row["mean_confidence"]),
             "discovery_method": "aggregate",
+            "evidence_tier": str(row.get("evidence_tier") or "aggregate"),
             "aggregation_only": True,
         }
     )
@@ -629,6 +636,7 @@ def _component_edge(row: dict[str, object]) -> ExplorerEdge:
             "count": _int(row["edge_count"]),
             "confidence": _float(row["confidence"]),
             "discovery_method": "aggregate",
+            "evidence_tier": "aggregate",
             "aggregation_only": True,
         }
     )
@@ -644,6 +652,7 @@ def _logic_edge(row: dict[str, object]) -> ExplorerEdge:
             "count": 1,
             "confidence": _float(row["confidence"]),
             "discovery_method": str(row["discovery_method"]),
+            "evidence_tier": str(row.get("evidence_tier") or "deterministic_rule"),
             "aggregation_only": False,
         }
     )

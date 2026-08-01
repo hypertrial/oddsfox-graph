@@ -6,31 +6,33 @@ Current commands:
 - runtime: `model-manifest`, `model-check`;
 - explorer: `serve`, `explorer-export`;
 - graph: `search`, `nodes`, `edges`, `condition`, `explain`, `explain-edge`,
-  `prove`, `why-not`.
+  `prove`, and `why-not`.
 
-`discover`, `qualify`, and `doctor` use the compact input, cache, two model
-manifests/endpoints, and compute profile. Shared runtime flags are
-`--primary-model-manifest`, `--verifier-model-manifest`, `--primary-base-url`,
-`--verifier-base-url`, and `--allow-remote-inference`.
+`discover --mode fast` needs only `--input` and `--out`. It uses the complete
+catalog unless `--max-propositions N` is set. Fast supports
+`--incremental-from`, `--deadline-seconds`, `--progress-format`, and
+`--output-format`, and rejects all semantic-inference options.
 
-Discovery accepts exactly one of `--max-propositions N` and `--all-propositions`.
-The latter selects every complete market in the input. Use
-`--classification-coverage-target` and `--max-visible-coverage-gap` to make
-publication fail when the bounded classifier did not cover enough eligible pairs.
-`--progress-format auto|plain|json|quiet` writes progress to stderr. Final command
-results use `--output-format`.
+`discover --mode full` additionally requires `--cache-dir`,
+`--automation-profile`, `--primary-model-manifest`,
+`--verifier-model-manifest`, `--primary-base-url`, `--verifier-base-url`, and
+`--compute-profile`. Existing `--classification-coverage-target`,
+`--max-visible-coverage-gap`, confidence thresholds, candidate/NLI limits, and
+model-generation settings remain full-only controls. `--allow-remote-inference`
+is explicit; URLs with credentials, queries, or fragments are rejected.
 
-`serve --out OUTPUT` starts a read-only loopback service. `--host` rejects
-non-loopback addresses; `--port`, `--max-response-nodes`, and
-`--max-response-edges` are validated. `--open-browser` is optional.
+`doctor --mode fast|full` checks only resources needed by that mode. `qualify`
+remains out of band and creates the exact full-mode automation profile; its time
+is not part of the full discovery deadline. `--progress-format
+auto|plain|json|quiet` writes events to stderr. Final results use
+`--output-format table|json|jsonl` where supported.
 
-`explorer-export --out OUTPUT --destination DIRECTORY --scope
-event|component|neighborhood --identifier ID` creates a deterministic static
-snapshot. It fails rather than silently truncating the requested scope.
+`serve --out OUTPUT` starts a read-only loopback service. `explorer-export
+--out OUTPUT --destination DIRECTORY --scope event|component|neighborhood
+--identifier ID` creates a bounded portable snapshot and fails on truncation.
 
-Every graph query accepts `--output-format table|json|jsonl`. `prove` takes
-`--from`, `--to`, `--max-hops`, and `--max-paths`; traversal is capped at eight
-hops, twenty returned paths, and a bounded number of generated search states.
-`why-not` distinguishes
-accepted, solver-rejected, quarantined parse, disagreement, assumption, invalid
-citation, NLI veto, threshold, inference, retrieval, and unknown-node states.
+All graph queries accept table, JSON, or JSONL. `prove` takes `--from`, `--to`,
+`--max-hops`, and `--max-paths`. `why-not` includes accepted, solver-rejected,
+parse/model/citation/assumption/NLI/threshold failures,
+`not_applicable_to_deterministic_rules`, `full_mode_not_run`,
+`deadline_budget_exhausted`, `not_retrieved`, and `unknown_node`.

@@ -47,6 +47,12 @@ CANDIDATE_COLUMNS = {
     "verifier_inference_fingerprint": "VARCHAR",
     "consensus_fingerprint": "VARCHAR",
     "automation_profile_id": "VARCHAR",
+    "evidence_tier": "VARCHAR",
+    "extractor_id": "VARCHAR",
+    "extractor_version": "VARCHAR",
+    "source_spans_json": "VARCHAR",
+    "rule_applicability_fingerprint": "VARCHAR",
+    "proof_scope_key": "VARCHAR",
 }
 
 CANDIDATE_BLOCK_COLUMNS = {
@@ -303,7 +309,7 @@ class CandidateStore:
                 )::BIGINT AS assessed,
                 count(*) FILTER (
                     WHERE deterministic_relation IS NULL
-                      AND status = 'not_classified_budget'
+                      AND status IN ('not_classified_budget', 'deadline_budget_exhausted')
                 )::BIGINT AS unclassified
             FROM relation_candidates_work
             """
@@ -316,6 +322,27 @@ class CandidateStore:
             "unclassified": int(cast(int, row["unclassified"])),
             "coverage": 1.0 if eligible == 0 else assessed / eligible,
         }
+
+    def mark_deadline_exhausted(self) -> int:
+        """Mark queued work that was not completed before the scheduling cutoff."""
+
+        self.db.execute(
+            """
+            UPDATE relation_candidates_work AS c
+            SET status='deadline_budget_exhausted'
+            FROM inference_candidate_queue q
+            WHERE c.proposition_a_id=q.proposition_a_id
+              AND c.proposition_b_id=q.proposition_b_id
+              AND c.discovery_method IS NULL
+              AND c.status IN ('pending','not_classified_budget')
+            """
+        )
+        return int(
+            self.db.scalar(
+                "SELECT count(*) FROM relation_candidates_work WHERE status='deadline_budget_exhausted'"
+            )
+            or 0
+        )
 
     def inference_batches(
         self,
@@ -718,6 +745,21 @@ class CandidateStore:
             ),
         )
 
+    def update_deterministic_rows(self, rows: list[dict[str, Any]]) -> None:
+        """Persist deterministic proof provenance after rule revalidation."""
+
+        self._update_columns(
+            rows,
+            (
+                "evidence_tier",
+                "extractor_id",
+                "extractor_version",
+                "source_spans_json",
+                "rule_applicability_fingerprint",
+                "proof_scope_key",
+            ),
+        )
+
     def update_generative_rows(self, rows: list[dict[str, Any]]) -> None:
         self._update_columns(
             rows,
@@ -743,6 +785,12 @@ class CandidateStore:
                 "verifier_inference_fingerprint",
                 "consensus_fingerprint",
                 "automation_profile_id",
+                "evidence_tier",
+                "extractor_id",
+                "extractor_version",
+                "source_spans_json",
+                "rule_applicability_fingerprint",
+                "proof_scope_key",
             ),
         )
 

@@ -22,10 +22,10 @@ test.beforeEach(async ({ page }) => {
     let body: unknown;
     if (url.pathname.endsWith("/meta")) {
       body = {
-        package_version: "0.10.0",
-        viewer: {},
+        package_version: "0.11.0",
+        viewer: { build_mode: "fast", validation_status: "DETERMINISTIC_VALIDATED", evidence_tiers: ["source_contract", "deterministic_rule"] },
         coverage: { classification_coverage: 0.98, all_market_selection: true },
-        build: {},
+        build: { build_mode: "fast", validation_status: "DETERMINISTIC_VALIDATED" },
       };
     } else if (url.pathname.endsWith("/overview")) {
       body = { level: "event", nodes: [], edges: [], truncated_nodes: false, truncated_edges: false, coverage: {} };

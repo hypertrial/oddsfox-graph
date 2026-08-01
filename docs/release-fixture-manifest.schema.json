@@ -1,12 +1,12 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "OddsFox v0.10 automated discovery and explorer release fixture",
+  "title": "OddsFox v0.11 deterministic fast-mode release fixture",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema_version", "package_version", "source_sha256", "files", "trees"],
   "properties": {
-    "schema_version": {"const": "discovery-release-fixture-v6"},
-    "package_version": {"const": "0.10.0"},
+    "schema_version": {"const": "discovery-release-fixture-v7"},
+    "package_version": {"const": "0.11.0"},
     "source_sha256": {
       "const": "790bd1595b379472ad65ba0073105b4eb630974d04e7b44d58c8a4929f274aa2"
     },
@@ -16,25 +16,17 @@
       "required": [
         "input.parquet",
         "performance_report.json",
-        "compute_profile.json",
-        "primary_model_manifest.json",
-        "verifier_model_manifest.json",
-        "automation_profile.json",
-        "qualification_report.json",
-        "qualification_cases.parquet",
         "expected_artifact_hashes.json",
-        "baselines/5000/build_manifest.json",
-        "baselines/20000/build_manifest.json",
-        "baselines/all/build_manifest.json",
-        "baselines/all/viewer_manifest.json",
-        "baselines/all/coverage_summary.json"
+        "baselines/fast/build_manifest.json",
+        "baselines/fast/viewer_manifest.json",
+        "baselines/fast/coverage_summary.json"
       ],
       "additionalProperties": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
     },
     "trees": {
       "type": "object",
       "propertyNames": {"pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+$"},
-      "required": ["cache", "baselines/5000", "baselines/20000", "baselines/all"],
+      "required": ["baselines/fast"],
       "additionalProperties": {
         "type": "object",
         "additionalProperties": false,

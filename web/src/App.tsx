@@ -1,7 +1,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import * as api from "./api";
 import { GraphCanvas } from "./GraphCanvas";
-import type { ExplorerLevel, GraphMetadata, GraphView, Relation, SearchNode } from "./types";
+import type { EvidenceTier, ExplorerLevel, GraphMetadata, GraphView, Relation, SearchNode } from "./types";
 
 const relations: Array<Relation | "all"> = [
   "all",
@@ -18,6 +18,7 @@ export function App() {
   const [level, setLevel] = useState<"component" | "event">("event");
   const [relation, setRelation] = useState<Relation | "all">("all");
   const [minConfidence, setMinConfidence] = useState(0.95);
+  const [evidenceTier, setEvidenceTier] = useState<EvidenceTier>("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<Record<string, unknown> | null>(null);
   const [query, setQuery] = useState("");
@@ -33,7 +34,7 @@ export function App() {
     setLoading(true);
     setError(null);
     try {
-      const next = await api.overview(level, relation, minConfidence, relation === "compatible");
+      const next = await api.overview(level, relation, minConfidence, relation === "compatible", evidenceTier);
       setView(next);
       setSelectedId(null);
       setDetail(null);
@@ -42,7 +43,7 @@ export function App() {
     } finally {
       setLoading(false);
     }
-  }, [level, relation, minConfidence]);
+  }, [level, relation, minConfidence, evidenceTier]);
 
   useEffect(() => {
     if (metadata !== null) return;
@@ -143,6 +144,8 @@ export function App() {
       ? (inputSelection as Record<string, unknown>).input_market_rows
       : undefined;
   const isStatic = metadata?.viewer.static === true;
+  const buildMode = String(metadata?.build.build_mode ?? metadata?.viewer.build_mode ?? "unknown");
+  const validationStatus = String(metadata?.build.validation_status ?? metadata?.viewer.validation_status ?? "unknown");
 
   return (
     <main className="app-shell">
@@ -152,6 +155,7 @@ export function App() {
           <h1>Logic Explorer</h1>
         </div>
         <div className="run-health" aria-label="Graph coverage">
+          <span className={`mode-badge mode-${buildMode}`}>{buildMode} · {validationStatus.replaceAll("_", " ")}</span>
           <span>Classification coverage</span>
           <strong>{coverage}</strong>
         </div>
@@ -196,6 +200,15 @@ export function App() {
           Relation
           <select value={relation} onChange={(event) => setRelation(event.target.value as Relation | "all")}>
             {relations.map((value) => <option key={value} value={value}>{value.replaceAll("_", " ")}</option>)}
+          </select>
+        </label>
+        <label>
+          Evidence
+          <select value={evidenceTier} onChange={(event) => setEvidenceTier(event.target.value as EvidenceTier)}>
+            <option value="all">all evidence</option>
+            <option value="source_contract">source contract</option>
+            <option value="deterministic_rule">deterministic rule</option>
+            <option value="generative_consensus">generative consensus</option>
           </select>
         </label>
         <label>

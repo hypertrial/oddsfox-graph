@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict
 
 from .._discovery.provenance import canonical_json_sha256, sha256_file
-from .contracts import GraphFilter
+from .contracts import EvidenceTier, GraphFilter
 from ..graph import Graph, Relation
 
 
@@ -124,6 +124,7 @@ def create_app(
         active_only: bool = False,
         closed_only: bool = False,
         include_compatible: bool = False,
+        evidence_tiers: list[EvidenceTier] = Query(default=[]),
         max_nodes: int = Query(default=max_response_nodes, ge=1, le=max_response_nodes),
         max_edges: int = Query(default=max_response_edges, ge=0, le=max_response_edges),
     ) -> dict[str, object]:
@@ -134,6 +135,7 @@ def create_app(
             active_only=active_only,
             closed_only=closed_only,
             include_compatible=include_compatible,
+            evidence_tiers=tuple(evidence_tiers),
         )
         return graph.overview(
             level,
@@ -182,6 +184,7 @@ def create_app(
         relations: list[Relation] = Query(default=[]),
         min_confidence: float = Query(default=0.0, ge=0.0, le=1.0),
         include_compatible: bool = False,
+        evidence_tiers: list[EvidenceTier] = Query(default=[]),
         max_nodes: int = Query(default=max_response_nodes, ge=1, le=max_response_nodes),
         max_edges: int = Query(default=max_response_edges, ge=0, le=max_response_edges),
     ) -> dict[str, object]:
@@ -192,6 +195,7 @@ def create_app(
                 relations=tuple(relations),
                 min_confidence=min_confidence,
                 include_compatible=include_compatible,
+                evidence_tiers=tuple(evidence_tiers),
             ),
             max_nodes=max_nodes,
             max_edges=max_edges,

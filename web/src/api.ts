@@ -1,4 +1,4 @@
-import type { GraphMetadata, GraphView, Relation, SearchNode } from "./types";
+import type { EvidenceTier, GraphMetadata, GraphView, Relation, SearchNode } from "./types";
 
 let staticMode = false;
 
@@ -35,6 +35,7 @@ export async function overview(
   relation: Relation | "all",
   minConfidence: number,
   includeCompatible: boolean,
+  evidenceTier: EvidenceTier,
 ): Promise<GraphView> {
   if (staticMode) {
     return filterGraphView(
@@ -42,6 +43,7 @@ export async function overview(
       relation,
       minConfidence,
       includeCompatible,
+      evidenceTier,
     );
   }
   const params = new URLSearchParams({
@@ -50,6 +52,7 @@ export async function overview(
     include_compatible: String(includeCompatible),
   });
   if (relation !== "all") params.append("relations", relation);
+  if (evidenceTier !== "all") params.append("evidence_tiers", evidenceTier);
   return json<GraphView>(`/api/v1/overview?${params}`);
 }
 
@@ -58,9 +61,11 @@ export function filterGraphView(
   relation: Relation | "all",
   minConfidence: number,
   includeCompatible: boolean,
+  evidenceTier: EvidenceTier = "all",
 ): GraphView {
   const edges = view.edges.filter((edge) => {
     if (edge.confidence < minConfidence) return false;
+    if (evidenceTier !== "all" && edge.evidence_tier !== evidenceTier) return false;
     if (relation !== "all") return edge.relation === relation;
     return includeCompatible || edge.relation !== "compatible";
   });
