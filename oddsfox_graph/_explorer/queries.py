@@ -754,7 +754,7 @@ class ExplorerStore:
                     """,
                     [event_ids, event_ids, *edge_params, edge_limit + 1],
                 )
-                if event_ids and edge_limit
+                if event_ids
                 else []
             )
         finally:

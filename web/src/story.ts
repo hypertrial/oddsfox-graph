@@ -114,8 +114,6 @@ export function storyFrame(story: RecordingStory, requestedFrame: number): Story
       const holdFrame = frame - shot.reveal_end_frame;
       const pulse = Math.sin((holdFrame / story.viewport.fps) * Math.PI * 1.25);
       emphasis = 0.92 + 0.08 * pulse * pulse;
-    } else {
-      emphasis = reveal * 0.8;
     }
   }
   return {

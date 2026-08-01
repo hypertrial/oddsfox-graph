@@ -56,6 +56,7 @@ describe("deterministic recording story", () => {
     expect(storyFrame(story, 90).highlightedEdge).toBeNull();
     expect([...storyFrame(story, 150).highlightedNodes]).toEqual(["a", "b"]);
     expect(storyFrame(story, 150).highlightedEdge).toBeNull();
+    expect(storyFrame(story, 179).emphasis).toBe(0);
     expect(storyFrame(story, 180).highlightedEdge).toBe("p1");
     expect(storyFrame(story, 180).emphasis).toBeGreaterThan(0);
     expect(storyFrame(story, story.timeline.frame_count - 1).camera).toEqual({

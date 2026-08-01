@@ -48,7 +48,7 @@ files = ["oddsfox_graph"]
 strict = true
 
 [[tool.mypy.overrides]]
-module = ["duckdb", "numpy", "sentence_transformers", "usearch", "pysat.*"]
+module = ["duckdb", "numpy", "sentence_transformers", "usearch.*", "pysat.*"]
 ignore_missing_imports = true
 
 [project.scripts]

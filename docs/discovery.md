@@ -4,6 +4,8 @@
 `--max-propositions` is absent, both modes select the complete valid catalog in
 stable market order. The canonical release file has 94,781 rows, four rejected
 invalid rows, 94,777 selected markets, and 189,570 propositions.
+The output must not be the input file or an ancestor directory containing it;
+discovery rejects either target before publication.
 
 ## Fast mode
 
@@ -23,6 +25,9 @@ outcomes as `mutually_exclusive`, plus independently qualified exact equivalence
 numeric containment/disjointness, time containment, stage implication, and
 strict single-winner exclusion. Each enabled rule requires 100 positive and 100
 adversarial generated cases with no false acceptance.
+Cross-market deterministic rules require the same authoritative event scope.
+Negated bounded ranges and negated equality are non-convex sets, so fast mode
+does not reduce them to unsafe single-interval numeric proofs.
 
 ## Full mode
 
@@ -54,5 +59,6 @@ state, outputs, and release fixtures are incompatible.
 Every output records `build_mode`, `validation_status`, evidence tier, extractor
 and rule bindings, source spans, proof scope, assessed/unassessed counts, cutoff,
 deadline state, stage wall time, RSS, DuckDB/spill bytes, component sizes, and
-publication bytes. `DETERMINISTIC_VALIDATED` applies only to fast outputs;
+publication bytes. Deadline status covers the manifest-complete published graph.
+`DETERMINISTIC_VALIDATED` applies only to fast outputs;
 v0.11 full outputs are always `EXPERIMENTAL_FULL`.

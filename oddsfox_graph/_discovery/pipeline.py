@@ -108,6 +108,7 @@ from .incremental import EXECUTION_PLAN_COLUMNS, ExecutionPlan
 from .publication import (
     copy_sorted_parquet as _copy_table,
     publish_directory_atomically,
+    validate_source_output_paths,
     write_conditionals,
 )
 from .types import (
@@ -1188,6 +1189,7 @@ def _discover_impl(
     out_dir = out_dir.resolve()
     if not input_path.is_file():
         raise ValueError(f"Input parquet does not exist: {input_path}")
+    validate_source_output_paths(input_path, out_dir)
     config.validate()
 
     out_dir.parent.mkdir(parents=True, exist_ok=True)
@@ -1792,6 +1794,32 @@ def _discover_impl(
                 inference,
             )
             discovery_publication.write_manifest_last(out_dir, manifest)
+            ready_elapsed_seconds = recorder.runtime_seconds()
+            if (
+                ready_elapsed_seconds > config.deadline_seconds
+                and stats["deadline"]["met"]
+            ):
+                stats["runtime_seconds"] = ready_elapsed_seconds
+                stats["deadline"] = {
+                    **stats["deadline"],
+                    "elapsed_seconds": ready_elapsed_seconds,
+                    "met": False,
+                }
+                write_summary_report(out_dir, stats)
+                manifest = _discovery_manifest(
+                    input_path,
+                    input_hash,
+                    artifact_hashes,
+                    source_schema,
+                    stats,
+                    config,
+                    cache,
+                    state,
+                    recorder.timings,
+                    state_hashes,
+                    inference,
+                )
+                discovery_publication.write_manifest_last(out_dir, manifest)
         except Exception:
             publication_swap.rollback()
             raise
@@ -1849,6 +1877,7 @@ def _qualify_only_impl(
     out_dir = out_dir.resolve()
     if not input_path.is_file():
         raise ValueError(f"Input parquet does not exist: {input_path}")
+    validate_source_output_paths(input_path, out_dir)
     inference = _prepare_inference_context(
         config,
         out_dir,

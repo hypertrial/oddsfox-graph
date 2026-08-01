@@ -7,6 +7,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from oddsfox_graph._discovery import pipeline as pipeline_module
 from oddsfox_graph._discovery.contracts import (
     AtomicPairAssessment,
     DiscoveryConfig,
@@ -376,6 +377,58 @@ def test_published_consensus_edge_uses_lower_model_confidence(
         and row["verifier_assessment_id"] in assessment_ids
         for row in confidences
     )
+
+
+def test_full_deadline_includes_manifest_publication(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    catalog = tmp_path / "catalog.parquet"
+    _write_catalog(catalog)
+    manifest_written = False
+    original_write_manifest = (
+        pipeline_module.discovery_publication.write_manifest_last
+    )
+
+    def write_manifest(*args: object, **kwargs: object) -> None:
+        nonlocal manifest_written
+        original_write_manifest(*args, **kwargs)
+        manifest_written = True
+
+    monkeypatch.setattr(
+        pipeline_module.discovery_publication,
+        "write_manifest_last",
+        write_manifest,
+    )
+    monkeypatch.setattr(
+        pipeline_module.StageRecorder,
+        "runtime_seconds",
+        lambda _self: 361.0 if manifest_written else 1.0,
+    )
+    config = DiscoveryConfig(
+        cache_dir=tmp_path / "cache",
+        max_propositions=2,
+        max_candidates=100,
+        max_llm_pairs=2,
+        top_k=1,
+        deadline_seconds=360.0,
+        progress_format="quiet",
+    )
+    out = tmp_path / "out"
+    stats = discover(
+        catalog,
+        out,
+        config=config,
+        _primary_client=_FakeClient(config.primary_model),
+        _verifier_client=_FakeClient(config.verifier_model),
+        _embedder=_embeddings,
+    )
+    manifest = json.loads(
+        (out / "build_manifest.json").read_text(encoding="utf-8")
+    )
+    assert stats["deadline"]["met"] is False
+    assert manifest["deadline"]["met"] is False
+    assert manifest["deadline"]["elapsed_seconds"] == 361.0
 
 
 def test_aggregate_endpoint_loss_aborts_and_transient_cache_recovers(

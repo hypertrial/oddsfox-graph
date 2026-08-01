@@ -12,6 +12,8 @@ Current commands:
 catalog unless `--max-propositions N` is set. Fast supports
 `--incremental-from`, `--deadline-seconds`, `--progress-format`, and
 `--output-format`, and rejects all semantic-inference options.
+For `discover` and `qualify`, the output cannot be the input file or an ancestor
+directory containing it.
 
 `discover --mode full` additionally requires `--cache-dir`,
 `--automation-profile`, `--primary-model-manifest`,

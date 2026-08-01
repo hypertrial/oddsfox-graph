@@ -212,6 +212,31 @@ def test_fast_mode_rejects_full_flags_and_stale_baselines(tmp_path: Path) -> Non
         )
 
 
+@pytest.mark.parametrize("output_kind", ("ancestor", "input"))
+def test_fast_mode_rejects_output_that_could_consume_its_input(
+    tmp_path: Path,
+    output_kind: str,
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    catalog = source / "catalog.parquet"
+    _write_catalog(catalog)
+    original = catalog.read_bytes()
+    marker = source / "unrelated.txt"
+    marker.write_text("preserve me", encoding="utf-8")
+    out = source if output_kind == "ancestor" else catalog
+
+    with pytest.raises(ValueError, match="must not be the input file or contain"):
+        discover(
+            catalog,
+            out,
+            config=DiscoveryConfig(mode="fast", progress_format="quiet"),
+        )
+
+    assert catalog.read_bytes() == original
+    assert marker.read_text(encoding="utf-8") == "preserve me"
+
+
 @pytest.mark.parametrize(
     ("artifact", "corrupt"),
     (
@@ -359,26 +384,25 @@ def test_fast_deadline_miss_still_publishes_a_complete_graph(tmp_path: Path) -> 
     assert Graph.open(out).nodes()
 
 
-def test_fast_deadline_includes_final_directory_publication(
+def test_fast_deadline_includes_manifest_publication(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     catalog = tmp_path / "catalog.parquet"
     _write_catalog(catalog)
-    published = False
-    original_publish = fast_module.publish_directory_atomically
+    manifest_written = False
+    original_write_manifest = fast_module.write_manifest_last
 
-    def publish(*args: object, **kwargs: object) -> object:
-        nonlocal published
-        result = original_publish(*args, **kwargs)
-        published = True
-        return result
+    def write_manifest(*args: object, **kwargs: object) -> None:
+        nonlocal manifest_written
+        original_write_manifest(*args, **kwargs)
+        manifest_written = True
 
-    monkeypatch.setattr(fast_module, "publish_directory_atomically", publish)
+    monkeypatch.setattr(fast_module, "write_manifest_last", write_manifest)
     monkeypatch.setattr(
         fast_module.StageRecorder,
         "runtime_seconds",
-        lambda _self: 3.0 if published else 1.0,
+        lambda _self: 3.0 if manifest_written else 1.0,
     )
     out = tmp_path / "deadline-after-publication"
     stats = discover(
@@ -403,7 +427,7 @@ def _write_catalog(path: Path) -> None:
             """
             CREATE TABLE catalog AS SELECT * FROM (VALUES
               ('m1','Will Alpha happen?',['Yes','No'],['alpha-yes','alpha-no'],'e1','alpha',''),
-              ('m2','Will Alpha happen?',['Yes','No'],['alpha2-yes','alpha2-no'],'e2','alpha-copy',''),
+              ('m2','Will Alpha happen?',['Yes','No'],['alpha2-yes','alpha2-no'],'e1','alpha-copy',''),
               ('m3','Who wins the cup?',['Alpha','Beta','Gamma'],['cat-a','cat-b','cat-c'],'e3','cup',''),
               ('m4','Will BTC be above $100,000?',['Yes','No'],['numeric-yes','numeric-no'],'e4','btc','')
             ) t(market_id,question,outcomes,clob_token_ids,event_id,event_slug,description)
@@ -412,6 +436,60 @@ def _write_catalog(path: Path) -> None:
         db.execute(f"COPY catalog TO '{q(path)}' (FORMAT PARQUET)")
     finally:
         db.close()
+
+
+def test_fast_rules_require_authoritative_scope_and_reject_nonconvex_negations(
+    tmp_path: Path,
+) -> None:
+    catalog = tmp_path / "numeric.parquet"
+    db = DuckDB()
+    try:
+        db.execute(
+            """
+            CREATE TABLE catalog AS SELECT * FROM (VALUES
+              ('scope-a','Will attendance be above 100?',['Yes','No'],['scope-a-y','scope-a-n'],'event-a','event-a',''),
+              ('scope-b','Will attendance be above 200?',['Yes','No'],['scope-b-y','scope-b-n'],'event-b','event-b',''),
+              ('bounded-a','Will attendance be between 100 and 200?',['Yes','No'],['bounded-a-y','bounded-a-n'],'event-c','event-c',''),
+              ('bounded-b','Will attendance be between 300 and 400?',['Yes','No'],['bounded-b-y','bounded-b-n'],'event-c','event-c',''),
+              ('equal-a','Will attendance equal 100?',['Yes','No'],['equal-a-y','equal-a-n'],'event-c','event-c',''),
+              ('equal-b','Will attendance equal 200?',['Yes','No'],['equal-b-y','equal-b-n'],'event-c','event-c','')
+            ) t(market_id,question,outcomes,clob_token_ids,event_id,event_slug,description)
+            """
+        )
+        db.execute(f"COPY catalog TO '{q(catalog)}' (FORMAT PARQUET)")
+    finally:
+        db.close()
+
+    out = tmp_path / "numeric-out"
+    discover(
+        catalog,
+        out,
+        config=DiscoveryConfig(mode="fast", progress_format="quiet"),
+    )
+    graph_db = DuckDB(out / "oddsfox_graph.duckdb", read_only=True)
+    try:
+        cross_scope = graph_db.scalar(
+            "SELECT count(*) FROM logic_edges_v "
+            "WHERE (src_node_id LIKE 'scope-%' AND dst_node_id LIKE 'scope-%') "
+            "AND market_id_src != market_id_dst"
+        )
+        unsafe_negative = graph_db.scalar(
+            "SELECT count(*) FROM logic_edges_v "
+            "WHERE rule_id='threshold.interval_containment.v2' "
+            "AND src_node_id IN ('bounded-a-n','bounded-b-n','equal-a-n','equal-b-n') "
+            "AND dst_node_id IN ('bounded-a-n','bounded-b-n','equal-a-n','equal-b-n')"
+        )
+        positive_disjoint = graph_db.scalar(
+            "SELECT count(*) FROM logic_edges_v "
+            "WHERE edge_type='mutually_exclusive' "
+            "AND ((src_node_id='bounded-a-y' AND dst_node_id='bounded-b-y') "
+            "OR (src_node_id='bounded-b-y' AND dst_node_id='bounded-a-y'))"
+        )
+    finally:
+        graph_db.close()
+    assert cross_scope == 0
+    assert unsafe_negative == 0
+    assert positive_disjoint == 1
 
 
 def _write_catalog_variant(source: Path, target: Path, variant: str) -> None:

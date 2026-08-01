@@ -163,6 +163,8 @@ def publish_directory_atomically(
 
     if not staging.is_dir():
         raise ValueError(f"Discovery staging directory does not exist: {staging}")
+    if out_dir.is_symlink() or (out_dir.exists() and not out_dir.is_dir()):
+        raise ValueError(f"Discovery output must be a directory path: {out_dir}")
     out_dir.parent.mkdir(parents=True, exist_ok=True)
     backup: Path | None = None
     if out_dir.exists():
@@ -181,6 +183,16 @@ def publish_directory_atomically(
             os.replace(backup, out_dir)
         raise
     return PublicationSwap(out_dir=out_dir, backup=backup)
+
+
+def validate_source_output_paths(input_path: Path, out_dir: Path) -> None:
+    """Reject publication targets that could consume the source artifact."""
+
+    if input_path == out_dir or out_dir in input_path.parents:
+        raise ValueError(
+            "Discovery output must not be the input file or contain the input file: "
+            f"input={input_path}, output={out_dir}"
+        )
 
 
 def write_manifest_last(

@@ -260,3 +260,20 @@ def test_atomic_publication_is_finalized_explicitly(tmp_path: Path) -> None:
 
     assert (out / "new").read_text(encoding="utf-8") == "new"
     assert swap.backup is not None and not swap.backup.exists()
+
+
+def test_atomic_publication_preserves_existing_file_target(tmp_path: Path) -> None:
+    staging = tmp_path / "staging"
+    out = tmp_path / "out"
+    staging.mkdir()
+    out.write_text("preserve", encoding="utf-8")
+
+    try:
+        publish_directory_atomically(staging, out)
+    except ValueError as exc:
+        assert "must be a directory path" in str(exc)
+    else:
+        raise AssertionError("publication unexpectedly replaced a file")
+
+    assert out.read_text(encoding="utf-8") == "preserve"
+    assert staging.is_dir()

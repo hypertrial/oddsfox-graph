@@ -36,7 +36,13 @@ from .incremental import EXECUTION_PLAN_COLUMNS
 from .input import load_source_markets
 from .metrics import StageRecorder
 from .provenance import atomic_write_json, canonical_json_sha256, peak_rss_mb, sha256_file
-from .publication import copy_sorted_parquet, publish_directory_atomically, write_conditionals, write_manifest_last
+from .publication import (
+    copy_sorted_parquet,
+    publish_directory_atomically,
+    validate_source_output_paths,
+    write_conditionals,
+    write_manifest_last,
+)
 from .relations import RULE_REGISTRY, deterministic_relation
 from .versions import (
     CANDIDATE_STATE_VERSION,
@@ -135,6 +141,7 @@ def discover_fast(
     out_dir = out_dir.resolve()
     if not input_path.is_file():
         raise ValueError(f"Input parquet does not exist: {input_path}")
+    validate_source_output_paths(input_path, out_dir)
     out_dir.parent.mkdir(parents=True, exist_ok=True)
     recorder = StageRecorder(config.progress_format)
     source_schema, input_rows, markets, selection = recorder.run(
@@ -290,6 +297,23 @@ def discover_fast(
                 name: sha256_file(out_dir / name) for name in sorted(published_names)
             }
             write_manifest_last(out_dir, manifest)
+            ready_elapsed_seconds = recorder.runtime_seconds()
+            if ready_elapsed_seconds > config.deadline_seconds and deadline_met:
+                deadline_met = False
+                stats["runtime_seconds"] = ready_elapsed_seconds
+                stats["deadline"] = {
+                    **stats["deadline"],
+                    "elapsed_seconds": ready_elapsed_seconds,
+                    "met": False,
+                }
+                manifest["deadline"] = stats["deadline"]
+                manifest["stats"] = stats
+                write_summary_report(out_dir, stats)
+                manifest["published_file_hashes"] = {
+                    name: sha256_file(out_dir / name)
+                    for name in sorted(published_names)
+                }
+                write_manifest_last(out_dir, manifest)
         except Exception:
             swap.rollback()
             raise
@@ -640,7 +664,8 @@ def _fast_proposition_row(
     token: str,
     extracted: ExtractedProposition,
 ) -> dict[str, Any]:
-    low, low_inc, high, high_inc = _numeric_interval(extracted)
+    interval = _numeric_interval(extracted)
+    low, low_inc, high, high_inc = interval or (None, False, None, False)
     return {
         "proposition_id": token,
         "market_id": market.market_id,
@@ -694,7 +719,9 @@ def _fast_proposition_row(
         "first_seen_ts": market.first_seen_ts or market.time_start,
         "last_seen_ts": market.last_seen_ts or market.time_end,
         "resolution_signature": extracted.resolution_signature,
-        "numeric_predicate_signature": extracted.numeric_predicate_signature,
+        "numeric_predicate_signature": (
+            extracted.numeric_predicate_signature if interval is not None else None
+        ),
         "temporal_predicate_signature": extracted.temporal_predicate_signature,
         "stage_family_signature": extracted.stage_family_signature,
         "winner_family_signature": extracted.winner_family_signature,
@@ -708,12 +735,14 @@ def _fast_proposition_row(
     }
 
 
-def _numeric_interval(extracted: ExtractedProposition) -> tuple[float | None, bool, float | None, bool]:
+def _numeric_interval(
+    extracted: ExtractedProposition,
+) -> tuple[float | None, bool, float | None, bool] | None:
     if extracted.interval_low is not None or extracted.interval_high is not None:
         if extracted.polarity == "negative":
             # The negation of a bounded interval is a union of two intervals;
             # do not collapse it into an unsafe one-interval proof.
-            return None, False, None, False
+            return None
         return (
             extracted.interval_low,
             extracted.interval_low_inclusive,
@@ -721,7 +750,7 @@ def _numeric_interval(extracted: ExtractedProposition) -> tuple[float | None, bo
             extracted.interval_high_inclusive,
         )
     if extracted.threshold is None or extracted.operator is None:
-        return None, False, None, False
+        return None
     operator = extracted.operator
     if extracted.polarity == "negative":
         negated_operators: dict[Operator, Operator] = {
@@ -729,9 +758,12 @@ def _numeric_interval(extracted: ExtractedProposition) -> tuple[float | None, bo
             "greater_than_or_equal": "less_than",
             "less_than": "greater_than_or_equal",
             "less_than_or_equal": "greater_than",
-            "equal": "equal",
         }
-        operator = negated_operators[operator]
+        negated_operator = negated_operators.get(operator)
+        if negated_operator is None:
+            # "not equal" is also a union of two intervals.
+            return None
+        operator = negated_operator
     threshold = extracted.threshold
     if operator == "greater_than":
         return threshold, False, None, False
@@ -799,8 +831,10 @@ def _create_public_base_tables(db: DuckDB) -> None:
 
 
 def _create_fast_candidates(db: DuckDB, max_candidates: int) -> None:
+    same_scope = _same_authoritative_scope_sql("a", "b")
+    same_event = _same_event_sql("a", "b")
     db.execute(
-        """
+        f"""
         CREATE TEMP TABLE fast_candidate_reason_rows AS
         WITH pairs AS (
             SELECT a.proposition_id a_id, b.proposition_id b_id, 'same_market' reason
@@ -811,6 +845,7 @@ def _create_fast_candidates(db: DuckDB, max_candidates: int) -> None:
             FROM fast_propositions a JOIN fast_propositions b
               ON a.resolution_signature=b.resolution_signature
              AND a.proposition_id<b.proposition_id AND a.market_id!=b.market_id
+             AND ({same_scope})
             UNION ALL
             SELECT a.proposition_id, b.proposition_id, 'numeric_signature'
             FROM fast_propositions a JOIN fast_propositions b
@@ -818,6 +853,7 @@ def _create_fast_candidates(db: DuckDB, max_candidates: int) -> None:
              AND a.numeric_predicate_signature IS NOT NULL
              AND a.proposition_id<b.proposition_id AND a.market_id!=b.market_id
              AND a.extraction_status='exact' AND b.extraction_status='exact'
+             AND ({same_scope})
             UNION ALL
             SELECT a.proposition_id, b.proposition_id, 'temporal_signature'
             FROM fast_propositions a JOIN fast_propositions b
@@ -825,6 +861,7 @@ def _create_fast_candidates(db: DuckDB, max_candidates: int) -> None:
              AND a.temporal_predicate_signature IS NOT NULL
              AND a.proposition_id<b.proposition_id AND a.market_id!=b.market_id
              AND a.extraction_status='exact' AND b.extraction_status='exact'
+             AND ({same_scope})
             UNION ALL
             SELECT a.proposition_id, b.proposition_id, 'stage_family'
             FROM fast_propositions a JOIN fast_propositions b
@@ -832,6 +869,7 @@ def _create_fast_candidates(db: DuckDB, max_candidates: int) -> None:
              AND a.stage_family_signature IS NOT NULL
              AND a.proposition_id<b.proposition_id AND a.market_id!=b.market_id
              AND a.extraction_status='exact' AND b.extraction_status='exact'
+             AND ({same_scope})
             UNION ALL
             SELECT a.proposition_id, b.proposition_id, 'single_winner_family'
             FROM fast_propositions a JOIN fast_propositions b
@@ -839,6 +877,7 @@ def _create_fast_candidates(db: DuckDB, max_candidates: int) -> None:
              AND a.winner_family_signature IS NOT NULL
              AND a.proposition_id<b.proposition_id AND a.market_id!=b.market_id
              AND a.extraction_status='exact' AND b.extraction_status='exact'
+             AND ({same_event})
         ) SELECT DISTINCT a_id, b_id, reason FROM pairs
         """
     )
@@ -860,6 +899,7 @@ def _create_fast_candidates(db: DuckDB, max_candidates: int) -> None:
         ), joined AS (
             SELECT g.*,
                    a.market_id, a.event_slug, a.event_id,
+                   a.event_scope,
                    a.source_spans_json,
                    a.rule_applicability_fingerprint,
                    a.proof_scope_key,
@@ -873,7 +913,10 @@ def _create_fast_candidates(db: DuckDB, max_candidates: int) -> None:
                    a.interval_high, a.interval_high_inclusive,
                    a.expected_tokens,
                    b.market_id b_market_id, b.event_slug b_event_slug,
-                   b.event_id b_event_id, b.source_spans_json b_source_spans_json,
+                   b.event_id b_event_id, b.event_scope b_event_scope,
+                   b.source_spans_json b_source_spans_json,
+                   ({same_scope}) AS same_authoritative_scope,
+                   ({same_event}) AS same_event,
                    b.rule_applicability_fingerprint b_rule_fingerprint,
                    b.proof_scope_key b_proof_scope_key,
                    b.resolution_signature b_resolution_signature,
@@ -897,8 +940,10 @@ def _create_fast_candidates(db: DuckDB, max_candidates: int) -> None:
               CASE
                 WHEN market_id=b_market_id AND expected_tokens=2 THEN 'complement'
                 WHEN market_id=b_market_id THEN 'mutually_exclusive'
-                WHEN resolution_signature=b_resolution_signature THEN 'equivalent'
+                WHEN resolution_signature=b_resolution_signature
+                     AND same_authoritative_scope THEN 'equivalent'
                 WHEN numeric_predicate_signature=b_numeric_signature
+                     AND same_authoritative_scope
                      AND interval_low IS NOT NULL AND interval_high IS NOT NULL
                      AND b_interval_low IS NOT NULL AND b_interval_high IS NOT NULL
                      AND (
@@ -906,38 +951,51 @@ def _create_fast_candidates(db: DuckDB, max_candidates: int) -> None:
                          (interval_high = b_interval_low AND NOT (interval_high_inclusive AND b_interval_low_inclusive)) OR
                          (b_interval_high = interval_low AND NOT (b_interval_high_inclusive AND interval_low_inclusive))
                      ) THEN 'mutually_exclusive'
-                WHEN numeric_predicate_signature=b_numeric_signature AND ({subset_a_b}) AND ({subset_b_a}) THEN 'equivalent'
-                WHEN numeric_predicate_signature=b_numeric_signature AND ({subset_a_b}) THEN 'A_implies_B'
-                WHEN numeric_predicate_signature=b_numeric_signature AND ({subset_b_a}) THEN 'B_implies_A'
+                WHEN numeric_predicate_signature=b_numeric_signature
+                     AND same_authoritative_scope
+                     AND ({subset_a_b}) AND ({subset_b_a}) THEN 'equivalent'
+                WHEN numeric_predicate_signature=b_numeric_signature
+                     AND same_authoritative_scope AND ({subset_a_b}) THEN 'A_implies_B'
+                WHEN numeric_predicate_signature=b_numeric_signature
+                     AND same_authoritative_scope AND ({subset_b_a}) THEN 'B_implies_A'
                 WHEN temporal_predicate_signature=b_temporal_signature
+                     AND same_authoritative_scope
                      AND polarity='positive' AND b_polarity='positive'
                      AND (b_time_start IS NULL OR (time_start IS NOT NULL AND time_start>=b_time_start))
                      AND (b_time_end IS NULL OR (time_end IS NOT NULL AND time_end<=b_time_end))
                      AND (time_start IS DISTINCT FROM b_time_start OR time_end IS DISTINCT FROM b_time_end)
                      THEN 'A_implies_B'
                 WHEN temporal_predicate_signature=b_temporal_signature
+                     AND same_authoritative_scope
                      AND polarity='positive' AND b_polarity='positive'
                      AND (time_start IS NULL OR (b_time_start IS NOT NULL AND b_time_start>=time_start))
                      AND (time_end IS NULL OR (b_time_end IS NOT NULL AND b_time_end<=time_end))
                      AND (time_start IS DISTINCT FROM b_time_start OR time_end IS DISTINCT FROM b_time_end)
                      THEN 'B_implies_A'
                 WHEN temporal_predicate_signature=b_temporal_signature
+                     AND same_authoritative_scope
                      AND polarity='negative' AND b_polarity='negative'
                      AND time_start IS NULL AND b_time_start IS NULL
                      AND time_end>b_time_end THEN 'A_implies_B'
                 WHEN temporal_predicate_signature=b_temporal_signature
+                     AND same_authoritative_scope
                      AND polarity='negative' AND b_polarity='negative'
                      AND b_time_start IS NULL AND time_start IS NULL
                      AND b_time_end>time_end THEN 'B_implies_A'
-                WHEN stage_family_signature=b_stage_family AND polarity='positive'
+                WHEN stage_family_signature=b_stage_family
+                     AND same_authoritative_scope AND polarity='positive'
                      AND b_polarity='positive' AND stage_rank>b_stage_rank THEN 'A_implies_B'
-                WHEN stage_family_signature=b_stage_family AND polarity='positive'
+                WHEN stage_family_signature=b_stage_family
+                     AND same_authoritative_scope AND polarity='positive'
                      AND b_polarity='positive' AND b_stage_rank>stage_rank THEN 'B_implies_A'
-                WHEN stage_family_signature=b_stage_family AND polarity='negative'
+                WHEN stage_family_signature=b_stage_family
+                     AND same_authoritative_scope AND polarity='negative'
                      AND b_polarity='negative' AND stage_rank<b_stage_rank THEN 'A_implies_B'
-                WHEN stage_family_signature=b_stage_family AND polarity='negative'
+                WHEN stage_family_signature=b_stage_family
+                     AND same_authoritative_scope AND polarity='negative'
                      AND b_polarity='negative' AND b_stage_rank<stage_rank THEN 'B_implies_A'
-                WHEN winner_family_signature=b_winner_family AND polarity='positive'
+                WHEN winner_family_signature=b_winner_family AND same_event
+                     AND polarity='positive'
                      AND b_polarity='positive' AND subject!=b_subject THEN 'mutually_exclusive'
                 ELSE NULL END AS relation,
               CASE
@@ -956,6 +1014,27 @@ def _create_fast_candidates(db: DuckDB, max_candidates: int) -> None:
     candidate_projection = _candidate_projection_sql()
     db.execute(f"CREATE TABLE relation_candidates_work AS SELECT {candidate_projection} FROM fast_relations")
     db.execute("CREATE VIEW relation_candidates_v AS SELECT * FROM relation_candidates_work")
+
+
+def _same_event_sql(left: str, right: str) -> str:
+    return f"""
+      (({left}.event_id IS NOT NULL AND {right}.event_id IS NOT NULL
+        AND {left}.event_id={right}.event_id)
+       OR
+       ({left}.event_slug IS NOT NULL AND {right}.event_slug IS NOT NULL
+        AND {left}.event_slug={right}.event_slug))
+    """
+
+
+def _same_authoritative_scope_sql(left: str, right: str) -> str:
+    same_event = _same_event_sql(left, right)
+    return f"""
+      (({same_event})
+       OR
+       (nullif(trim({left}.event_scope), '') IS NOT NULL
+        AND lower(regexp_replace(trim({left}.event_scope), '\\s+', ' ', 'g')) =
+            lower(regexp_replace(trim({right}.event_scope), '\\s+', ' ', 'g'))))
+    """
 
 
 def _interval_subset_sql(inner: str, outer: str) -> str:

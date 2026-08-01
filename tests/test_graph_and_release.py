@@ -205,6 +205,14 @@ def test_component_semantic_zoom_uses_a_component_scoped_event_view(
     assert client.get("/api/v1/component-graph/missing").status_code == 404
 
 
+def test_event_overview_reports_edge_truncation_at_zero_limit(
+    tmp_path: Path,
+) -> None:
+    view = Graph.open(_write_graph(tmp_path)).overview("event", max_edges=0)
+    assert view.edges == ()
+    assert view.truncated_edges is True
+
+
 def test_recording_plan_collapses_reversed_symmetric_duplicates(
     tmp_path: Path,
 ) -> None:
