@@ -16,6 +16,7 @@ from oddsfox_graph._discovery.versions import (
     WC2026_SOURCE_SCHEMA,
 )
 from oddsfox_graph.discovery import discover
+from oddsfox_graph.explorer import export_explorer
 from oddsfox_graph.graph import Graph
 from oddsfox_graph.qualification import (
     PUBLISHABLE_RELATIONS,
@@ -249,6 +250,60 @@ def test_wc2026_profile_collapses_hours_and_has_price_independent_semantics(
     ]
 
 
+def test_wc2026_profile_accepts_current_pipeline_contract_without_close_time(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "with-close.parquet"
+    current_pipeline = tmp_path / "current-pipeline.parquet"
+    out = tmp_path / "graph"
+    _write_wc2026(source)
+    _rewrite_wc2026(
+        source,
+        current_pipeline,
+        "SELECT * EXCLUDE(end_date) FROM {source}",
+    )
+
+    _, _, markets, _ = load_source_markets(
+        current_pipeline,
+        input_profile=WC2026_SOURCE_SCHEMA,
+    )
+    assert all(market.market_close_time is None for market in markets)
+
+    discover(
+        current_pipeline,
+        out,
+        config=DiscoveryConfig(
+            mode="fast",
+            input_profile=WC2026_SOURCE_SCHEMA,
+            progress_format="quiet",
+        ),
+    )
+    graph = Graph.open(out)
+    search_results = graph.search("Brazil", top=20)
+    search_labels = [item.plain_claim for item in search_results]
+    assert len(search_labels) == len(set(search_labels))
+    assert graph.search("Brazil reaches the round of 16")[0].plain_claim == (
+        "Brazil reaches the round of 16"
+    )
+    assert (
+        graph.overview("proposition", edge_mode="essential").layout_mode
+        == "hierarchical"
+    )
+    assert graph.market("br-r16").market_close_epoch is None
+    static = tmp_path / "static"
+    manifest = export_explorer(out, static, scope="graph")
+    assert manifest["schema_version"] == "static-explorer-v4"
+    db = DuckDB()
+    try:
+        assert db.scalar(
+            f"SELECT count(*) FROM read_parquet("
+            f"'{q(static / 'snapshot_claims.parquet')}') "
+            "WHERE market_close_epoch IS NULL"
+        ) == 10
+    finally:
+        db.close()
+
+
 def test_wc2026_qualification_contract_is_profile_specific_and_disjoint(
     tmp_path: Path,
 ) -> None:
@@ -444,11 +499,6 @@ def test_wc2026_profile_rejects_partial_and_malformed_inputs(tmp_path: Path) -> 
             "missing-column",
             "SELECT * EXCLUDE(stage_key) FROM {source}",
             "missing columns: stage_key",
-        ),
-        (
-            "missing-close-time",
-            "SELECT * EXCLUDE(end_date) FROM {source}",
-            "missing columns: end_date",
         ),
         (
             "wrong-type",
@@ -691,6 +741,11 @@ def test_fast_wc2026_discovery_publishes_structured_rules(tmp_path: Path) -> Non
     assert graph.coverage()["classification_status"] == "not_applicable"
     assert graph.coverage()["classification_coverage"] is None
     assert graph.market("br-r16").market_close_epoch == 1783382400
+    proposition_view = graph.overview("proposition", edge_mode="essential")
+    assert all("NOT(" not in node.label for node in proposition_view.nodes)
+    assert "Brazil does not reach the round of 16" in {
+        node.label for node in proposition_view.nodes
+    }
     assert [stage.stage_key for stage in graph.stages()] == [
         "round_of_32",
         "round_of_16",

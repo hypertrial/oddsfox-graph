@@ -253,6 +253,7 @@ class HumanExplorer:
     def snapshot(
         self,
         node_ids: Iterable[str] | None = None,
+        relationship_ids: Iterable[str] | None = None,
     ) -> dict[str, tuple[BaseModel, ...]]:
         """Return normalized rows used by the self-contained static explorer."""
 
@@ -264,17 +265,23 @@ class HumanExplorer:
                 for node_id, claim in claims.items()
                 if node_id in selected
             }
-        relationships = tuple(
-            item
-            for item in self._relationships(claims, edge_mode="essential")
-            if item.source.id in claims and item.target.id in claims
+        all_relationships = self._relationships(
+            claims,
+            edge_mode="all",
+            proposal_ids=relationship_ids,
+        )
+        relationships = self._relationships(
+            claims,
+            edge_mode="essential",
+            proposal_ids=relationship_ids,
         )
         return {
             "stages": self._stages(claims),
             "teams": self._teams(claims),
             "markets": self._markets(claims),
             "claims": tuple(claims.values()),
-            "relationships": relationships,
+            "relationships": all_relationships,
+            "essential_relationships": relationships,
             "groups": self._relationship_groups(relationships),
         }
 
@@ -421,6 +428,42 @@ class HumanExplorer:
         candidates.sort(key=lambda item: (item[0], item[1], item[2].id))
         return tuple(item[2] for item in candidates[:limit])
 
+    def search_claims(
+        self, query: str, *, limit: int = 20
+    ) -> tuple[ClaimSummary, ...]:
+        """Return graph claims matched and ranked by their human-readable text."""
+
+        text = " ".join(query.split()).casefold()
+        if not text:
+            raise ValueError("Search query must not be empty")
+        if not 1 <= limit <= 100:
+            raise ValueError("search limit must be between 1 and 100")
+        candidates: list[tuple[int, str, ClaimSummary]] = []
+        for claim in self._claims().values():
+            searchable = " ".join(
+                (
+                    claim.plain_claim,
+                    claim.question,
+                    claim.answer,
+                    claim.technical_canonical_label,
+                    claim.id,
+                )
+            ).casefold()
+            position = searchable.find(text)
+            if position >= 0:
+                candidates.append((position, claim.plain_claim.casefold(), claim))
+        candidates.sort(key=lambda item: (item[0], item[1], item[2].id))
+        seen_labels: set[str] = set()
+        result: list[ClaimSummary] = []
+        for _, label, claim in candidates:
+            if label in seen_labels:
+                continue
+            seen_labels.add(label)
+            result.append(claim)
+            if len(result) == limit:
+                break
+        return tuple(result)
+
     def compare(self, source_id: str, target_id: str, *, max_hops: int = 4) -> CompareResult:
         if not 1 <= max_hops <= 4:
             raise ValueError("max_hops must be between 1 and 4")
@@ -437,8 +480,8 @@ class HumanExplorer:
                 target=target,
                 explanation="You selected the same outcome twice.",
             )
-        relationships = self._relationships(claims, edge_mode="essential")
-        direct = self._direct(relationships, source_id, target_id)
+        all_relationships = self._relationships(claims, edge_mode="all")
+        direct = self._direct(all_relationships, source_id, target_id)
         if direct is not None:
             return CompareResult(
                 status="direct",
@@ -447,6 +490,7 @@ class HumanExplorer:
                 direct=direct,
                 explanation=_relationship_explanation(direct),
             )
+        relationships = self._relationships(claims, edge_mode="essential")
         path = self._shortest_path(
             relationships, source_id, target_id, max_hops=max_hops
         )
@@ -527,7 +571,11 @@ class HumanExplorer:
                     None if row.get("is_still_alive") is None
                     else bool(row["is_still_alive"])
                 ),
-                market_close_epoch=int(cast(int, row["market_close_epoch"])),
+                market_close_epoch=(
+                    None
+                    if row.get("market_close_epoch") is None
+                    else int(cast(int, row["market_close_epoch"]))
+                ),
                 technical_canonical_label=str(row["canonical_proposition"]),
             )
             claims[claim.id] = claim
@@ -582,7 +630,11 @@ class HumanExplorer:
                         None if row.get("is_still_alive") is None
                         else bool(row["is_still_alive"])
                     ),
-                    market_close_epoch=int(cast(int, row["market_close_epoch"])),
+                    market_close_epoch=(
+                        None
+                        if row.get("market_close_epoch") is None
+                        else int(cast(int, row["market_close_epoch"]))
+                    ),
                     claims=tuple(
                         sorted(
                             by_market[market_id],
@@ -598,23 +650,35 @@ class HumanExplorer:
         claims: Mapping[str, ClaimSummary],
         *,
         edge_mode: EdgeMode,
+        proposal_ids: Iterable[str] | None = None,
     ) -> tuple[RelationshipDetail, ...]:
         rows = self.db.rows(
             """
             SELECT *
             FROM logic_edges_v
-            WHERE edge_type != 'compatible'
             ORDER BY confidence DESC, proposal_id
             """
         )
+        selected_proposals = (
+            None if proposal_ids is None else frozenset(proposal_ids)
+        )
+        rows = [
+            row
+            for row in rows
+            if str(row["src_node_id"]) in claims
+            and str(row["dst_node_id"]) in claims
+            and (
+                selected_proposals is None
+                or str(row["proposal_id"]) in selected_proposals
+            )
+        ]
         if edge_mode == "essential":
+            rows = [row for row in rows if str(row["edge_type"]) != "compatible"]
             rows = essential_relationship_rows(rows)
         result: list[RelationshipDetail] = []
         for row in rows:
             source_id = str(row["src_node_id"])
             target_id = str(row["dst_node_id"])
-            if source_id not in claims or target_id not in claims:
-                continue
             explanation = " ".join(
                 str(row.get("explanation") or row.get("evidence") or "").split()
             )

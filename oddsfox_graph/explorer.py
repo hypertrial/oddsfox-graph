@@ -21,7 +21,7 @@ from fastapi import FastAPI
 
 from ._explorer.service import create_app, validate_loopback_host
 from ._explorer.human import HumanExplorer, graph_display_stats
-from ._explorer.contracts import RelationshipDetail
+from ._explorer.contracts import GraphFilter, RelationshipDetail
 from .graph import Graph
 from .queries import DuckDB, q
 
@@ -226,6 +226,7 @@ def export_explorer(
             "Static explorer destination must not overlap the source graph directory"
         )
     graph = Graph.open(source)
+    export_filters = GraphFilter(include_compatible=True)
     metadata = graph.metadata()
     build_input = metadata.build.get("input")
     input_profile = (
@@ -243,6 +244,7 @@ def export_explorer(
         view = graph.neighborhood(
             tuple(node_ids),
             hops=1,
+            filters=export_filters,
             max_nodes=max_nodes,
             max_edges=max_edges,
         )
@@ -251,6 +253,7 @@ def export_explorer(
         view = graph.neighborhood(
             (identifier,),
             hops=2,
+            filters=export_filters,
             max_nodes=max_nodes,
             max_edges=max_edges,
         )
@@ -260,6 +263,7 @@ def export_explorer(
         view = graph.neighborhood(
             tuple(node_ids),
             hops=1,
+            filters=export_filters,
             max_nodes=max_nodes,
             max_edges=max_edges,
         )
@@ -274,6 +278,7 @@ def export_explorer(
         view = graph.neighborhood(
             tuple(node_ids),
             hops=1,
+            filters=export_filters,
             max_nodes=max_nodes,
             max_edges=max_edges,
         )
@@ -305,14 +310,18 @@ def export_explorer(
         )
         shutil.copytree(assets, staging, dirs_exist_ok=True)
         snapshot = view.model_dump(mode="json")
-        human_rows = _static_human_rows(source, tuple(node.id for node in view.nodes))
+        human_rows = _static_human_rows(
+            source,
+            tuple(node.id for node in view.nodes),
+            tuple(edge.id for edge in view.edges),
+        )
         human_display_stats = graph_display_stats(
             tuple(str(row["plain_claim"]) for row in human_rows["claims"]),
             tuple(
                 (str(row["source_id"]), str(row["target_id"]))
-                for row in human_rows["relationships"]
+                for row in human_rows["essential_relationships"]
             ),
-            input_edge_count=len(view.edges),
+            input_edge_count=len(human_rows["relationships"]),
         )
         snapshot_db = DuckDB()
         try:
@@ -459,6 +468,7 @@ def _all_nodes(out_dir: Path, limit: int) -> list[str]:
 def _static_human_rows(
     out_dir: Path,
     node_ids: tuple[str, ...],
+    relationship_ids: tuple[str, ...],
 ) -> dict[str, list[dict[str, object]]]:
     db = DuckDB(out_dir / "oddsfox_graph.duckdb", read_only=True)
     try:
@@ -466,7 +476,7 @@ def _static_human_rows(
             db,
             coverage=Graph.open(out_dir).coverage(),
             build=Graph.open(out_dir).metadata().build,
-        ).snapshot(node_ids)
+        ).snapshot(node_ids, relationship_ids)
     finally:
         db.close()
     rows: dict[str, list[dict[str, object]]] = {}
@@ -482,12 +492,19 @@ def _static_human_rows(
     relationships = cast(
         tuple[RelationshipDetail, ...], snapshot["relationships"]
     )
-    rows["relationships"] = [
-        {
-            **item.model_dump(mode="json", exclude={"source", "target"}),
-            "source_id": item.source.id,
-            "target_id": item.target.id,
-        }
-        for item in relationships
-    ]
+    essential_relationships = cast(
+        tuple[RelationshipDetail, ...], snapshot["essential_relationships"]
+    )
+    for name, items in (
+        ("relationships", relationships),
+        ("essential_relationships", essential_relationships),
+    ):
+        rows[name] = [
+            {
+                **item.model_dump(mode="json", exclude={"source", "target"}),
+                "source_id": item.source.id,
+                "target_id": item.target.id,
+            }
+            for item in items
+        ]
     return rows

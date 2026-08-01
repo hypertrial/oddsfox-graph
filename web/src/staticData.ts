@@ -3,6 +3,7 @@ import duckdbMvp from "@duckdb/duckdb-wasm/dist/duckdb-mvp.wasm?url";
 import mvpWorker from "@duckdb/duckdb-wasm/dist/duckdb-browser-mvp.worker.js?url";
 import { marketsForProgressionStage, relationshipSentence } from "./human";
 import { closeTimeColumns } from "./layout";
+import { essentialGraphEdges } from "./graphEdges";
 import type {
   ClaimSummary,
   CompareResult,
@@ -76,6 +77,7 @@ export interface StaticSnapshot {
   markets: MarketDetail[];
   claims: ClaimSummary[];
   relationships: RelationshipDetail[];
+  essentialRelationships: RelationshipDetail[];
   groups: RelationshipGroupSummary[];
 }
 
@@ -91,7 +93,10 @@ export async function staticExploreHome(
   highlightLimit = 6,
 ): Promise<ExploreHome> {
   const loaded = await loadStaticSnapshot();
-  const notable_relationships = selectHumanHighlights(loaded.relationships, highlightLimit);
+  const notable_relationships = selectHumanHighlights(
+    loaded.essentialRelationships,
+    highlightLimit,
+  );
   return {
     scope: loaded.scope,
     stages: loaded.stages,
@@ -180,7 +185,12 @@ export async function staticCompare(
   if (direct) {
     return { status: "direct", source, target, direct, path: [], explanation: relationshipSentence(direct) };
   }
-  const path = shortestPath(loaded.relationships, sourceId, targetId, maxHops);
+  const path = shortestPath(
+    loaded.essentialRelationships,
+    sourceId,
+    targetId,
+    maxHops,
+  );
   if (path.length > 0) {
     return { status: "path", source, target, direct: null, path, explanation: `A ${path.length}-step logic path connects these outcomes.` };
   }
@@ -283,25 +293,31 @@ async function load(): Promise<StaticSnapshot> {
         .sort((left, right) => left.localeCompare(right))
         .map((team, index) => [team, index]),
     );
-    const closeColumns = closeTimeColumns(claims.map((claim) => claim.market_close_epoch));
-    const marketOffsets = marketCloseOffsets(claims);
+    const closeEpochs = claims
+      .map((claim) => claim.market_close_epoch)
+      .filter((epoch): epoch is number => epoch !== null);
+    const hasCloseTimes = claims.length > 0 && closeEpochs.length === claims.length;
+    const closeColumns = closeTimeColumns(closeEpochs);
+    const marketOffsets = hasCloseTimes ? marketCloseOffsets(claims) : new Map<string, number>();
     const humanNodes = nodes.map((node) => {
       const claim = claimById.get(node.id);
       return claim ? {
         ...node,
         label: claim.plain_claim,
-        parent_id: claim.canonical_team_name,
-        component_id: `team:${claim.canonical_team_name.toLocaleLowerCase()}`,
         domain: claim.canonical_team_name,
         progression_outcome: claim.is_progression_token,
         market_close_epoch: claim.market_close_epoch,
-        x: (closeColumns.get(claim.market_close_epoch) ?? 0) * 260,
-        y: (teamRows.get(claim.canonical_team_name) ?? 0) * 90
-          + (marketOffsets.get(claim.market_id) ?? 0) * 18
-          + (claim.is_progression_token ? 0 : 8),
+        x: hasCloseTimes
+          ? (closeColumns.get(claim.market_close_epoch!) ?? 0) * 260
+          : node.x,
+        y: hasCloseTimes
+          ? (teamRows.get(claim.canonical_team_name) ?? 0) * 90
+            + (marketOffsets.get(claim.market_id) ?? 0) * 18
+            + (claim.is_progression_token ? 0 : 8)
+          : node.y,
       } : node;
     });
-    const essentialEdges: ExplorerEdge[] = relationships.map((relationship) => ({
+    const allEdges: ExplorerEdge[] = relationships.map((relationship) => ({
       id: relationship.proposal_id,
       source: relationship.source.id,
       target: relationship.target.id,
@@ -312,16 +328,23 @@ async function load(): Promise<StaticSnapshot> {
       evidence_tier: relationship.evidence_tier,
       aggregation_only: false,
     }));
-    const displayStats = manifest.display_stats ?? calculateDisplayStats(humanNodes, essentialEdges);
+    const graphEdges = allEdges.filter((edge) => edge.relation !== "compatible");
+    const essentialEdges = essentialGraphEdges(graphEdges);
+    const essentialRelationships = relationshipsFromEdges(
+      relationships,
+      essentialEdges,
+    );
+    const displayStats = manifest.display_stats
+      ?? calculateDisplayStats(humanNodes, essentialEdges, allEdges.length);
     const view: GraphView = {
       level: humanNodes[0]?.level ?? "proposition",
       nodes: humanNodes,
-      edges: essentialEdges,
+      edges: graphEdges,
       truncated_nodes: false,
       truncated_edges: false,
       coverage: manifest.coverage,
-      edge_mode: "essential",
-      layout_mode: "close_time",
+      edge_mode: "all",
+      layout_mode: hasCloseTimes ? "close_time" : "hierarchical",
       display_stats: displayStats,
     };
     return {
@@ -334,6 +357,7 @@ async function load(): Promise<StaticSnapshot> {
       markets,
       claims,
       relationships,
+      essentialRelationships,
       groups,
       metadata: {
         package_version: manifest.package_version,
@@ -466,7 +490,22 @@ function shortestPath(
   return [];
 }
 
-function calculateDisplayStats(nodes: ExplorerNode[], edges: ExplorerEdge[]): GraphDisplayStats {
+function relationshipsFromEdges(
+  relationships: RelationshipDetail[],
+  edges: ExplorerEdge[],
+): RelationshipDetail[] {
+  const byId = new Map(relationships.map((relationship) => [
+    relationship.proposal_id,
+    relationship,
+  ]));
+  return edges.map((edge) => byId.get(edge.id)!).filter(Boolean);
+}
+
+function calculateDisplayStats(
+  nodes: ExplorerNode[],
+  edges: ExplorerEdge[],
+  inputEdgeCount = edges.length,
+): GraphDisplayStats {
   const degree = new Map(nodes.map((node) => [node.id, 0]));
   for (const edge of edges) {
     degree.set(edge.source, (degree.get(edge.source) ?? 0) + 1);
@@ -478,10 +517,10 @@ function calculateDisplayStats(nodes: ExplorerNode[], edges: ExplorerEdge[]): Gr
   const network = nodes.length <= 15 && edges.length <= 24 && density <= 0.15 && labelUniqueness >= 0.5 && maxDegree <= 8;
   return {
     input_node_count: nodes.length,
-    input_edge_count: edges.length,
+    input_edge_count: inputEdgeCount,
     display_node_count: nodes.length,
     display_edge_count: edges.length,
-    omitted_edge_count: 0,
+    omitted_edge_count: inputEdgeCount - edges.length,
     density,
     label_uniqueness: labelUniqueness,
     max_degree: maxDegree,

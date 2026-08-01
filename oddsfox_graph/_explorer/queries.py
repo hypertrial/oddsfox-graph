@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Literal, cast
 
 from .contracts import (
+    ClaimSummary,
     CompareResult,
     CoverageStatus,
     EdgeMode,
@@ -302,6 +303,51 @@ class ExplorerStore:
         finally:
             db.close()
 
+    def claim_search(
+        self, query: str, *, limit: int = 20
+    ) -> tuple[ClaimSummary, ...]:
+        db = self._db()
+        try:
+            return self._human(db).search_claims(query, limit=limit)
+        finally:
+            db.close()
+
+    def plain_claims(
+        self, node_ids: tuple[str, ...]
+    ) -> dict[str, str | None]:
+        if not node_ids:
+            return {}
+        db = self._db()
+        try:
+            rows = db.rows(
+                """
+                SELECT n.node_id, p.team_name, p.progression_level,
+                       p.is_progression
+                FROM nodes_table n
+                LEFT JOIN explorer_propositions_v p
+                  ON p.proposition_id = n.node_id
+                WHERE n.node_id IN (SELECT unnest(?))
+                ORDER BY n.node_id
+                """,
+                [list(node_ids)],
+            )
+        finally:
+            db.close()
+        return {
+            str(row["node_id"]): (
+                _recording_plain_claim(
+                    str(row["team_name"]),
+                    _int(row["progression_level"]),
+                    bool(row["is_progression"]),
+                )
+                if row.get("team_name")
+                and row.get("progression_level") is not None
+                and row.get("is_progression") is not None
+                else None
+            )
+            for row in rows
+        }
+
     def compare(
         self, source_id: str, target_id: str, *, max_hops: int = 4
     ) -> CompareResult:
@@ -567,7 +613,8 @@ class ExplorerStore:
                 SELECT n.*, m.component_id, m.total_degree,
                        m.classification_state, m.classification_status,
                        m.classification_coverage,
-                       p.event_key, p.team_name, p.is_progression,
+                       p.event_key, p.team_name, p.progression_level,
+                       p.is_progression,
                        epoch(p.market_close_time)::BIGINT AS market_close_epoch
                 FROM nodes_table n
                 JOIN node_metrics_v m USING (node_id)
@@ -632,7 +679,8 @@ class ExplorerStore:
                 SELECT n.*, m.component_id, m.total_degree,
                        m.classification_state, m.classification_status,
                        m.classification_coverage,
-                       p.event_key, p.team_name, p.is_progression,
+                       p.event_key, p.team_name, p.progression_level,
+                       p.is_progression,
                        epoch(p.market_close_time)::BIGINT AS market_close_epoch
                 FROM nodes_table n
                 JOIN node_metrics_v m USING (node_id)
@@ -875,7 +923,9 @@ class ExplorerStore:
                 SELECT n.*, m.component_id, m.total_degree,
                        m.classification_state, m.classification_status,
                        m.classification_coverage,
-                       p.event_key
+                       p.event_key, p.team_name, p.progression_level,
+                       p.is_progression,
+                       epoch(p.market_close_time)::BIGINT AS market_close_epoch
                 FROM nodes_table n
                 JOIN node_metrics_v m USING (node_id)
                 JOIN explorer_propositions_v p ON p.proposition_id = n.node_id
@@ -1227,15 +1277,22 @@ def _proposition_node(row: dict[str, object]) -> ExplorerNode:
     radius = 40.0 + int.from_bytes(digest[4:8], "big") / (2**32) * 180.0
     close_epoch = row.get("market_close_epoch")
     progression = row.get("is_progression")
+    team = row.get("team_name")
+    level = row.get("progression_level")
+    label = (
+        _recording_plain_claim(str(team), _int(level), bool(progression))
+        if team and level is not None and progression is not None
+        else str(row["canonical_proposition"])
+    )
     return ExplorerNode(
         id=node_id,
-        label=str(row["canonical_proposition"]),
+        label=label,
         level="proposition",
         parent_id=str(row["event_key"]),
         x=_float(row.get("layout_x", math.cos(angle) * radius)),
         y=_float(row.get("layout_y", math.sin(angle) * radius)),
         size=max(4.0, math.sqrt(_int(row["total_degree"]) + 1) * 3.0),
-        domain=(str(row["team_name"]) if row.get("team_name") else None),
+        domain=(str(team) if team else None),
         component_id=str(row["component_id"]),
         market_id=str(row["market_id"]),
         edge_count=_int(row["total_degree"]),

@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { filterGraphView } from "./api";
 import { parseRoute } from "./routes";
 import { coverageLabel, marketsByProgressionLevel, marketsForProgressionStage, relationshipSentenceFromParts, safeClaim } from "./human";
-import { closeTimeColumns } from "./layout";
+import { closeTimeColumns, layoutGroupId } from "./layout";
+import { essentialGraphEdges } from "./graphEdges";
 import type { GraphView, MarketDetail } from "./types";
 
 const fixture: GraphView = {
@@ -60,6 +61,31 @@ describe("World Cup outcome explorer", () => {
     expect([...columns.entries()]).toEqual([[100, 0], [200, 1], [300, 2]]);
   });
 
+  it("groups World Cup outcomes by team without changing component identity", () => {
+    const brazil = {
+      ...fixture.nodes[0],
+      domain: "Brazil",
+      component_id: "component-tournament",
+      progression_outcome: true,
+    };
+    const argentina = { ...brazil, id: "argentina", domain: "Argentina" };
+    expect(layoutGroupId(brazil)).toBe("team:brazil");
+    expect(layoutGroupId(argentina)).toBe("team:argentina");
+    expect(brazil.component_id).toBe(argentina.component_id);
+  });
+
+  it("reduces implications only after the visible edge filter", () => {
+    const edges = [
+      { ...fixture.edges[0], id: "a-b", source: "a", target: "b", confidence: 1 },
+      { ...fixture.edges[0], id: "b-c", source: "b", target: "c", confidence: 1 },
+      { ...fixture.edges[0], id: "a-c", source: "a", target: "c", confidence: 1 },
+      { ...fixture.edges[0], id: "a-b-equivalent", source: "a", target: "b", relation: "equivalent" as const, confidence: 1 },
+    ];
+    expect(essentialGraphEdges(edges).map((edge) => edge.id)).not.toContain("a-c");
+    expect(essentialGraphEdges(edges.filter((edge) => edge.relation === "implies")))
+      .toHaveLength(2);
+  });
+
   it("parses dependency-free hash routes and safely falls back home", () => {
     expect(parseRoute("#/explore/team/brazil")).toEqual({ kind: "team", id: "brazil" });
     expect(parseRoute("#/explore/relationship/proposal%201")).toEqual({ kind: "relationship", id: "proposal 1" });
@@ -93,7 +119,13 @@ describe("World Cup outcome explorer", () => {
     expect(filterGraphView(fixture, "compatible", 0.98, false).edges.map((edge) => edge.id)).toEqual([
       "compatibility",
     ]);
+    expect(filterGraphView(fixture, "compatible", 0.98, false).nodes.map((node) => node.id)).toEqual([
+      "a", "b", "c", "isolated",
+    ]);
     expect(filterGraphView(fixture, "implies", 0.98, true).edges).toEqual([]);
+    expect(filterGraphView(fixture, "implies", 0.98, true).nodes.map((node) => node.id)).toEqual([
+      "a", "b", "c", "isolated",
+    ]);
   });
 
   it("keeps the default World Cup progression view on positive outcomes", () => {
@@ -110,7 +142,7 @@ describe("World Cup outcome explorer", () => {
     };
     const filtered = filterGraphView(semanticView, "implies", 0.95, false);
     expect(filtered.edges.map((edge) => edge.id)).toEqual(["implication"]);
-    expect(filtered.nodes.map((node) => node.id)).toEqual(["a", "b"]);
+    expect(filtered.nodes.map((node) => node.id)).toEqual(["a", "b", "c", "isolated"]);
     const negative = filterGraphView(semanticView, "implies", 0.95, false, "all", false);
     expect(negative.edges.map((edge) => edge.id)).toEqual(["implication", "negative"]);
     expect(negative.nodes.map((node) => node.id)).toEqual(["a", "b", "c", "isolated"]);

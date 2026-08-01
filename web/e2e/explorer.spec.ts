@@ -315,7 +315,24 @@ test.beforeEach(async ({ page }) => {
         context_pruning: { incident_edge_cap_per_endpoint: 2, candidate_nodes: 2, candidate_edges: 1, retained_nodes: 2, retained_edges: 1, pruned_nodes: 0, pruned_edges: 0 },
       };
     } else if (url.pathname.endsWith("/search")) {
-      body = [{ node_id: winnerYes.id, market_id: winnerYes.market_id, outcome_label: "Yes", event_slug: "wc2026", canonical_proposition: winnerYes.plain_claim }];
+      const query = (url.searchParams.get("q") ?? "").toLowerCase();
+      body = query.includes("not")
+        ? [{
+            node_id: finalNo.id,
+            market_id: finalNo.market_id,
+            outcome_label: "No",
+            event_slug: "wc2026",
+            canonical_proposition: finalNo.technical_canonical_label,
+            plain_claim: finalNo.plain_claim,
+          }]
+        : [{
+            node_id: winnerYes.id,
+            market_id: winnerYes.market_id,
+            outcome_label: "Yes",
+            event_slug: "wc2026",
+            canonical_proposition: "Will Brazil win the 2026 FIFA World Cup?",
+            plain_claim: winnerYes.plain_claim,
+          }];
     } else if (url.pathname.endsWith("/subgraph")) {
       body = graphView;
     } else if (url.pathname.includes("/nodes/")) {
@@ -385,6 +402,8 @@ test("opens only the graph and its controls with cross-team logic selected", asy
   await expect(page.locator(".topbar, .primary-nav, .site-footer")).toHaveCount(0);
   await expect(page.locator(".graph-canvas")).toBeVisible();
   await expect(page.getByLabel("Show")).toHaveValue("all");
+  await expect(page.getByLabel("Grouping")).toHaveCount(0);
+  await expect(page.getByRole("option", { name: "Can coexist" })).toHaveCount(0);
   await expect(page.getByText("Earlier market close")).toBeVisible();
   await expect(page.getByText("Proof tools")).toHaveCount(0);
   await page.getByLabel("Find a team or outcome").fill("Brazil");
@@ -394,6 +413,10 @@ test("opens only the graph and its controls with cross-team logic selected", asy
   await expect(page.getByText(`ID: ${winnerYes.id}`)).not.toBeVisible();
   await page.getByText("Technical details").click();
   await expect(page.getByText(`ID: ${winnerYes.id}`)).toBeVisible();
+  await page.getByLabel("Find a team or outcome").fill("not");
+  await page.getByRole("button", { name: "Find" }).click();
+  await expect(page.getByRole("button", { name: finalNo.plain_claim })).toBeVisible();
+  await expect(page.getByText(/NOT\(/)).toHaveCount(0);
   await page.getByText("Proof tools").click();
   await expect(page.getByLabel("From outcome ID")).toBeVisible();
 });

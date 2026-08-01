@@ -30,6 +30,7 @@ from oddsfox_graph._explorer.human import (
 from oddsfox_graph._explorer.aggregation import EVENT_SUMMARY_COLUMNS
 from oddsfox_graph.graph import Graph
 from oddsfox_graph.explorer import (
+    _static_human_rows,
     create_explorer_app,
     export_explorer,
     validate_explorer_host,
@@ -112,12 +113,47 @@ def test_why_not_maps_every_quarantine_category(
 
 def test_graph_search_nodes_edges_condition_and_explanations(tmp_path: Path) -> None:
     graph = Graph.open(_write_graph(tmp_path))
-    assert graph.search("Alpha")[0].node_id == "a"
+    search_result = graph.search("Alpha")[0]
+    assert search_result.node_id == "a"
+    assert search_result.plain_claim == "Argentina wins the World Cup"
+    assert graph.search("Argentina wins the World Cup")[0].node_id == "a"
     assert len(graph.nodes()) == 4
     assert graph.edges("implies")[0].src_node_id == "a"
     assert graph.condition("a", "b")[0]["method"] == "logic"
     assert graph.explain_node("a")["edges"]
     assert graph.explain_edge("a", "b", "implies")["edges"]
+
+
+def test_human_relationship_lookup_and_compare_include_compatible(
+    tmp_path: Path,
+) -> None:
+    out = _write_graph(tmp_path)
+    db = DuckDB(out / "oddsfox_graph.duckdb")
+    try:
+        db.execute(
+            """
+            INSERT INTO edges
+            SELECT * REPLACE (
+                'a' AS src_node_id,
+                'c' AS dst_node_id,
+                'compatible' AS edge_type,
+                1.0 AS confidence,
+                'compatible' AS evidence,
+                'a and c are compatible' AS explanation,
+                'p6' AS proposal_id
+            )
+            FROM edges
+            WHERE proposal_id = 'p1'
+            """
+        )
+    finally:
+        db.close()
+    graph = Graph.open(out)
+    assert graph.relationship("p6").relation == "compatible"
+    comparison = graph.compare("a", "c")
+    assert comparison.status == "direct"
+    assert comparison.direct is not None
+    assert comparison.direct.proposal_id == "p6"
 
 
 def test_explorer_api_is_loopback_bounded_and_cacheable(tmp_path: Path) -> None:
@@ -281,9 +317,13 @@ def test_wc2026_human_explorer_routes_use_structured_claims(tmp_path: Path) -> N
     assert client.get("/api/v1/entity-search?q=Argentina").status_code == 200
     assert client.get("/api/v1/compare?a=a&b=d").json()["status"] == "direct"
 
-    indirect = graph.compare("b", "d")
+    redundant_direct = graph.compare("b", "d")
+    assert redundant_direct.status == "direct"
+    assert redundant_direct.direct is not None
+    assert redundant_direct.direct.proposal_id == "p5"
+    indirect = graph.compare("a", "c")
     assert indirect.status == "path"
-    assert [item.proposal_id for item in indirect.path] == ["p2", "p3"]
+    assert [item.proposal_id for item in indirect.path] == ["p1", "p2"]
     assert graph.relationship("p5").proposal_id == "p5"
 
 
@@ -569,7 +609,7 @@ def test_static_explorer_export_contains_bounded_parquet_snapshot(tmp_path: Path
             for row in db.rows(
                 f"SELECT proposal_id FROM read_parquet('{q(destination / 'snapshot_relationships.parquet')}')"
             )
-        } == {"p1", "p2", "p3", "p4"}
+        } == {"p1", "p2", "p3", "p4", "p5"}
         stage_coverage = {
             row["stage_key"]: row
             for row in db.rows(
@@ -604,6 +644,21 @@ def test_static_explorer_export_contains_bounded_parquet_snapshot(tmp_path: Path
         max_nodes=4,
         max_edges=5,
     )
+    bounded_view = Graph.open(out).neighborhood(
+        ("a",),
+        hops=1,
+        max_nodes=4,
+        max_edges=2,
+    )
+    assert bounded_view.truncated_edges is False
+    bounded_rows = _static_human_rows(
+        out,
+        tuple(node.id for node in bounded_view.nodes),
+        tuple(edge.id for edge in bounded_view.edges),
+    )
+    assert {str(row["proposal_id"]) for row in bounded_rows["relationships"]} == {
+        edge.id for edge in bounded_view.edges
+    }
     with pytest.raises(KeyError, match="Unknown event_key"):
         export_explorer(
             out,

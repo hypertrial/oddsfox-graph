@@ -164,7 +164,6 @@ _WC2026_REQUIRED_COLUMNS = {
     "opposite_clob_token_id",
     "market_status",
     "is_still_alive",
-    "end_date",
     "odds_hour_utc",
     "odds_hour_epoch",
 }
@@ -292,20 +291,21 @@ def _load_wc2026_markets(
                 "WC2026 graph input has invalid hourly grain or volume for: "
                 + ", ".join(invalid_hours)
             )
-        invalid_close_times = _bounded_values(
-            db,
-            f"""
-            SELECT market_id || '/' || clob_token_id AS value
-            FROM read_parquet('{q(input_path)}')
-            WHERE NOT isfinite(end_date)
-            ORDER BY value
-            """,
-        )
-        if invalid_close_times:
-            raise _wc2026_error(
-                "WC2026 graph input has a non-finite end_date for: "
-                + ", ".join(invalid_close_times)
+        if "end_date" in schema:
+            invalid_close_times = _bounded_values(
+                db,
+                f"""
+                SELECT market_id || '/' || clob_token_id AS value
+                FROM read_parquet('{q(input_path)}')
+                WHERE end_date IS NULL OR NOT isfinite(end_date)
+                ORDER BY value
+                """,
             )
+            if invalid_close_times:
+                raise _wc2026_error(
+                    "WC2026 graph input has a null or non-finite end_date for: "
+                    + ", ".join(invalid_close_times)
+                )
         duplicate_grains = _bounded_values(
             db,
             f"""
@@ -342,7 +342,7 @@ def _load_wc2026_markets(
                 opposite_clob_token_id::VARCHAR AS opposite_clob_token_id,
                 market_status::VARCHAR AS market_status,
                 is_still_alive::BOOLEAN AS is_still_alive,
-                end_date::TIMESTAMPTZ AS market_close_time
+                {"end_date::TIMESTAMPTZ" if "end_date" in schema else "NULL::TIMESTAMPTZ"} AS market_close_time
             FROM read_parquet('{q(input_path)}')
             ORDER BY market_id, outcome_index, clob_token_id
             """
@@ -442,7 +442,7 @@ def _validate_wc2026_column_types(schema: dict[str, str]) -> None:
             "WC2026 graph input has incompatible column type: "
             f"odds_hour_utc={schema['odds_hour_utc']}"
         )
-    if not schema["end_date"].startswith("TIMESTAMP"):
+    if "end_date" in schema and not schema["end_date"].startswith("TIMESTAMP"):
         raise _wc2026_error(
             "WC2026 graph input has incompatible column type: "
             f"end_date={schema['end_date']}"

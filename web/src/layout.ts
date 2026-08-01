@@ -229,12 +229,23 @@ function seedLayout(view: GraphView, key: string): Record<string, Position> {
 function groupNodes(view: GraphView): Map<string, GraphView["nodes"]> {
   const groups = new Map<string, GraphView["nodes"]>();
   for (const node of [...view.nodes].sort(byId)) {
-    const groupId = node.component_id ?? node.parent_id ?? "ungrouped";
+    const groupId = layoutGroupId(node);
     const group = groups.get(groupId) ?? [];
     group.push(node);
     groups.set(groupId, group);
   }
   return groups;
+}
+
+export function layoutGroupId(node: GraphView["nodes"][number]): string {
+  if (
+    node.level === "proposition"
+    && typeof node.progression_outcome === "boolean"
+    && node.domain
+  ) {
+    return `team:${node.domain.toLocaleLowerCase()}`;
+  }
+  return node.component_id ?? node.parent_id ?? "ungrouped";
 }
 
 function packGroups(

@@ -14,6 +14,7 @@ import type {
   StageDetail,
   TeamDetail,
 } from "./types";
+import { essentialGraphEdges } from "./graphEdges";
 
 let staticMode = false;
 
@@ -113,15 +114,27 @@ export async function overview(
   signal?: AbortSignal,
   edgeMode: EdgeMode = "all",
 ): Promise<GraphView> {
-  if (staticMode) {
+  if (level === "proposition") {
+    let base: GraphView;
+    if (staticMode) {
+      base = (await staticSnapshot()).view;
+    } else {
+      const params = graphFilterParameters(relation, minConfidence, evidenceTier, "all");
+      params.set("level", "proposition");
+      params.set("include_compatible", String(includeCompatible));
+      base = await json<GraphView>(`/api/v1/overview?${params}`, signal);
+    }
     return filterGraphView(
-      (await staticSnapshot()).view,
+      base,
       relation,
       minConfidence,
       includeCompatible,
       evidenceTier,
+      true,
+      edgeMode,
     );
   }
+  if (staticMode) return (await staticSnapshot()).view;
   const params = graphFilterParameters(relation, minConfidence, evidenceTier, edgeMode);
   params.set("level", level);
   params.set("include_compatible", String(includeCompatible));
@@ -149,8 +162,11 @@ export function filterGraphView(
   includeCompatible: boolean,
   evidenceTier: EvidenceTier = "all",
   progressionOnly = true,
+  edgeMode: EdgeMode = "essential",
 ): GraphView {
-  const hasProgressionSemantics = view.nodes.some((node) => node.progression_outcome !== undefined);
+  const hasProgressionSemantics = view.nodes.some(
+    (node) => typeof node.progression_outcome === "boolean",
+  );
   const progressionOutcomes = new Set(
     view.nodes.filter((node) => node.progression_outcome).map((node) => node.id),
   );
@@ -166,17 +182,19 @@ export function filterGraphView(
     }
     return includeCompatible || edge.relation !== "compatible";
   });
-  const connected = new Set(edges.flatMap((edge) => [edge.source, edge.target]));
+  const displayEdges = edgeMode === "essential" ? essentialGraphEdges(edges) : edges;
   return {
     ...view,
-    nodes: relation === "all" ? view.nodes : view.nodes.filter((node) => connected.has(node.id)),
-    edges,
+    nodes: view.nodes,
+    edges: displayEdges,
+    edge_mode: edgeMode,
+    display_stats: null,
   };
 }
 
 export async function neighborhood(node: string, hops = 2): Promise<GraphView> {
   if (staticMode) return focusedView((await staticSnapshot()).view, node, hops);
-  const params = new URLSearchParams({ node, hops: String(hops), edge_mode: "essential" });
+  const params = new URLSearchParams({ node, hops: String(hops), edge_mode: "all" });
   return json<GraphView>(`/api/v1/subgraph?${params}`);
 }
 

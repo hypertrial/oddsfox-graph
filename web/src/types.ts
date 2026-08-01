@@ -28,8 +28,8 @@ export interface ExplorerNode {
   edge_count: number;
   classification_coverage: number | null;
   classification_status: ClassificationStatus;
-  progression_outcome?: boolean;
-  market_close_epoch?: number;
+  progression_outcome?: boolean | null;
+  market_close_epoch?: number | null;
 }
 
 export interface ExplorerEdge {
@@ -118,7 +118,7 @@ export interface ClaimSummary {
   is_progression_token: boolean;
   market_status: string;
   is_still_alive: boolean | null;
-  market_close_epoch: number;
+  market_close_epoch: number | null;
   technical_canonical_label: string;
 }
 
@@ -165,7 +165,7 @@ export interface MarketDetail {
   market_direction: "winner" | "advance" | "elimination";
   market_status: string;
   is_still_alive: boolean | null;
-  market_close_epoch: number;
+  market_close_epoch: number | null;
   claims: ClaimSummary[];
 }
 
@@ -405,6 +405,7 @@ export interface SearchNode {
   outcome_label: string;
   event_slug: string;
   canonical_proposition: string;
+  plain_claim?: string | null;
 }
 
 export interface GraphMetadata {

@@ -182,7 +182,7 @@ class ClaimSummary(BaseModel):
     is_progression_token: bool
     market_status: str
     is_still_alive: bool | None = None
-    market_close_epoch: int
+    market_close_epoch: int | None = None
     technical_canonical_label: str
 
 
@@ -199,7 +199,7 @@ class MarketDetail(BaseModel):
     market_direction: Literal["winner", "advance", "elimination"]
     market_status: str
     is_still_alive: bool | None = None
-    market_close_epoch: int
+    market_close_epoch: int | None = None
     claims: tuple[ClaimSummary, ...]
 
 

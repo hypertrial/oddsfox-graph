@@ -147,6 +147,9 @@ def test_fast_mode_publishes_shared_contract_without_inference(tmp_path: Path) -
     graph = Graph.open(first_out)
     assert graph.build_mode == "fast"
     assert graph.metadata().build["build_mode"] == "fast"
+    generic_search = graph.search("Alpha")
+    assert generic_search
+    assert generic_search[0].plain_claim is None
     with pytest.raises(
         ValueError,
         match="World Cup exploration and recording require a graph built",

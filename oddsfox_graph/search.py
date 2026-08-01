@@ -59,6 +59,22 @@ def search_nodes(out_dir: Path, query: str, top: int = 20) -> list[dict[str, obj
     )
 
 
+def nodes_by_ids(out_dir: Path, node_ids: Sequence[str]) -> list[dict[str, object]]:
+    if not node_ids:
+        return []
+    return read_rows(
+        out_dir,
+        "nodes.parquet",
+        f"""
+        SELECT node_id, market_id, outcome_label, event_slug, canonical_proposition
+        FROM read_parquet('{PATH_SENTINEL}')
+        WHERE node_id IN (SELECT unnest(?))
+        ORDER BY node_id
+        """,
+        [list(node_ids)],
+    )
+
+
 def resolve_node(out_dir: Path, text: str, *, require_unique: bool = False) -> str | None:
     exact = read_rows(
         out_dir,

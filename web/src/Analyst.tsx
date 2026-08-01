@@ -1,6 +1,7 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import * as api from "./api";
 import { GraphCanvas } from "./GraphCanvas";
+import { safeClaim } from "./human";
 import type {
   EvidenceTier,
   GraphMetadata,
@@ -34,7 +35,6 @@ interface Props {
 
 export function Analyst({ metadata, onEnterStory }: Props) {
   const [view, setView] = useState<GraphView | null>(null);
-  const [level, setLevel] = useState<"component" | "event" | "proposition">("proposition");
   const [relation, setRelation] = useState<Relation | "all">("all");
   const [minConfidence, setMinConfidence] = useState(0.95);
   const [evidenceTier, setEvidenceTier] = useState<EvidenceTier>("all");
@@ -52,7 +52,7 @@ export function Analyst({ metadata, onEnterStory }: Props) {
   const [contextLabel, setContextLabel] = useState("All teams");
   const overviewRequest = useRef<AbortController | null>(null);
   const graphFingerprint = String(metadata.viewer.graph_content_fingerprint ?? "unknown");
-  const requestedFilterKey = `${level}:${relation}:${minConfidence.toFixed(2)}:${evidenceTier}:essential`;
+  const requestedFilterKey = `proposition:${relation}:${minConfidence.toFixed(2)}:${evidenceTier}:essential`;
   const [viewFilterKey, setViewFilterKey] = useState(requestedFilterKey);
   const isStatic = metadata.viewer.static === true;
 
@@ -61,7 +61,7 @@ export function Analyst({ metadata, onEnterStory }: Props) {
     setError(null);
     try {
       const next = await api.overview(
-        level,
+        "proposition",
         relation,
         minConfidence,
         relation === "compatible",
@@ -73,14 +73,14 @@ export function Analyst({ metadata, onEnterStory }: Props) {
       setViewFilterKey(requestedFilterKey);
       setSelectedId(null);
       setDetail(null);
-      setContextLabel(level === "component" ? "Team groups" : level === "event" ? "Market groups" : "All teams");
+      setContextLabel("All teams");
     } catch (reason) {
       if (reason instanceof DOMException && reason.name === "AbortError") return;
       setError(message(reason));
     } finally {
       if (!signal?.aborted) setLoading(false);
     }
-  }, [level, relation, minConfidence, evidenceTier, requestedFilterKey]);
+  }, [relation, minConfidence, evidenceTier, requestedFilterKey]);
 
   useEffect(() => {
     overviewRequest.current?.abort();
@@ -124,31 +124,6 @@ export function Analyst({ metadata, onEnterStory }: Props) {
     }
   }, [view]);
 
-  const openNode = useCallback(async (id: string) => {
-    const selected = view?.nodes.find((node) => node.id === id);
-    if (!selected || selected.level === "proposition") return;
-    overviewRequest.current?.abort();
-    setLoading(true);
-    setError(null);
-    try {
-      if (selected.level === "event") {
-        setView(await api.eventGraph(id, relation, minConfidence, evidenceTier));
-        setViewFilterKey(`event:${id}:${requestedFilterKey}`);
-        setContextLabel(selected.label);
-      } else {
-        setView(await api.componentGraph(id, relation, minConfidence, evidenceTier));
-        setViewFilterKey(`component:${id}:${requestedFilterKey}`);
-        setContextLabel(selected.label);
-      }
-      setSelectedId(null);
-      setDetail(null);
-    } catch (reason) {
-      setError(message(reason));
-    } finally {
-      setLoading(false);
-    }
-  }, [view, relation, minConfidence, evidenceTier, requestedFilterKey]);
-
   async function submitSearch(event: FormEvent) {
     event.preventDefault();
     if (!query.trim()) return;
@@ -174,7 +149,7 @@ export function Analyst({ metadata, onEnterStory }: Props) {
         selected?.progression_outcome !== false,
       ));
       setViewFilterKey(`search:${result.node_id}:essential`);
-      setContextLabel(result.canonical_proposition);
+      setContextLabel(selected?.label ?? safeClaim(result.canonical_proposition));
       setSelectedId(result.node_id);
       if (!reasonFrom) setReasonFrom(result.node_id);
       else if (!reasonTo && reasonFrom !== result.node_id) setReasonTo(result.node_id);
@@ -252,7 +227,7 @@ export function Analyst({ metadata, onEnterStory }: Props) {
               {results.map((result) => (
                 <li key={result.node_id}>
                   <button type="button" onClick={() => void openResult(result)}>
-                    <span>{result.canonical_proposition}</span>
+                    <span>{result.plain_claim ?? view?.nodes.find((node) => node.id === result.node_id)?.label ?? safeClaim(result.canonical_proposition)}</span>
                   </button>
                 </li>
               ))}
@@ -262,7 +237,7 @@ export function Analyst({ metadata, onEnterStory }: Props) {
         <label className="relation-filter">
           Show
           <select value={relation} onChange={(event) => setRelation(event.target.value as Relation | "all")}>
-            {relations.map((value) => <option key={value} value={value}>{relationLabels[value]}</option>)}
+            {relations.filter((value) => value !== "compatible").map((value) => <option key={value} value={value}>{relationLabels[value]}</option>)}
           </select>
         </label>
         <span className="graph-summary">
@@ -272,20 +247,6 @@ export function Analyst({ metadata, onEnterStory }: Props) {
         <details className="graph-options">
           <summary>More</summary>
           <div>
-            <label>
-              Grouping
-              <select
-                value={isStatic ? "static" : level}
-                disabled={isStatic}
-                title={isStatic ? "Static snapshots use their exported graph level" : undefined}
-                onChange={(event) => setLevel(event.target.value as "component" | "event" | "proposition")}
-              >
-                {isStatic && <option value="static">Snapshot layout</option>}
-                <option value="proposition">Outcomes</option>
-                <option value="event">Market groups</option>
-                <option value="component">Team groups</option>
-              </select>
-            </label>
             <label>
               Evidence
               <select value={evidenceTier} onChange={(event) => setEvidenceTier(event.target.value as EvidenceTier)}>
@@ -323,7 +284,6 @@ export function Analyst({ metadata, onEnterStory }: Props) {
             frame={0}
             onSelectNode={selectNode}
             onSelectEdge={selectEdge}
-            onOpenNode={(id) => void openNode(id)}
           />
           {usesCloseTimeLayout && (
             <div className="timeline-guide" aria-hidden="true"><span>Earlier market close</span><span>Later market close →</span></div>

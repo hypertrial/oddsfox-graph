@@ -26,7 +26,7 @@ rule-specific proof-scope key; fuzzy entity merging is never used.
 
 The human explorer's production profile reads the pipeline's long-form WC2026
 graph mart. A trust-boundary adapter validates the hourly grain and canonical
-team/stage/progression fields plus market close time, then collapses rows into
+team/stage/progression fields plus optional market close time, then collapses rows into
 binary markets. Prices, close times, and observation timestamps are not logical inputs. Structured WC rules operate
 inside a team progression scope, except for explicit exclusion between
 different teams' positive winner claims. The raw file hash records provenance;
@@ -51,9 +51,10 @@ input profile, discovery semantics, rules, and viewer contracts only.
 `Graph` and `ExplorerStore` open completed outputs read-only. The loopback-only
 FastAPI service exposes bounded parameterized queries, never arbitrary SQL.
 React starts with an accessible WC2026 stage/team progression map. Its graph-only
-Sigma surface requests a complete bounded proposition view, keeps every source
-team, and freezes nodes into close-time columns; focused neighborhoods use the
-same layout contract.
+Sigma surface requests a complete bounded proposition view and keeps every
+source team. It freezes nodes into close-time columns when the source supplies
+that metadata and otherwise uses the deterministic hierarchical layout;
+focused neighborhoods use the same layout contract.
 Explore consumes display-essential edges and grouped constraints; source graph
 artifacts remain unchanged. `prove` traverses implication plus bidirectional
 equivalence only; it never materializes transitive closure.

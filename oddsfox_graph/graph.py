@@ -40,7 +40,14 @@ from ._discovery.versions import (
     discovery_semantics_fingerprint,
 )
 from .queries import DuckDB
-from .search import PATH_SENTINEL, read_rows, require_artifact, resolve_node, search_nodes
+from .search import (
+    PATH_SENTINEL,
+    nodes_by_ids,
+    read_rows,
+    require_artifact,
+    resolve_node,
+    search_nodes,
+)
 
 
 Relation = Literal[
@@ -65,6 +72,7 @@ class Node(BaseModel):
     outcome_label: str
     event_slug: str
     canonical_proposition: str
+    plain_claim: str | None = None
 
 
 class Edge(BaseModel):
@@ -471,7 +479,62 @@ class Graph:
         return self._explorer().edge(proposal_id)
 
     def search(self, query: str, top: int = 20) -> tuple[Node, ...]:
-        return tuple(Node.model_validate(row) for row in search_nodes(self.out_dir, query, top))
+        if top <= 0:
+            return ()
+        legacy_rows = search_nodes(self.out_dir, query, top)
+        build = self.metadata().build
+        build_input = build.get("input")
+        input_profile = (
+            build_input.get("schema")
+            if isinstance(build_input, dict)
+            else build.get("input_schema")
+        )
+        if input_profile != WC2026_SOURCE_SCHEMA:
+            return tuple(Node.model_validate(row) for row in legacy_rows)
+        claim_matches = (
+            self._explorer().claim_search(query, limit=min(top, 100))
+            if query.strip()
+            else ()
+        )
+        candidate_ids = list(
+            dict.fromkeys(
+                [claim.id for claim in claim_matches]
+                + [str(row["node_id"]) for row in legacy_rows]
+            )
+        )
+        normalized_query = query.strip().casefold()
+        ordered_ids = [
+            *(
+                node_id
+                for node_id in candidate_ids
+                if node_id.casefold() == normalized_query
+            ),
+            *(
+                node_id
+                for node_id in candidate_ids
+                if node_id.casefold() != normalized_query
+            ),
+        ]
+        rows_by_id = {
+            str(row["node_id"]): row
+            for row in (*legacy_rows, *nodes_by_ids(self.out_dir, ordered_ids))
+        }
+        plain_claims = self._explorer().plain_claims(tuple(ordered_ids))
+        result: list[Node] = []
+        seen_labels: set[str] = set()
+        for node_id in ordered_ids:
+            row = rows_by_id[node_id]
+            plain_claim = plain_claims.get(node_id)
+            display_label = str(plain_claim or row["canonical_proposition"]).casefold()
+            if display_label in seen_labels and node_id.casefold() != normalized_query:
+                continue
+            seen_labels.add(display_label)
+            result.append(
+                Node.model_validate({**row, "plain_claim": plain_claim})
+            )
+            if len(result) == top:
+                break
+        return tuple(result)
 
     def nodes(self, top: int = 50) -> tuple[Node, ...]:
         rows = read_rows(
