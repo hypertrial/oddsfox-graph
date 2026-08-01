@@ -16,7 +16,7 @@ opposite-token IDs, status, and hourly grain must be complete and unambiguous.
 An optional market `end_date` must be complete and invariant when present;
 closing time is retained only as plot metadata and is never treated as an event
 interval or rule input. Missing close time selects the deterministic
-hierarchical layout rather than an inferred ordering.
+team-by-progression grid rather than an inferred timestamp ordering.
 Malformed markets fail the build; discovery never skips them or falls back to
 question or slug matching.
 

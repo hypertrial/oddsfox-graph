@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 ExplorerLevel = Literal["component", "event", "proposition"]
-LayoutMode = Literal["hierarchical", "close_time"]
+LayoutMode = Literal["hierarchical", "close_time", "progression"]
 ExplorerRelation = Literal[
     "compatible",
     "complement",
@@ -56,6 +56,8 @@ class ExplorerNode(BaseModel):
     classification_coverage: float | None = None
     classification_status: CoverageStatus = "not_applicable"
     progression_outcome: bool | None = None
+    progression_level: int | None = Field(default=None, ge=0, le=5)
+    stage_key: str | None = None
     market_close_epoch: int | None = None
 
 

@@ -41,6 +41,10 @@ STATIC_NODE_COLUMNS = {
     "edge_count": "BIGINT",
     "classification_coverage": "DOUBLE",
     "classification_status": "VARCHAR",
+    "progression_outcome": "BOOLEAN",
+    "progression_level": "BIGINT",
+    "stage_key": "VARCHAR",
+    "market_close_epoch": "BIGINT",
 }
 
 STATIC_STAGE_COLUMNS = {

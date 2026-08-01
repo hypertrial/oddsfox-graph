@@ -285,10 +285,27 @@ def test_wc2026_profile_accepts_current_pipeline_contract_without_close_time(
     assert graph.search("Brazil reaches the round of 16")[0].plain_claim == (
         "Brazil reaches the round of 16"
     )
-    assert (
-        graph.overview("proposition", edge_mode="essential").layout_mode
-        == "hierarchical"
+    proposition_view = graph.overview("proposition", edge_mode="essential")
+    assert proposition_view.layout_mode == "progression"
+    assert {node.domain for node in proposition_view.nodes} == {
+        "Argentina",
+        "Brazil",
+    }
+    assert all(node.market_close_epoch is None for node in proposition_view.nodes)
+    assert all(node.stage_key is not None for node in proposition_view.nodes)
+    assert all(node.progression_level is not None for node in proposition_view.nodes)
+    assert all(
+        node.x
+        == node.progression_level * 260
+        + (-42 if node.progression_outcome else 42)
+        for node in proposition_view.nodes
+        if node.progression_level is not None
     )
+    for market_id in {node.market_id for node in proposition_view.nodes}:
+        pair = [node for node in proposition_view.nodes if node.market_id == market_id]
+        assert len(pair) == 2
+        assert abs(pair[0].x - pair[1].x) == 84
+        assert pair[0].y == pair[1].y
     assert graph.market("br-r16").market_close_epoch is None
     static = tmp_path / "static"
     manifest = export_explorer(out, static, scope="graph")
@@ -785,7 +802,37 @@ def test_recording_plan_ignores_winner_clique_for_story_diversity(
         ),
     )
 
-    plan = Graph.open(out).recording_plan(limit=6)
+    graph = Graph.open(out)
+    proposition_view = graph.overview("proposition", edge_mode="essential")
+    expected_teams = {f"Team {index:02d}" for index in range(1, 13)}
+    assert proposition_view.layout_mode == "close_time"
+    assert {node.domain for node in proposition_view.nodes} == expected_teams
+    assert len(proposition_view.nodes) == 144
+    close_columns = [
+        [
+            node.x
+            for node in proposition_view.nodes
+            if node.market_close_epoch == epoch
+        ]
+        for epoch in sorted(
+            {
+                node.market_close_epoch
+                for node in proposition_view.nodes
+                if node.market_close_epoch is not None
+            }
+        )
+    ]
+    assert all(
+        max(earlier) < min(later)
+        for earlier, later in zip(close_columns, close_columns[1:])
+    )
+    for market_id in {node.market_id for node in proposition_view.nodes}:
+        pair = [node for node in proposition_view.nodes if node.market_id == market_id]
+        assert len(pair) == 2
+        assert abs(pair[0].x - pair[1].x) == 84
+        assert pair[0].y == pair[1].y
+
+    plan = graph.recording_plan(limit=6)
 
     assert len(plan.highlights) == 6
     assert len({highlight.source_team_name for highlight in plan.highlights}) == 6

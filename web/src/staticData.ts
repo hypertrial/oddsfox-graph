@@ -298,7 +298,20 @@ async function load(): Promise<StaticSnapshot> {
       .filter((epoch): epoch is number => epoch !== null);
     const hasCloseTimes = claims.length > 0 && closeEpochs.length === claims.length;
     const closeColumns = closeTimeColumns(closeEpochs);
-    const marketOffsets = hasCloseTimes ? marketCloseOffsets(claims) : new Map<string, number>();
+    const hasProgressionSemantics = claims.length > 0 && claims.every(
+      (claim) => Number.isInteger(claim.normalized_progression_level),
+    );
+    const usesTournamentGrid = hasCloseTimes || hasProgressionSemantics;
+    const columnValue = (claim: ClaimSummary) => hasCloseTimes
+      ? claim.market_close_epoch!
+      : claim.normalized_progression_level;
+    const marketOffsets = usesTournamentGrid
+      ? marketColumnOffsets(claims, columnValue)
+      : new Map<string, number>();
+    const maxParallelMarkets = usesTournamentGrid
+      ? maximumParallelMarkets(claims, columnValue)
+      : 1;
+    const teamRowSpacing = Math.max(96, maxParallelMarkets * 48);
     const humanNodes = nodes.map((node) => {
       const claim = claimById.get(node.id);
       return claim ? {
@@ -306,14 +319,18 @@ async function load(): Promise<StaticSnapshot> {
         label: claim.plain_claim,
         domain: claim.canonical_team_name,
         progression_outcome: claim.is_progression_token,
+        progression_level: claim.normalized_progression_level,
+        stage_key: claim.stage_key,
         market_close_epoch: claim.market_close_epoch,
-        x: hasCloseTimes
-          ? (closeColumns.get(claim.market_close_epoch!) ?? 0) * 260
+        x: usesTournamentGrid
+          ? (hasCloseTimes
+              ? (closeColumns.get(claim.market_close_epoch!) ?? 0) * 260
+              : claim.normalized_progression_level * 260)
+            + (claim.is_progression_token ? -42 : 42)
           : node.x,
-        y: hasCloseTimes
-          ? (teamRows.get(claim.canonical_team_name) ?? 0) * 90
-            + (marketOffsets.get(claim.market_id) ?? 0) * 18
-            + (claim.is_progression_token ? 0 : 8)
+        y: usesTournamentGrid
+          ? (teamRows.get(claim.canonical_team_name) ?? 0) * teamRowSpacing
+            + (marketOffsets.get(claim.market_id) ?? 0) * 48
           : node.y,
       } : node;
     });
@@ -344,7 +361,11 @@ async function load(): Promise<StaticSnapshot> {
       truncated_edges: false,
       coverage: manifest.coverage,
       edge_mode: "all",
-      layout_mode: hasCloseTimes ? "close_time" : "hierarchical",
+      layout_mode: hasCloseTimes
+        ? "close_time"
+        : hasProgressionSemantics
+          ? "progression"
+          : "hierarchical",
       display_stats: displayStats,
     };
     return {
@@ -381,9 +402,16 @@ async function load(): Promise<StaticSnapshot> {
 }
 
 export function marketCloseOffsets(claims: ClaimSummary[]): Map<string, number> {
+  return marketColumnOffsets(claims, (claim) => claim.market_close_epoch);
+}
+
+function marketColumnOffsets(
+  claims: ClaimSummary[],
+  columnValue: (claim: ClaimSummary) => number | null,
+): Map<string, number> {
   const groups = new Map<string, Set<string>>();
   for (const claim of claims) {
-    const key = `${claim.canonical_team_name}\u0000${claim.market_close_epoch}`;
+    const key = `${claim.canonical_team_name}\u0000${columnValue(claim)}`;
     const markets = groups.get(key) ?? new Set<string>();
     markets.add(claim.market_id);
     groups.set(key, markets);
@@ -394,6 +422,20 @@ export function marketCloseOffsets(claims: ClaimSummary[]): Map<string, number> 
     ordered.forEach((marketId, index) => offsets.set(marketId, index - (ordered.length - 1) / 2));
   }
   return offsets;
+}
+
+function maximumParallelMarkets(
+  claims: ClaimSummary[],
+  columnValue: (claim: ClaimSummary) => number | null,
+): number {
+  const groups = new Map<string, Set<string>>();
+  for (const claim of claims) {
+    const key = `${claim.canonical_team_name}\u0000${columnValue(claim)}`;
+    const markets = groups.get(key) ?? new Set<string>();
+    markets.add(claim.market_id);
+    groups.set(key, markets);
+  }
+  return Math.max(1, ...[...groups.values()].map((markets) => markets.size));
 }
 
 async function register(database: duckdb.AsyncDuckDB, name: string) {

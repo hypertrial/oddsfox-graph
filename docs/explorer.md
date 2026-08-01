@@ -38,7 +38,8 @@ navigation, explanatory sections, and footer so only the graph, its controls,
 and selection inspector remain. It opens on every display-essential relation,
 including the cross-team winner exclusions. Complete live and static views retain
 all teams from the canonical input even when a filter temporarily leaves a team
-without a visible edge. Relation, evidence, confidence, and progression-polarity
+without a visible edge, while relation-specific views omit irrelevant outcomes
+and keep one deterministic team representative. Relation, evidence, confidence, and progression-polarity
 filters run before redundant implications are removed, so every omitted visible
 implication still has an equal-or-stronger path in the filtered graph. Static
 snapshots retain all accepted relationship details and derive the same essential
@@ -53,9 +54,13 @@ Sigma and Graphology are constructed once per canvas. Inspection state is
 applied with reducers, so selection and hover do not replace the renderer or
 reset the camera. When every market has source `end_date`, complete live and
 static WC2026 views use frozen team rows with market close time increasing from
-left to right; equal close times are placed in stable market-ID order. Without
-that optional metadata they use the deterministic hierarchical layout. Close
-time is presentation metadata only and is excluded from relationship inference.
+left to right; equal close times are placed in stable market-ID sublanes and
+Yes/No outcomes sit on opposite sides of the same close column. Without that
+optional metadata they use the same team rows with normalized progression from
+left to right. Close time is presentation metadata only and is excluded from
+relationship inference. Node size and persistent labels reflect the currently
+visible graph, and overview links are subdued until hover or selection so the
+cross-team winner constraint remains inspectable without becoming an opaque cable.
 Component overviews remain packed atlases;
 event group views pack component groups after an exactly 250-iteration, worker-backed
 ForceAtlas2 layout, with deterministic seeds, four-decimal coordinates, and a

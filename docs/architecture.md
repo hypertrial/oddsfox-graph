@@ -53,7 +53,7 @@ FastAPI service exposes bounded parameterized queries, never arbitrary SQL.
 React starts with an accessible WC2026 stage/team progression map. Its graph-only
 Sigma surface requests a complete bounded proposition view and keeps every
 source team. It freezes nodes into close-time columns when the source supplies
-that metadata and otherwise uses the deterministic hierarchical layout;
+that metadata and otherwise uses a deterministic team-by-progression grid;
 focused neighborhoods use the same layout contract.
 Explore consumes display-essential edges and grouped constraints; source graph
 artifacts remain unchanged. `prove` traverses implication plus bidirectional

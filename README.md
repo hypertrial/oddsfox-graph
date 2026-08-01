@@ -45,9 +45,9 @@ The explorer input is
 tokens plus authoritative team, stage, direction, and progression semantics.
 When the export carries the optional source market `end_date`, the plotter uses
 it only for left-to-right placement and never as evidence for a logical edge.
-The current v1 pipeline contract without that column remains valid and uses the
-deterministic hierarchical layout; OddsFox Graph never substitutes odds
-timestamps for a missing market close time.
+The current v1 pipeline contract without that column remains valid and uses a
+deterministic team-by-progression grid instead; OddsFox Graph never substitutes
+odds timestamps for a missing market close time.
 Do not recreate membership by filtering questions, tags, or slugs.
 
 ```bash

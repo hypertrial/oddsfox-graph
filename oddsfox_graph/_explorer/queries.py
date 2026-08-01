@@ -22,6 +22,7 @@ from .contracts import (
     GraphPage,
     GraphView,
     HumanHighlight,
+    LayoutMode,
     MarketDetail,
     RelationshipDetail,
     RecordingContextPruning,
@@ -113,6 +114,11 @@ FROM eligible
 ORDER BY confidence DESC, proposal_id
 LIMIT ?
 """
+
+_PLOT_COLUMN_SPACING = 260.0
+_PLOT_POLARITY_X_OFFSET = 42.0
+_PLOT_MARKET_LANE_SPACING = 48.0
+_PLOT_MIN_TEAM_ROW_SPACING = 96.0
 
 
 _RECORDING_EXCLUSIONS_SQL = """
@@ -613,7 +619,8 @@ class ExplorerStore:
                 SELECT n.*, m.component_id, m.total_degree,
                        m.classification_state, m.classification_status,
                        m.classification_coverage,
-                       p.event_key, p.team_name, p.progression_level,
+                       p.event_key, p.team_name, p.stage_key,
+                       p.progression_level,
                        p.is_progression,
                        epoch(p.market_close_time)::BIGINT AS market_close_epoch
                 FROM nodes_table n
@@ -679,7 +686,8 @@ class ExplorerStore:
                 SELECT n.*, m.component_id, m.total_degree,
                        m.classification_state, m.classification_status,
                        m.classification_coverage,
-                       p.event_key, p.team_name, p.progression_level,
+                       p.event_key, p.team_name, p.stage_key,
+                       p.progression_level,
                        p.is_progression,
                        epoch(p.market_close_time)::BIGINT AS market_close_epoch
                 FROM nodes_table n
@@ -923,7 +931,8 @@ class ExplorerStore:
                 SELECT n.*, m.component_id, m.total_degree,
                        m.classification_state, m.classification_status,
                        m.classification_coverage,
-                       p.event_key, p.team_name, p.progression_level,
+                       p.event_key, p.team_name, p.stage_key,
+                       p.progression_level,
                        p.is_progression,
                        epoch(p.market_close_time)::BIGINT AS market_close_epoch
                 FROM nodes_table n
@@ -1279,6 +1288,7 @@ def _proposition_node(row: dict[str, object]) -> ExplorerNode:
     progression = row.get("is_progression")
     team = row.get("team_name")
     level = row.get("progression_level")
+    stage_key = row.get("stage_key")
     label = (
         _recording_plain_claim(str(team), _int(level), bool(progression))
         if team and level is not None and progression is not None
@@ -1299,44 +1309,82 @@ def _proposition_node(row: dict[str, object]) -> ExplorerNode:
         classification_coverage=_optional_float(row.get("classification_coverage")),
         classification_status=_coverage_status(row),
         progression_outcome=(None if progression is None else bool(progression)),
+        progression_level=(None if level is None else _int(level)),
+        stage_key=(None if stage_key is None else str(stage_key)),
         market_close_epoch=(None if close_epoch is None else _int(close_epoch)),
     )
 
 
 def _proposition_nodes(
     rows: list[dict[str, object]],
-) -> tuple[tuple[ExplorerNode, ...], Literal["hierarchical", "close_time"]]:
-    if not rows or any(
-        row.get("market_close_epoch") is None or not row.get("team_name") for row in rows
-    ):
+) -> tuple[tuple[ExplorerNode, ...], LayoutMode]:
+    if not rows:
         return tuple(_proposition_node(row) for row in rows), "hierarchical"
-    close_epochs = sorted({_int(row["market_close_epoch"]) for row in rows})
-    close_columns = {epoch: index for index, epoch in enumerate(close_epochs)}
+
+    has_teams = all(row.get("team_name") for row in rows)
+    has_close_times = has_teams and all(
+        row.get("market_close_epoch") is not None for row in rows
+    )
+    has_progression_semantics = has_teams and all(
+        row.get("progression_level") is not None
+        and row.get("is_progression") is not None
+        for row in rows
+    )
+    if has_close_times:
+        close_epochs = sorted({_int(row["market_close_epoch"]) for row in rows})
+        columns = {
+            epoch: index * _PLOT_COLUMN_SPACING
+            for index, epoch in enumerate(close_epochs)
+        }
+        column_key = "market_close_epoch"
+        layout_mode: LayoutMode = "close_time"
+    elif has_progression_semantics:
+        progression_levels = sorted({_int(row["progression_level"]) for row in rows})
+        columns = {
+            level: level * _PLOT_COLUMN_SPACING for level in progression_levels
+        }
+        column_key = "progression_level"
+        layout_mode = "progression"
+    else:
+        return tuple(_proposition_node(row) for row in rows), "hierarchical"
+
     teams = sorted({str(row["team_name"]) for row in rows})
     team_rows = {team: index for index, team in enumerate(teams)}
     grouped_markets: dict[tuple[str, int], set[str]] = {}
     for row in rows:
-        key = (str(row["team_name"]), _int(row["market_close_epoch"]))
+        key = (str(row["team_name"]), _int(row[column_key]))
         grouped_markets.setdefault(key, set()).add(str(row["market_id"]))
     market_offsets: dict[str, float] = {}
     for markets_set in grouped_markets.values():
         markets = sorted(markets_set)
         for index, market_id in enumerate(markets):
             market_offsets[market_id] = index - (len(markets) - 1) / 2
+    max_parallel_markets = max(len(markets) for markets in grouped_markets.values())
+    team_row_spacing = max(
+        _PLOT_MIN_TEAM_ROW_SPACING,
+        max_parallel_markets * _PLOT_MARKET_LANE_SPACING,
+    )
     positioned = []
     for row in rows:
-        close_epoch = _int(row["market_close_epoch"])
         team = str(row["team_name"])
+        progression = row.get("is_progression")
+        polarity_offset = (
+            -_PLOT_POLARITY_X_OFFSET
+            if progression is True
+            else _PLOT_POLARITY_X_OFFSET
+            if progression is False
+            else 0.0
+        )
         positioned.append(
             {
                 **row,
-                "layout_x": close_columns[close_epoch] * 260,
-                "layout_y": team_rows[team] * 90
-                + market_offsets[str(row["market_id"])] * 18
-                + (0 if bool(row.get("is_progression")) else 8),
+                "layout_x": columns[_int(row[column_key])] + polarity_offset,
+                "layout_y": team_rows[team] * team_row_spacing
+                + market_offsets[str(row["market_id"])]
+                * _PLOT_MARKET_LANE_SPACING,
             }
         )
-    return tuple(_proposition_node(row) for row in positioned), "close_time"
+    return tuple(_proposition_node(row) for row in positioned), layout_mode
 
 
 def _event_edge(row: dict[str, object]) -> ExplorerEdge:

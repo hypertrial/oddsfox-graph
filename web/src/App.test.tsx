@@ -120,12 +120,10 @@ describe("World Cup outcome explorer", () => {
       "compatibility",
     ]);
     expect(filterGraphView(fixture, "compatible", 0.98, false).nodes.map((node) => node.id)).toEqual([
-      "a", "b", "c", "isolated",
+      "a", "c",
     ]);
     expect(filterGraphView(fixture, "implies", 0.98, true).edges).toEqual([]);
-    expect(filterGraphView(fixture, "implies", 0.98, true).nodes.map((node) => node.id)).toEqual([
-      "a", "b", "c", "isolated",
-    ]);
+    expect(filterGraphView(fixture, "implies", 0.98, true).nodes).toEqual([]);
   });
 
   it("keeps the default World Cup progression view on positive outcomes", () => {
@@ -142,10 +140,36 @@ describe("World Cup outcome explorer", () => {
     };
     const filtered = filterGraphView(semanticView, "implies", 0.95, false);
     expect(filtered.edges.map((edge) => edge.id)).toEqual(["implication"]);
-    expect(filtered.nodes.map((node) => node.id)).toEqual(["a", "b", "c", "isolated"]);
+    expect(filtered.nodes.map((node) => node.id)).toEqual(["a", "b"]);
     const negative = filterGraphView(semanticView, "implies", 0.95, false, "all", false);
     expect(negative.edges.map((edge) => edge.id)).toEqual(["implication", "negative"]);
     expect(negative.nodes.map((node) => node.id)).toEqual(["a", "b", "c", "isolated"]);
+  });
+
+  it("keeps one deterministic representative for every team in filtered views", () => {
+    const teamView: GraphView = {
+      ...fixture,
+      nodes: [
+        { ...fixture.nodes[0], id: "brazil-final", domain: "Brazil", progression_outcome: true, progression_level: 4 },
+        { ...fixture.nodes[0], id: "brazil-winner", domain: "Brazil", progression_outcome: true, progression_level: 5 },
+        { ...fixture.nodes[0], id: "argentina-winner", domain: "Argentina", progression_outcome: true, progression_level: 5 },
+        { ...fixture.nodes[0], id: "spain-final", domain: "Spain", progression_outcome: true, progression_level: 4 },
+        { ...fixture.nodes[0], id: "spain-winner", domain: "Spain", progression_outcome: true, progression_level: 5 },
+      ],
+      edges: [{
+        ...fixture.edges[0],
+        id: "winner-exclusion",
+        source: "brazil-winner",
+        target: "argentina-winner",
+        relation: "mutually_exclusive",
+      }],
+    };
+    const filtered = filterGraphView(teamView, "mutually_exclusive", 0.95, false);
+    expect(filtered.nodes.map((node) => node.id)).toEqual([
+      "brazil-winner",
+      "argentina-winner",
+      "spain-winner",
+    ]);
   });
 
   it("keeps every market at its normalized progression level", () => {

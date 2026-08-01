@@ -183,13 +183,48 @@ export function filterGraphView(
     return includeCompatible || edge.relation !== "compatible";
   });
   const displayEdges = edgeMode === "essential" ? essentialGraphEdges(edges) : edges;
+  const nodes = relation === "all" && evidenceTier === "all"
+    ? view.nodes
+    : filteredGraphNodes(view.nodes, displayEdges);
   return {
     ...view,
-    nodes: view.nodes,
+    nodes,
     edges: displayEdges,
     edge_mode: edgeMode,
     display_stats: null,
   };
+}
+
+function filteredGraphNodes(
+  nodes: GraphView["nodes"],
+  edges: GraphView["edges"],
+): GraphView["nodes"] {
+  const visible = new Set(edges.flatMap((edge) => [edge.source, edge.target]));
+  const representedTeams = new Set(
+    nodes
+      .filter((node) => visible.has(node.id) && node.domain)
+      .map((node) => node.domain),
+  );
+  const representatives = new Set<string>();
+  const candidatesByTeam = new Map<string, GraphView["nodes"]>();
+  for (const node of nodes) {
+    if (!node.domain || representedTeams.has(node.domain)) continue;
+    const candidates = candidatesByTeam.get(node.domain) ?? [];
+    candidates.push(node);
+    candidatesByTeam.set(node.domain, candidates);
+  }
+  for (const candidates of candidatesByTeam.values()) {
+    candidates.sort((left, right) =>
+      Number(right.progression_outcome === true) - Number(left.progression_outcome === true)
+      || (right.progression_level ?? Number.NEGATIVE_INFINITY)
+        - (left.progression_level ?? Number.NEGATIVE_INFINITY)
+      || (right.market_close_epoch ?? Number.NEGATIVE_INFINITY)
+        - (left.market_close_epoch ?? Number.NEGATIVE_INFINITY)
+      || right.x - left.x
+      || left.id.localeCompare(right.id));
+    if (candidates[0]) representatives.add(candidates[0].id);
+  }
+  return nodes.filter((node) => visible.has(node.id) || representatives.has(node.id));
 }
 
 export async function neighborhood(node: string, hops = 2): Promise<GraphView> {

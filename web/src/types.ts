@@ -29,6 +29,8 @@ export interface ExplorerNode {
   classification_coverage: number | null;
   classification_status: ClassificationStatus;
   progression_outcome?: boolean | null;
+  progression_level?: number | null;
+  stage_key?: string | null;
   market_close_epoch?: number | null;
 }
 
@@ -60,7 +62,7 @@ export interface GraphView {
   level: ExplorerLevel;
   nodes: ExplorerNode[];
   edges: ExplorerEdge[];
-  layout_mode?: "hierarchical" | "close_time";
+  layout_mode?: "hierarchical" | "progression" | "close_time";
   truncated_nodes: boolean;
   truncated_edges: boolean;
   coverage: Record<string, unknown>;

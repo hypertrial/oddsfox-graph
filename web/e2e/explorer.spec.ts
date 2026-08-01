@@ -127,51 +127,106 @@ const team = {
   classification_coverage: null,
 };
 
+const plotTeams = [
+  "Argentina", "Brazil", "England", "France", "Germany", "Japan",
+  "Mexico", "Morocco", "Netherlands", "Portugal", "Spain", "United States",
+];
+const plotStages = [
+  ["round_of_32", "reaches the round of 32"],
+  ["round_of_16", "reaches the round of 16"],
+  ["quarterfinal", "reaches the quarterfinals"],
+  ["semifinal", "reaches the semifinals"],
+  ["final", "reaches the final"],
+  ["winner", "wins the World Cup"],
+] as const;
+const plotId = (teamName: string) => teamName.toLowerCase().replaceAll(" ", "-");
+const graphNodes = plotTeams.flatMap((teamName, teamIndex) =>
+  plotStages.flatMap(([stageKey, outcome], progressionLevel) =>
+    [true, false].map((progressionOutcome) => ({
+      id: `${plotId(teamName)}-${stageKey}-${progressionOutcome ? "yes" : "no"}`,
+      label: `${teamName} ${progressionOutcome
+        ? outcome
+        : outcome.replace(/^reaches/, "does not reach").replace(/^wins/, "does not win")}`,
+      level: "proposition",
+      parent_id: "wc2026",
+      x: progressionLevel * 260 + (progressionOutcome ? -42 : 42),
+      y: teamIndex * 96,
+      size: 6,
+      domain: teamName,
+      component_id: "wc2026-progression",
+      market_id: `${plotId(teamName)}-${stageKey}`,
+      proposition_count: 1,
+      edge_count: 1,
+      classification_coverage: null,
+      classification_status: "not_applicable",
+      progression_outcome: progressionOutcome,
+      progression_level: progressionLevel,
+      stage_key: stageKey,
+      market_close_epoch: 1783000000 + progressionLevel * 86400,
+    })),
+  ),
+);
+const graphEdges = [
+  ...plotTeams.flatMap((teamName) => plotStages.flatMap(([stageKey], progressionLevel) => {
+    const teamId = plotId(teamName);
+    const edges = [{
+      id: `${teamId}-${stageKey}-complement`,
+      source: `${teamId}-${stageKey}-yes`,
+      target: `${teamId}-${stageKey}-no`,
+      relation: "complement",
+      count: 1,
+      confidence: 1,
+      discovery_method: "source_contract",
+      evidence_tier: "source_contract",
+      aggregation_only: false,
+    }];
+    if (progressionLevel > 0) edges.push({
+      id: progressionLevel === 5 && teamName === "Brazil"
+        ? relationship.proposal_id
+        : `${teamId}-${stageKey}-implies-${plotStages[progressionLevel - 1][0]}`,
+      source: `${teamId}-${stageKey}-yes`,
+      target: `${teamId}-${plotStages[progressionLevel - 1][0]}-yes`,
+      relation: "implies",
+      count: 1,
+      confidence: 1,
+      discovery_method: "deterministic",
+      evidence_tier: "deterministic_rule",
+      aggregation_only: false,
+    });
+    return edges;
+  })),
+  ...plotTeams.flatMap((sourceTeam, sourceIndex) =>
+    plotTeams.slice(sourceIndex + 1).map((targetTeam) => ({
+      id: `${plotId(sourceTeam)}-${plotId(targetTeam)}-winner-exclusion`,
+      source: `${plotId(sourceTeam)}-winner-yes`,
+      target: `${plotId(targetTeam)}-winner-yes`,
+      relation: "mutually_exclusive",
+      count: 1,
+      confidence: 1,
+      discovery_method: "deterministic",
+      evidence_tier: "deterministic_rule",
+      aggregation_only: false,
+    })),
+  ),
+];
+const graphEdge = graphEdges.find((edge) => edge.id === relationship.proposal_id)!;
 const displayStats = {
-  input_node_count: 4,
-  input_edge_count: 1,
-  display_node_count: 4,
-  display_edge_count: 1,
+  input_node_count: graphNodes.length,
+  input_edge_count: graphEdges.length,
+  display_node_count: graphNodes.length,
+  display_edge_count: graphEdges.length,
   omitted_edge_count: 0,
-  density: 0.083,
+  density: 0.02,
   label_uniqueness: 1,
-  max_degree: 1,
+  max_degree: 16,
   recommended_representation: "network",
-};
-
-const graphNodes = [winnerYes, finalYes].map((claim, index) => ({
-  id: claim.id,
-  label: claim.plain_claim,
-  level: "proposition",
-  parent_id: "wc2026",
-  x: index * 20,
-  y: 0,
-  size: 8,
-  domain: "sports",
-  component_id: "brazil-progression",
-  market_id: claim.market_id,
-  proposition_count: 1,
-  edge_count: 1,
-  classification_coverage: null,
-  classification_status: "not_applicable",
-}));
-
-const graphEdge = {
-  id: relationship.proposal_id,
-  source: winnerYes.id,
-  target: finalYes.id,
-  relation: "implies",
-  count: 1,
-  confidence: 1,
-  discovery_method: "deterministic",
-  evidence_tier: "deterministic_rule",
-  aggregation_only: false,
 };
 
 const graphView = {
   level: "proposition",
   nodes: graphNodes,
-  edges: [graphEdge],
+  edges: graphEdges,
+  layout_mode: "close_time",
   truncated_nodes: false,
   truncated_edges: false,
   coverage: { classification_status: "not_applicable", classification_coverage: null },
@@ -316,7 +371,9 @@ test.beforeEach(async ({ page }) => {
       };
     } else if (url.pathname.endsWith("/search")) {
       const query = (url.searchParams.get("q") ?? "").toLowerCase();
-      body = query.includes("not")
+      body = query.includes("missing")
+        ? []
+        : query.includes("not")
         ? [{
             node_id: finalNo.id,
             market_id: finalNo.market_id,
@@ -406,6 +463,10 @@ test("opens only the graph and its controls with cross-team logic selected", asy
   await expect(page.getByRole("option", { name: "Can coexist" })).toHaveCount(0);
   await expect(page.getByText("Earlier market close")).toBeVisible();
   await expect(page.getByText("Proof tools")).toHaveCount(0);
+  await page.getByLabel("Show").selectOption("implies");
+  await expect(page.getByText(/12 teams · 72 outcomes · 60 links/)).toBeVisible();
+  await page.getByLabel("Show").selectOption("mutually_exclusive");
+  await expect(page.getByText(/12 teams · 12 outcomes · 66 links/)).toBeVisible();
   await page.getByLabel("Find a team or outcome").fill("Brazil");
   await page.getByRole("button", { name: "Find" }).click();
   await page.getByRole("button", { name: /Brazil wins the World Cup/ }).click();
@@ -415,10 +476,50 @@ test("opens only the graph and its controls with cross-team logic selected", asy
   await expect(page.getByText(`ID: ${winnerYes.id}`)).toBeVisible();
   await page.getByLabel("Find a team or outcome").fill("not");
   await page.getByRole("button", { name: "Find" }).click();
-  await expect(page.getByRole("button", { name: finalNo.plain_claim })).toBeVisible();
+  await page.getByRole("button", { name: finalNo.plain_claim }).click();
+  await expect(page.getByRole("heading", { name: finalNo.plain_claim })).toBeVisible();
   await expect(page.getByText(/NOT\(/)).toHaveCount(0);
   await page.getByText("Proof tools").click();
   await expect(page.getByLabel("From outcome ID")).toBeVisible();
+});
+
+test("keeps graph search, menus, and empty results unambiguous", async ({ page }) => {
+  await page.goto("/#/analyst");
+  const search = page.getByLabel("Find a team or outcome");
+  await search.fill("Brazil");
+  await page.getByRole("button", { name: "Find" }).click();
+  await expect(page.getByRole("button", { name: /Brazil wins the World Cup/ })).toBeVisible();
+  await search.fill("missing");
+  await expect(page.getByRole("button", { name: /Brazil wins the World Cup/ })).toHaveCount(0);
+  await page.getByRole("button", { name: "Find" }).click();
+  await expect(page.getByText("No outcomes found for “missing”.")).toBeVisible();
+  await search.fill("Brazil");
+  await page.getByRole("button", { name: "Find" }).click();
+  await page.getByText("More").click();
+  await expect(page.getByRole("button", { name: /Brazil wins the World Cup/ })).toHaveCount(0);
+  await expect(page.getByLabel("Evidence")).toBeVisible();
+});
+
+test("preserves the mobile graph while selection is open and restores keyboard focus", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 568 });
+  await page.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" });
+  await page.goto("/#/analyst");
+  const search = page.getByLabel("Find a team or outcome");
+  await search.fill("Brazil");
+  await page.getByRole("button", { name: "Find" }).click();
+  await page.getByRole("button", { name: /Brazil wins the World Cup/ }).click();
+  const closeSelection = page.getByRole("button", { name: "Close selection" });
+  await expect(closeSelection).toBeFocused();
+  const graphBox = await page.locator(".graph-panel").boundingBox();
+  expect(graphBox?.height).toBeGreaterThanOrEqual(240);
+  await expect(page.getByText("Team progresses", { exact: true })).toBeVisible();
+  const incidentConnection = page.locator(".incident-connections button").first();
+  await incidentConnection.focus();
+  await page.keyboard.press("Enter");
+  await expect(closeSelection).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(closeSelection).toHaveCount(0);
+  await expect(search).toBeFocused();
 });
 
 test("records a human-captioned, hairball-free deterministic story", async ({ page }) => {

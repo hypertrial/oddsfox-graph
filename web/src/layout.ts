@@ -72,7 +72,12 @@ export function createLayoutTask(
   if (cached) {
     return { key, seed, result: Promise.resolve(cached), cancel: () => undefined };
   }
-  if (view.layout_mode === "close_time" || view.level === "component" || view.nodes.length < 3) {
+  if (
+    view.layout_mode === "close_time"
+    || view.layout_mode === "progression"
+    || view.level === "component"
+    || view.nodes.length < 3
+  ) {
     sessionCache.set(key, seed);
     return { key, seed, result: Promise.resolve(seed), cancel: () => undefined };
   }
@@ -180,7 +185,7 @@ export function applyLayout(view: GraphView, layout: LayoutResult): GraphView {
 
 function seedLayout(view: GraphView, key: string): Record<string, Position> {
   if (view.nodes.length === 0) return {};
-  if (view.layout_mode === "close_time") {
+  if (view.layout_mode === "close_time" || view.layout_mode === "progression") {
     return normalizePositions(
       Object.fromEntries(view.nodes.map((node) => [node.id, { x: node.x, y: node.y }])),
     );

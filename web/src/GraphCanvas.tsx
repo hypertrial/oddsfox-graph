@@ -9,30 +9,52 @@ import { applyLayout, createLayoutTask } from "./layout";
 import { storyFrame } from "./story";
 import type { GraphView, RecordingStory, StoryFrameState } from "./types";
 
-const relationColors: Record<string, string> = {
-  implies: "#5b91f5",
-  equivalent: "#39b9aa",
-  complement: "#e27a72",
-  mutually_exclusive: "#b889e8",
-  compatible: "#8793a5",
-};
+const relationColors = {
+  dark: {
+    implies: "#72a8ff",
+    equivalent: "#55d2bd",
+    complement: "#ff9184",
+    mutually_exclusive: "#c6a1ff",
+    compatible: "#9cacc2",
+  },
+  light: {
+    implies: "#245eae",
+    equivalent: "#087566",
+    complement: "#ad423c",
+    mutually_exclusive: "#7248a2",
+    compatible: "#596779",
+  },
+} as const;
 
-const domainColors = [
-  "#6ea8fe",
-  "#57c4ad",
-  "#f2a65a",
-  "#d98bd8",
-  "#f27688",
-  "#8ea6df",
-  "#9bc66d",
-  "#d6a66d",
-];
+const domainColors = {
+  dark: [
+    "#72b5ff",
+    "#58d1b2",
+    "#ffc36c",
+    "#e7a0e5",
+    "#ff8999",
+    "#a9baff",
+    "#b7d97e",
+    "#e5b77c",
+  ],
+  light: [
+    "#246ca6",
+    "#0b755f",
+    "#985900",
+    "#893f89",
+    "#ad3553",
+    "#465fa2",
+    "#58751f",
+    "#80551c",
+  ],
+} as const;
 
 interface RenderState {
   selectedId: string | null;
   hoveredId: string | null;
   story: StoryFrameState | null;
-  highestDegree: ReadonlySet<string>;
+  persistentLabels: ReadonlyMap<string, string>;
+  darkMode: boolean;
 }
 
 interface Props {
@@ -70,7 +92,8 @@ export function GraphCanvas({
     selectedId: null,
     hoveredId: null,
     story: null,
-    highestDegree: new Set(),
+    persistentLabels: new Map(),
+    darkMode: false,
   });
   const activeView = useRef(0);
   const appliedLayoutNonce = useRef(layoutNonce);
@@ -85,9 +108,15 @@ export function GraphCanvas({
     const graph = new Graph({ multi: true, type: "directed" });
     graphRef.current = graph;
     const colorScheme = window.matchMedia("(prefers-color-scheme: dark)");
+    renderState.current.darkMode = colorScheme.matches;
     const renderer = new Sigma(graph, container.current, {
-      allowInvalidContainer: false,
+      allowInvalidContainer: true,
       renderEdgeLabels: false,
+      stagePadding: graphStagePadding(container.current),
+      minEdgeThickness: 0.6,
+      zIndex: true,
+      labelSize: 13,
+      labelWeight: "600",
       labelRenderedSizeThreshold: 7,
       labelDensity: 0.7,
       labelColor: { color: colorScheme.matches ? "#dce5f2" : "#243044" },
@@ -115,15 +144,26 @@ export function GraphCanvas({
       renderer.scheduleRefresh();
     });
     const updateLabelColor = () => {
+      renderState.current.darkMode = colorScheme.matches;
       renderer.setSetting("labelColor", {
         color: colorScheme.matches ? "#dce5f2" : "#243044",
       });
       renderer.scheduleRefresh();
     };
+    const updateStagePadding = () => {
+      if (container.current) renderer.setSetting("stagePadding", graphStagePadding(container.current));
+    };
+    const resizeObserver = typeof ResizeObserver === "undefined"
+      ? null
+      : new ResizeObserver(updateStagePadding);
+    resizeObserver?.observe(container.current);
     colorScheme.addEventListener("change", updateLabelColor);
+    window.addEventListener("resize", updateStagePadding);
     return () => {
       activeView.current += 1;
       colorScheme.removeEventListener("change", updateLabelColor);
+      window.removeEventListener("resize", updateStagePadding);
+      resizeObserver?.disconnect();
       renderer.kill();
       rendererRef.current = null;
       graphRef.current = null;
@@ -144,12 +184,7 @@ export function GraphCanvas({
     const initialView = story ? view : applyLayout(view, task!.seed);
     const graph = buildGraph(initialView);
     graphRef.current = graph;
-    renderState.current.highestDegree = new Set(
-      [...view.nodes]
-        .sort((left, right) => right.edge_count - left.edge_count || left.id.localeCompare(right.id))
-        .slice(0, 12)
-        .map((node) => node.id),
-    );
+    renderState.current.persistentLabels = persistentLabels(view);
     renderer.setGraph(graph);
     renderer.getCamera().setState({ x: 0.5, y: 0.5, ratio: 1, angle: 0 });
     renderer.refresh();
@@ -210,43 +245,68 @@ export function GraphCanvas({
       ref={container}
       role="img"
       aria-hidden={hiddenForStory || undefined}
-      aria-label={`Interactive World Cup logic graph with ${view?.nodes.length ?? 0} outcome${view?.nodes.length === 1 ? "" : "s"} and ${view?.edges.length ?? 0} connection${view?.edges.length === 1 ? "" : "s"}. Select an outcome to inspect nearby logic.`}
+      aria-label={`Interactive World Cup logic graph with ${view?.nodes.length ?? 0} outcome${view?.nodes.length === 1 ? "" : "s"} and ${view?.edges.length ?? 0} connection${view?.edges.length === 1 ? "" : "s"}. Use the search controls or point to an outcome to inspect nearby logic.`}
     />
   );
 }
 
-function buildGraph(view: GraphView): Graph {
+export function buildGraph(view: GraphView): Graph {
   const graph = new Graph({ multi: true, type: "directed" });
+  const visibleDegrees = visibleDegreeByNode(view);
+  const relations = new Set(view.edges.map((edge) => edge.relation));
   for (const node of view.nodes) {
-    const degreeValue = view.level === "component" ? node.proposition_count : node.edge_count;
-    const bounds = view.level === "proposition" ? [4, 15] : view.level === "event" ? [7, 22] : [10, 30];
+    const visibleDegree = visibleDegrees.get(node.id) ?? 0;
+    const degreeValue = view.level === "component" ? node.proposition_count : visibleDegree;
+    const size = nodeSize(view.level, degreeValue, node.progression_outcome);
+    const paletteKey = node.domain ?? node.component_id ?? node.id;
     graph.addNode(node.id, {
       label: node.label,
       x: node.x,
       y: node.y,
-      size: clamp(Math.sqrt(Math.max(1, degreeValue)) * 3, bounds[0], bounds[1]),
-      color: domainColor(node.domain ?? node.component_id ?? node.id),
-      degree: node.edge_count,
+      size,
+      color: domainColor(paletteKey, false),
+      lightColor: domainColor(paletteKey, false),
+      darkColor: domainColor(paletteKey, true),
+      progressionOutcome: node.progression_outcome,
+      visibleDegree,
     });
   }
   for (const edge of view.edges) {
     if (!graph.hasNode(edge.source) || !graph.hasNode(edge.target)) continue;
-    const color = evidenceColor(relationColors[edge.relation], edge.evidence_tier);
+    const lightColor = evidenceColor(relationColors.light[edge.relation], edge.evidence_tier, false);
+    const darkColor = evidenceColor(relationColors.dark[edge.relation], edge.evidence_tier, true);
+    const size = edgeSize(edge.relation, edge.count);
     graph.addEdgeWithKey(edge.id, edge.source, edge.target, {
-      color,
-      baseColor: color,
-      size: clamp(Math.log2(edge.count + 1) * 1.4, 1.2, 5),
-      baseSize: clamp(Math.log2(edge.count + 1) * 1.4, 1.2, 5),
+      color: lightColor,
+      lightColor,
+      darkColor,
+      size,
+      baseSize: size,
       type: edge.relation === "implies" ? "curvedArrow" : "curved",
       label: `${edge.relation.replaceAll("_", " ")} · ${edge.count}`,
       confidence: edge.confidence,
       relation: edge.relation,
+      overviewOpacity: overviewEdgeOpacity(edge.relation, relations.size === 1),
     });
   }
   indexParallelEdgesIndex(graph);
+  const yExtent = graphExtent(graph, "y");
   graph.forEachEdge((edge, attributes) => {
     const parallel = typeof attributes.parallelIndex === "number" ? attributes.parallelIndex : 0;
-    graph.setEdgeAttribute(edge, "curvature", parallel === 0 ? 0.08 : parallel * 0.16);
+    const relation = String(attributes.relation);
+    if (relation === "mutually_exclusive") {
+      const [source, target] = graph.extremities(edge);
+      const span = Math.abs(
+        Number(graph.getNodeAttribute(source, "y")) - Number(graph.getNodeAttribute(target, "y")),
+      );
+      const normalizedSpan = yExtent === 0 ? 0 : span / yExtent;
+      const direction = stableHash([source, target].sort().join("|")) % 2 === 0 ? -1 : 1;
+      graph.setEdgeAttribute(edge, "curvature", direction * (0.14 + normalizedSpan * 0.34));
+      return;
+    }
+    const relationCurve = relation === "complement" ? 0.16 : relation === "equivalent" ? 0.11 : 0.06;
+    const parallelCurve = parallel === 0 ? relationCurve : Math.sign(parallel) * (relationCurve + Math.abs(parallel) * 0.14);
+    graph.setEdgeAttribute(edge, "curvature", parallelCurve);
   });
   return graph;
 }
@@ -255,18 +315,29 @@ function reduceNode(graph: Graph, state: RenderState, node: string, data: Record
   if (state.story && !state.story.visibleNodes.has(node)) return { ...data, hidden: true };
   const focus = focusedNodes(graph, state);
   const relevant = focus.size === 0 || focus.has(node) || [...focus].some((id) => graph.hasNode(id) && graph.areNeighbors(node, id));
-  const forced = focus.has(node) || state.highestDegree.has(node);
+  const focused = focus.has(node);
+  const persistentLabel = focus.size === 0 || relevant ? state.persistentLabels.get(node) : undefined;
+  const forced = focused || persistentLabel !== undefined;
   const storyEndpoint = Boolean(state.story?.highlightedNodes.has(node));
+  const baseColor = String(state.darkMode ? data.darkColor : data.lightColor);
+  const progressionOutcome = data.progressionOutcome;
+  const opacity = !relevant
+    ? 0.1
+    : focused || storyEndpoint
+      ? 1
+      : progressionOutcome === false
+        ? 0.8
+        : 0.94;
   return {
     ...data,
-    label: forced ? String(data.label ?? node) : null,
+    label: focused ? String(data.label ?? node) : persistentLabel ?? null,
     forceLabel: forced,
-    highlighted: focus.has(node) && !state.story,
+    highlighted: focused && !state.story,
     size: storyEndpoint
       ? Number(data.size ?? 1) * (1 + 0.35 * (state.story?.reveal ?? 0))
       : Number(data.size ?? 1),
-    color: relevant ? String(data.color) : withAlpha(String(data.color), 0.14),
-    zIndex: focus.has(node) ? 3 : relevant ? 1 : 0,
+    color: withAlpha(baseColor, opacity),
+    zIndex: focused ? 3 : persistentLabel ? 2 : relevant ? 1 : 0,
   };
 }
 
@@ -279,13 +350,29 @@ function reduceEdge(graph: Graph, state: RenderState, edge: string, data: Record
     ? edge === storyEdge || state.story!.highlightedNodes.has(source) || state.story!.highlightedNodes.has(target)
     : focus.size === 0 || edge === state.selectedId || focus.has(source) || focus.has(target);
   const emphasized = storyEdge === edge;
+  const selected = state.selectedId === edge;
   const confidence = Number(data.confidence ?? 1);
   const baseSize = Number(data.baseSize ?? 1);
+  const hasFocus = focus.size > 0 || Boolean(storyEdge);
+  const alpha = emphasized || selected
+    ? clamp(confidence, 0.82, 1)
+    : hasFocus
+      ? relevant
+        ? clamp(confidence * 0.72, 0.48, 0.82)
+        : 0.025
+      : Number(data.overviewOpacity ?? 0.16) * clamp(confidence, 0.4, 1);
+  const baseColor = String(state.darkMode ? data.darkColor : data.lightColor);
   return {
     ...data,
-    color: withAlpha(String(data.baseColor), relevant ? clamp(confidence, 0.28, 1) : 0.07),
-    size: emphasized ? baseSize * (1 + 2.2 * (state.story?.emphasis ?? 0)) : baseSize,
-    zIndex: emphasized ? 4 : relevant ? 1 : 0,
+    color: withAlpha(baseColor, alpha),
+    size: emphasized
+      ? baseSize * (1 + 2.2 * (state.story?.emphasis ?? 0))
+      : selected
+        ? baseSize * 1.7
+        : hasFocus && relevant
+          ? baseSize * 1.2
+          : baseSize,
+    zIndex: emphasized || selected ? 4 : relevant ? 1 : 0,
   };
 }
 
@@ -302,6 +389,106 @@ function focusedNodes(graph: Graph, state: RenderState): ReadonlySet<string> {
     }
   }
   return nodes;
+}
+
+function visibleDegreeByNode(view: GraphView): Map<string, number> {
+  const degrees = new Map(view.nodes.map((node) => [node.id, 0]));
+  for (const edge of view.edges) {
+    if (degrees.has(edge.source)) degrees.set(edge.source, (degrees.get(edge.source) ?? 0) + 1);
+    if (degrees.has(edge.target)) degrees.set(edge.target, (degrees.get(edge.target) ?? 0) + 1);
+  }
+  return degrees;
+}
+
+export function persistentLabels(view: GraphView): ReadonlyMap<string, string> {
+  const degrees = visibleDegreeByNode(view);
+  if (view.level !== "proposition") {
+    return new Map(
+      [...view.nodes]
+        .sort(
+          (left, right) =>
+            (degrees.get(right.id) ?? 0) - (degrees.get(left.id) ?? 0) ||
+            left.id.localeCompare(right.id),
+        )
+        .slice(0, 12)
+        .map((node) => [node.id, node.label]),
+    );
+  }
+
+  const anchors = new Map<string, GraphView["nodes"][number]>();
+  for (const node of view.nodes) {
+    if (!node.domain) continue;
+    const current = anchors.get(node.domain);
+    if (!current || compareTeamAnchor(node, current) < 0) anchors.set(node.domain, node);
+  }
+  if (anchors.size > 0) {
+    return new Map([...anchors.entries()].map(([team, node]) => [node.id, team]));
+  }
+
+  return new Map(
+    [...view.nodes]
+      .sort(
+        (left, right) =>
+          (degrees.get(right.id) ?? 0) - (degrees.get(left.id) ?? 0) ||
+          left.id.localeCompare(right.id),
+      )
+      .slice(0, 12)
+      .map((node) => [node.id, node.label]),
+  );
+}
+
+function compareTeamAnchor(
+  left: GraphView["nodes"][number],
+  right: GraphView["nodes"][number],
+): number {
+  const progression = Number(right.progression_outcome === true) - Number(left.progression_outcome === true);
+  if (progression !== 0) return progression;
+  if (left.x !== right.x) return right.x - left.x;
+  const close = (right.market_close_epoch ?? 0) - (left.market_close_epoch ?? 0);
+  return close || left.id.localeCompare(right.id);
+}
+
+function nodeSize(
+  level: GraphView["level"],
+  degree: number,
+  progressionOutcome: boolean | null | undefined,
+): number {
+  if (level === "proposition") {
+    return progressionOutcome === false
+      ? clamp(3.4 + Math.sqrt(degree) * 0.36, 3.4, 5.4)
+      : clamp(4.3 + Math.sqrt(degree) * 0.5, 4.3, 8);
+  }
+  const bounds = level === "event" ? [7, 22] : [10, 30];
+  return clamp(Math.sqrt(Math.max(1, degree)) * 3, bounds[0], bounds[1]);
+}
+
+function edgeSize(relation: string, count: number): number {
+  const weight = clamp(Math.log2(count + 1) * 1.15, 0.8, 4);
+  const relationWeight = relation === "equivalent"
+    ? 1.35
+    : relation === "complement"
+      ? 1.15
+      : relation === "mutually_exclusive" || relation === "compatible"
+        ? 0.72
+        : 1;
+  return weight * relationWeight;
+}
+
+function overviewEdgeOpacity(relation: string, onlyRelation: boolean): number {
+  if (relation === "mutually_exclusive") return onlyRelation ? 0.15 : 0.045;
+  if (relation === "compatible") return onlyRelation ? 0.2 : 0.06;
+  if (relation === "complement") return onlyRelation ? 0.42 : 0.16;
+  if (relation === "equivalent") return onlyRelation ? 0.38 : 0.18;
+  return onlyRelation ? 0.3 : 0.14;
+}
+
+function graphExtent(graph: Graph, attribute: string): number {
+  const values = graph.mapNodes((_node, attributes) => Number(attributes[attribute]));
+  return values.length ? Math.max(...values) - Math.min(...values) : 0;
+}
+
+function graphStagePadding(element: HTMLElement): number {
+  return clamp(element.clientWidth * 0.22, 58, 100);
 }
 
 function applyPositions(graph: Graph, positions: Record<string, { x: number; y: number }>) {
@@ -350,17 +537,28 @@ function tweenPositions(
   };
 }
 
-function domainColor(domain: string): string {
+function domainColor(domain: string, darkMode: boolean): string {
   let hash = 0;
   for (const character of domain) hash = Math.imul(hash ^ character.charCodeAt(0), 0x45d9f3b);
-  return domainColors[Math.abs(hash) % domainColors.length];
+  const colors = darkMode ? domainColors.dark : domainColors.light;
+  return colors[Math.abs(hash) % colors.length];
 }
 
-function evidenceColor(color: string, tier: string): string {
+function evidenceColor(color: string, tier: string, darkMode: boolean): string {
   if (tier === "generative_consensus") return color;
-  if (tier === "deterministic_rule") return mix(color, "#ffffff", 0.14);
-  if (tier === "source_contract") return mix(color, "#9ba7ba", 0.32);
-  return mix(color, "#9ba7ba", 0.45);
+  const neutral = darkMode ? "#a3afc1" : "#536176";
+  if (tier === "deterministic_rule") return mix(color, neutral, 0.1);
+  if (tier === "source_contract") return mix(color, neutral, 0.28);
+  return mix(color, neutral, 0.42);
+}
+
+function stableHash(value: string): number {
+  let hash = 0x811c9dc5;
+  for (const character of value) {
+    hash ^= character.charCodeAt(0);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return hash >>> 0;
 }
 
 function mix(left: string, right: string, amount: number): string {
