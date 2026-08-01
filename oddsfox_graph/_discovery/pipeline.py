@@ -89,11 +89,11 @@ from .relation_logic import (
     nli_text as _nli_text,
 )
 from .parsing import (
+    canonicalize_parsed_market as _canonicalize_parsed_market,
     canonical_entity,
     canonical_unit,
     normalize_optional,
     proposition_row as _proposition_row,
-    validate_parsed_market as _validate_parsed_market,
 )
 from .retrieval import generate_candidate_workspace
 from .metrics import RunState, StageRecorder
@@ -1260,8 +1260,7 @@ def _validated_qualification_parse(
         return None
     try:
         parsed = ParsedMarket.model_validate(entry["parsed"])
-        _validate_parsed_market(source, parsed)
-        return parsed
+        return _canonicalize_parsed_market(source, parsed)
     except (TypeError, ValueError):
         return None
 
@@ -2689,8 +2688,7 @@ def _validated_parse_entry(
         return None, error or "structured output omitted this market"
     try:
         parsed = ParsedMarket.model_validate(entry["parsed"])
-        _validate_parsed_market(market, parsed)
-        return parsed, None
+        return _canonicalize_parsed_market(market, parsed), None
     except (TypeError, ValueError) as exc:
         return None, str(exc)
 

@@ -456,12 +456,14 @@ class LocalStructuredClient:
                 ),
                 None,
             )
+        context_length = _runtime_context_length(data, runtime_metadata)
         return {
             "origin": self.base_url,
             "health": health_payload,
             "model_ids": model_ids,
             "runtime": runtime_header or expected_runtime,
             "runtime_version": runtime_version,
+            "context_length": context_length,
             "model_metadata": data,
             "runtime_metadata": runtime_metadata,
         }
@@ -640,6 +642,38 @@ class LocalStructuredClient:
             status_code=response.status_code,
             error_type="http_error",
         )
+
+
+def _runtime_context_length(
+    model_metadata: object,
+    runtime_metadata: object,
+) -> int:
+    """Read the configured context from llama.cpp or vLLM metadata."""
+
+    candidates: list[object] = [runtime_metadata]
+    if isinstance(runtime_metadata, dict):
+        candidates.extend(
+            runtime_metadata.get(key)
+            for key in ("default_generation_settings", "engine_config")
+        )
+    if isinstance(model_metadata, list):
+        for model in model_metadata:
+            candidates.append(model)
+            if isinstance(model, dict):
+                candidates.append(model.get("meta"))
+    for keys in (("context_length", "n_ctx", "max_model_len"), ("n_ctx_train",)):
+        for candidate in candidates:
+            if not isinstance(candidate, dict):
+                continue
+            for key in keys:
+                value = candidate.get(key)
+                if isinstance(value, bool):
+                    continue
+                if isinstance(value, int) and value > 1:
+                    return value
+                if isinstance(value, str) and value.isdigit() and int(value) > 1:
+                    return int(value)
+    return 0
 
 
 def _integer_usage(usage: dict[str, Any], key: str) -> int:

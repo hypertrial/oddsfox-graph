@@ -32,7 +32,13 @@ from .versions import (
 
 
 PARSE_PROMPT = """/no_think
-Extract one proposition for every supplied market outcome.
+Extract one separate proposition for every supplied market outcome.
+The propositions array length must equal expected_outcome_count. Copy each outcome
+string into exactly one proposition and never collapse, combine, or omit outcomes,
+including mutually exclusive Yes and No rows.
+Before returning, verify that the case-sensitive proposition outcome strings equal
+required_outcomes exactly. Every citations list must be a nonempty subset of
+available_citation_fields; never cite a null, empty, or unavailable field.
 Use the question, full description, outcome, and authoritative metadata only.
 Use the outcome string exactly as supplied. Normalize dates, numbers, and units.
 Use null for information that is absent or not supported by the schema; never invent it.
@@ -77,6 +83,9 @@ class ParseRequest(BaseModel):
     tags: list[str]
     time_start: datetime | None
     time_end: datetime | None
+    expected_outcome_count: int
+    required_outcomes: list[str]
+    available_citation_fields: list[str]
     outcomes: list[ParseOutcomeRequest]
 
 
@@ -214,6 +223,18 @@ def deterministic_extract(
 
 
 def market_request(market: SourceMarket) -> ParseRequest:
+    available_citation_fields = ["question", "outcome"]
+    for field, value in (
+        ("description", market.description),
+        ("event_id", market.event_id),
+        ("event_slug", market.event_slug),
+        ("category", market.category),
+        ("tags", market.tags),
+        ("time_start", market.time_start),
+        ("time_end", market.time_end),
+    ):
+        if value not in (None, "", ()):
+            available_citation_fields.append(field)
     return ParseRequest(
         market_id=market.market_id,
         question=market.question,
@@ -225,6 +246,9 @@ def market_request(market: SourceMarket) -> ParseRequest:
         tags=list(market.tags),
         time_start=market.time_start,
         time_end=market.time_end,
+        expected_outcome_count=len(market.outcomes),
+        required_outcomes=[outcome.outcome for outcome in market.outcomes],
+        available_citation_fields=available_citation_fields,
         outcomes=[
             ParseOutcomeRequest(
                 outcome=outcome.outcome,
@@ -270,31 +294,35 @@ def pair_request(
     )
 
 
-def conformance_parse_request() -> ParseRequest:
-    return ParseRequest(
+def conformance_source_market() -> SourceMarket:
+    return SourceMarket(
         market_id="conformance-market",
         question="Will the conformance check pass?",
         description="A local schema-conformance request.",
-        market_source_hash=text_sha256("conformance-market"),
+        source_hash=text_sha256("conformance-market"),
         event_id=None,
         event_slug=None,
         category=None,
-        tags=[],
+        tags=(),
         time_start=None,
         time_end=None,
-        outcomes=[
-            ParseOutcomeRequest(
+        outcomes=(
+            SourceOutcome(
+                outcome_index=0,
                 outcome="Yes",
                 clob_token_id="yes",
-                authoritative_extraction={"polarity": "positive"},
             ),
-            ParseOutcomeRequest(
+            SourceOutcome(
+                outcome_index=1,
                 outcome="No",
                 clob_token_id="no",
-                authoritative_extraction={"polarity": "negative"},
             ),
-        ],
+        ),
     )
+
+
+def conformance_parse_request() -> ParseRequest:
+    return market_request(conformance_source_market())
 
 
 def conformance_pair_request(model_id: str) -> PairRequest:

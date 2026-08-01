@@ -7,7 +7,7 @@ CANONICAL_CATALOG_SHA256 = (
     "790bd1595b379472ad65ba0073105b4eb630974d04e7b44d58c8a4929f274aa2"
 )
 
-PARSE_PROMPT_VERSION = "consensus-proposition-parse-v1"
+PARSE_PROMPT_VERSION = "consensus-proposition-parse-v2"
 CLASSIFY_PROMPT_VERSION = "dual-atomic-relation-v1"
 RULE_VERSION = "discovery-rules-v5"
 NORMALIZATION_VERSION = "normalization-v4"

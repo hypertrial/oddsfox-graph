@@ -17,7 +17,15 @@ python -m pip install -e '.[dev]'
 ```
 
 llama.cpp or vLLM, model weights, MiniLM embeddings, and ModernBERT NLI files are
-external. The package never downloads or launches a model.
+external. The installed Python package never downloads or launches a model; the
+explicit repository setup wrapper below can do both for local development.
+
+For the complete local M4 setup, `scripts/local_stack.sh` installs and checks the
+runtime, downloads immutable assets, runs qualification and discovery, and
+serves the explorer. Its default `.oddsfox-runtime/` tree keeps all weights,
+caches (including npm and Playwright), temporary files, logs, and outputs on the
+SSD that contains this checkout. See the
+[local runtime guide](docs/local-runtime.md).
 
 ## Input
 

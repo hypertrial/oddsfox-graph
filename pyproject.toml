@@ -16,6 +16,7 @@ dependencies = [
   "fastapi>=0.115",
   "numpy>=1.26",
   "pydantic>=2",
+  "pytz>=2025.2",
   "python-sat==1.9.dev7",
   "sentence-transformers>=5",
   "uvicorn>=0.34",

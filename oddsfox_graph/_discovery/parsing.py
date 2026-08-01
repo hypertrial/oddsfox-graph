@@ -32,6 +32,31 @@ _UNIT_ALIASES = {
 }
 
 
+def canonicalize_parsed_market(
+    source: SourceMarket,
+    parsed: ParsedMarket,
+) -> ParsedMarket:
+    """Restore authoritative outcome spelling after model normalization."""
+
+    expected = {
+        outcome.outcome.casefold().strip(): outcome.outcome
+        for outcome in source.outcomes
+    }
+    if len(expected) != len(source.outcomes):
+        raise ValueError(f"Source outcomes for {source.market_id!r} are ambiguous")
+    propositions: list[ParsedOutcome] = []
+    for outcome in parsed.propositions:
+        authoritative = expected.get(outcome.outcome.casefold().strip())
+        if authoritative is None:
+            raise ValueError(
+                f"Structured parse outcome {outcome.outcome!r} does not match input"
+            )
+        propositions.append(outcome.model_copy(update={"outcome": authoritative}))
+    canonical = parsed.model_copy(update={"propositions": propositions})
+    validate_parsed_market(source, canonical)
+    return canonical
+
+
 def validate_parsed_market(source: SourceMarket, parsed: ParsedMarket) -> None:
     if parsed.market_id != source.market_id:
         raise ValueError(

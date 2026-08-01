@@ -29,7 +29,9 @@ from oddsfox_graph._discovery.inference import (
     normalize_inference_base_url,
     validate_automation_profile_match,
 )
+from oddsfox_graph._discovery.parsing import canonicalize_parsed_market
 from oddsfox_graph._discovery.provenance import canonical_json_sha256
+from oddsfox_graph._discovery.protocol import market_request
 from oddsfox_graph._discovery.versions import CACHE_ENTRY_VERSION
 
 
@@ -182,6 +184,44 @@ def test_dual_parse_consensus_accepts_normalization_equivalence_and_quarantines_
     changed = _parsed_market("Ethereum")
     result = merge_parsed_markets(source, first, changed)
     assert all(row.status == "model_disagreement" for row in result.values())
+
+
+def test_parse_request_and_validation_bind_authoritative_outcomes_and_citations() -> None:
+    source = SourceMarket(
+        market_id="m",
+        question="Will BTC win?",
+        description="",
+        source_hash="a" * 64,
+        outcomes=(SourceOutcome(0, "Yes", "yes"), SourceOutcome(1, "No", "no")),
+    )
+    request = market_request(source)
+    assert request.expected_outcome_count == 2
+    assert request.required_outcomes == ["Yes", "No"]
+    assert request.available_citation_fields == ["question", "outcome"]
+
+    normalized = _parsed_market("Bitcoin").model_copy(
+        update={
+            "propositions": [
+                outcome.model_copy(update={"outcome": outcome.outcome.casefold()})
+                for outcome in _parsed_market("Bitcoin").propositions
+            ]
+        }
+    )
+    canonical = canonicalize_parsed_market(source, normalized)
+    assert [outcome.outcome for outcome in canonical.propositions] == ["Yes", "No"]
+
+    unavailable = canonical.model_copy(
+        update={
+            "propositions": [
+                canonical.propositions[0].model_copy(
+                    update={"citations": ["question", "description"]}
+                ),
+                canonical.propositions[1],
+            ]
+        }
+    )
+    with pytest.raises(ValueError, match="unavailable source fields"):
+        canonicalize_parsed_market(source, unavailable)
 
 
 def _parsed_market(subject: str) -> ParsedMarket:
@@ -365,17 +405,37 @@ def test_local_chat_completions_contract_and_token_accounting() -> None:
 
 
 @pytest.mark.parametrize(
-    ("runtime", "metadata_path", "metadata", "version"),
+    ("runtime", "metadata_path", "metadata", "model_metadata", "version", "context_length"),
     (
-        ("llama.cpp", "/props", {"build_info": "b7000", "n_ctx": 8192}, "b7000"),
-        ("vllm", "/version", {"version": "0.10.1"}, "0.10.1"),
+        (
+            "llama.cpp",
+            "/props",
+            {
+                "build_info": "b7000",
+                "n_ctx_train": 32768,
+                "default_generation_settings": {"n_ctx": 8192},
+            },
+            {"id": PRIMARY, "meta": {"n_ctx_train": 32768}},
+            "b7000",
+            8192,
+        ),
+        (
+            "vllm",
+            "/version",
+            {"version": "0.10.1"},
+            {"id": PRIMARY, "max_model_len": "16384"},
+            "0.10.1",
+            16384,
+        ),
     ),
 )
 def test_runtime_preflight_supports_llamacpp_and_vllm(
     runtime: str,
     metadata_path: str,
     metadata: dict[str, object],
+    model_metadata: dict[str, object],
     version: str,
+    context_length: int,
 ) -> None:
     paths: list[str] = []
 
@@ -386,7 +446,7 @@ def test_runtime_preflight_supports_llamacpp_and_vllm(
         if request.url.path == "/v1/models":
             return httpx.Response(
                 200,
-                json={"data": [{"id": PRIMARY}]},
+                json={"data": [model_metadata]},
                 headers={"x-llm-runtime": runtime},
             )
         if request.url.path == metadata_path:
@@ -404,4 +464,5 @@ def test_runtime_preflight_supports_llamacpp_and_vllm(
     asyncio.run(client.aclose())
     assert observed["runtime"] == runtime
     assert observed["runtime_version"] == version
+    assert observed["context_length"] == context_length
     assert metadata_path in paths

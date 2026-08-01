@@ -48,6 +48,7 @@ jobs:
       - run: python -m pip install -c constraints-dev.txt -e ".[dev]"
       - run: python -m ruff check .
       - run: python -m mypy
+      - run: shellcheck scripts/*.sh
       - name: Verify self-hosted-only inference surface
         run: |
           if rg -n -i 'openai|OPENAI_API_KEY|gpt-5' oddsfox_graph docs README.md pyproject.toml constraints-dev.txt scripts web/src web/package.json; then

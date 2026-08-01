@@ -18,11 +18,13 @@ from ._discovery.inference import (
     normalize_inference_base_url,
     sha256_path,
 )
+from ._discovery.parsing import canonicalize_parsed_market
 from ._discovery.protocol import (
     CLASSIFY_PROMPT,
     PARSE_PROMPT,
     conformance_pair_request,
     conformance_parse_request,
+    conformance_source_market,
     default_generation_settings,
 )
 from ._discovery.provenance import (
@@ -130,7 +132,21 @@ def check_model(
         )
     )
     if not report["passed"]:
-        raise RuntimeError("Model runtime conformance failed")
+        failed = sorted(
+            name
+            for name in (
+                "preflight",
+                "metadata_complete",
+                "parse_schema",
+                "classification_schema",
+                "token_accounting",
+                "stable_failure_handling",
+            )
+            if not bool(report[name])
+        )
+        raise RuntimeError(
+            "Model runtime conformance failed: " + ", ".join(failed)
+        )
     return report
 
 
@@ -193,6 +209,14 @@ async def _check_model_async(
         parsed_assessment = AtomicPairAssessment.model_validate(
             classification.parsed
         )
+        parse_validation_error: str | None = None
+        try:
+            canonicalize_parsed_market(
+                conformance_source_market(),
+                parsed_market,
+            )
+        except ValueError as exc:
+            parse_validation_error = str(exc)
         context_length = _context_length(metadata)
         return {
             "manifest_id": manifest.manifest_id,
@@ -203,10 +227,8 @@ async def _check_model_async(
             "observed_context_length": context_length,
             "preflight": True,
             "metadata_complete": context_length > 1,
-            "parse_schema": (
-                parsed_market.market_id == "conformance-market"
-                and _contains_each_outcome_once(parsed_market, {"Yes", "No"})
-            ),
+            "parse_schema": parse_validation_error is None,
+            "parse_validation_error": parse_validation_error,
             "classification_schema": (
                 parsed_assessment.pair_id == "conformance-pair"
             ),
@@ -283,14 +305,6 @@ def _context_length(metadata: object) -> int:
         if isinstance(value, str) and value.isdigit():
             return int(value)
     return 0
-
-
-def _contains_each_outcome_once(
-    parsed: ParsedMarket,
-    expected: set[str],
-) -> bool:
-    outcomes = [row.outcome for row in parsed.propositions]
-    return len(outcomes) == len(expected) and set(outcomes) == expected
 
 
 def _is_loopback(origin: str) -> bool:

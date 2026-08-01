@@ -227,6 +227,9 @@ output/
 # Local catalog / discovery inputs (not versioned)
 data/
 
+# SSD-resident local model/runtime assets
+.oddsfox-runtime/
+
 # macOS
 .DS_Store
 
