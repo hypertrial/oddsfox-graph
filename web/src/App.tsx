@@ -1,13 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import * as api from "./api";
-import { Analyst } from "./Analyst";
 import { Explore } from "./Explore";
 import { coverageLabel, validationLabel } from "./human";
-import { freezeLayout } from "./layout";
-import { Presentation } from "./Presentation";
-import { buildStory } from "./story";
 import { parseRoute, type Route } from "./routes";
 import type { GraphMetadata, RecordingStory } from "./types";
+
+const Analyst = lazy(() => import("./Analyst").then((module) => ({ default: module.Analyst })));
+const Presentation = lazy(() => import("./Presentation").then((module) => ({ default: module.Presentation })));
 
 const pageParameters = new URLSearchParams(window.location.search);
 const automationMode = pageParameters.get("presentation") === "1";
@@ -45,6 +44,10 @@ export function App() {
     setStoryLoading(true);
     setStoryError(null);
     try {
+      const [{ freezeLayout }, { buildStory }] = await Promise.all([
+        import("./layout"),
+        import("./story"),
+      ]);
       const highlights = integerParameter("highlights", 6);
       const plan = await api.recordingPlan(highlights, confidence);
       const frozen = await freezeLayout(
@@ -63,7 +66,7 @@ export function App() {
           fps: integerParameter("fps", 30),
         },
         metadata.package_version,
-        String(metadata.viewer.client_fingerprint ?? "unknown"),
+        String(metadata.client_fingerprint ?? "unknown"),
       ));
     } catch (reason) {
       setStoryError(message(reason));
@@ -80,17 +83,19 @@ export function App() {
 
   if (story) {
     return (
-      <Presentation
-        story={story}
-        automationMode={automationMode}
-        loading={storyLoading}
-        error={storyError}
-        onRegenerate={() => void enterStory(numberParameter("min_confidence", 0.95))}
-        onExit={() => {
-          setStory(null);
-          setStoryError(null);
-        }}
-      />
+      <Suspense fallback={<main className="startup-state" role="status">Opening presentation…</main>}>
+        <Presentation
+          story={story}
+          automationMode={automationMode}
+          loading={storyLoading}
+          error={storyError}
+          onRegenerate={() => void enterStory(numberParameter("min_confidence", 0.95))}
+          onExit={() => {
+            setStory(null);
+            setStoryError(null);
+          }}
+        />
+      </Suspense>
     );
   }
 
@@ -100,7 +105,7 @@ export function App() {
         <p className="eyebrow">OddsFox</p>
         <h1>The outcome map could not be opened</h1>
         <p>{metadataError}</p>
-        <small>If this is an older graph or static export, regenerate it with oddsfox-graph 0.12.0.</small>
+        <small>If this is an older graph or static export, regenerate it with oddsfox-graph 0.13.0.</small>
       </main>
     );
   }
@@ -117,7 +122,7 @@ export function App() {
     );
   }
 
-  const isStatic = metadata.viewer.static === true;
+  const isStatic = "static" in metadata.viewer && metadata.viewer.static === true;
   const buildMode = String(metadata.build.build_mode ?? metadata.viewer.build_mode ?? "unknown");
   const validationStatus = String(metadata.build.validation_status ?? metadata.viewer.validation_status ?? "unknown");
   const classificationStatus = String(metadata.coverage.classification_status ?? "");
@@ -151,9 +156,11 @@ export function App() {
       {storyError && <div className="error" role="alert">{storyError}</div>}
       {storyLoading && <div className="global-progress" role="status">Building the presentation story…</div>}
       <main id="main-content" className="main-content" ref={mainRef} tabIndex={-1}>
-        {route.kind === "analyst"
-          ? <Analyst metadata={metadata} onEnterStory={(confidence) => void enterStory(confidence)} />
-          : <Explore route={route} />}
+        <Suspense fallback={<div className="page-state" role="status">Loading graph tools…</div>}>
+          {route.kind === "analyst"
+            ? <Analyst metadata={metadata} onEnterStory={(confidence) => void enterStory(confidence)} />
+            : <Explore route={route} />}
+        </Suspense>
       </main>
       {!graphOnly && <footer className="site-footer">
         <span>Outcome logic from the canonical OddsFox pipeline export.</span>

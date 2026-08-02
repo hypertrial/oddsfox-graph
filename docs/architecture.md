@@ -43,7 +43,7 @@ and solver acceptance.
 
 SQLite owns transactional inference cache entries. DuckDB owns propositions,
 candidates, proofs, solver state, aggregates, layouts, and the public database.
-Incremental baselines are current, manifest-complete 0.12 outputs with matching
+Incremental baselines are current, manifest-complete 0.13 outputs with matching
 input profile, discovery semantics, rules, and viewer contracts only.
 
 ## Exploration

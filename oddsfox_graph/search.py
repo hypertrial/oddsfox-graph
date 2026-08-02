@@ -46,7 +46,7 @@ def search_nodes(out_dir: Path, query: str, top: int = 20) -> list[dict[str, obj
         out_dir,
         "nodes.parquet",
         f"""
-        SELECT node_id, market_id, outcome_label, event_slug, canonical_proposition
+        SELECT *
         FROM read_parquet('{PATH_SENTINEL}')
         WHERE lower(node_id) = ?
             OR lower(question) LIKE ? ESCAPE '!'
@@ -66,7 +66,7 @@ def nodes_by_ids(out_dir: Path, node_ids: Sequence[str]) -> list[dict[str, objec
         out_dir,
         "nodes.parquet",
         f"""
-        SELECT node_id, market_id, outcome_label, event_slug, canonical_proposition
+        SELECT *
         FROM read_parquet('{PATH_SENTINEL}')
         WHERE node_id IN (SELECT unnest(?))
         ORDER BY node_id

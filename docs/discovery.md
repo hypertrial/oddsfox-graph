@@ -87,7 +87,7 @@ Every output records `build_mode`, `validation_status`, evidence tier, extractor
 and rule bindings, source spans, proof scope, assessed/unassessed counts, cutoff,
 deadline state, stage wall time, RSS, DuckDB/spill bytes, component sizes, and
 publication bytes. Deadline status covers the manifest-complete published graph.
-`DETERMINISTIC_VALIDATED` applies only to fast outputs; 0.12 full outputs are
+`DETERMINISTIC_VALIDATED` applies only to fast outputs; 0.13 full outputs are
 always `EXPERIMENTAL_FULL`. Classification reporting is nullable:
 `not_applicable`, `not_started`, `partial`, or `complete`. A zero-eligible fast
 run is `not_applicable`, never artificial 100% coverage.

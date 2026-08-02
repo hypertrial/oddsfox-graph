@@ -2,21 +2,26 @@
 
 from __future__ import annotations
 
-import json
 import heapq
 import itertools
+from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, JsonValue
 
 from . import __version__
 from ._explorer.contracts import (
     CompareResult,
+    ComponentDetail,
+    ComponentSummary,
     EdgeMode,
     EntitySearchResult,
     ExploreHome,
     ExplorerMetadata,
+    EventDetail,
+    EventSummary,
+    EvidenceTier,
     GraphFilter,
     GraphPage,
     GraphView,
@@ -24,20 +29,25 @@ from ._explorer.contracts import (
     MarketDetail,
     RelationshipDetail,
     RecordingPlan,
+    QuarantineSummary,
     StageDetail,
     StageSummary,
     TeamDetail,
+    TeamSummary,
 )
 from ._explorer.queries import ExplorerStore
 from ._discovery.provenance import sha256_file
 from ._discovery.versions import (
-    PUBLICATION_VERSION,
-    RULE_VERSION,
-    VIEWER_API_VERSION,
-    VIEWER_ARTIFACT_VERSION,
-    COVERAGE_SUMMARY_VERSION,
     WC2026_SOURCE_SCHEMA,
     discovery_semantics_fingerprint,
+)
+from ._discovery.manifest_contracts import (
+    BuildManifest,
+    CoverageSummary,
+    WC2026Scope,
+    load_build_manifest,
+    load_viewer_manifest,
+    validate_manifest_pair,
 )
 from .queries import DuckDB
 from .search import (
@@ -65,30 +75,77 @@ _MAX_PROOF_STATES = 100_000
 
 
 class Node(BaseModel):
-    model_config = ConfigDict(extra="allow", frozen=True)
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     node_id: str
     market_id: str
+    outcome_index: int
+    clob_token_id: str
+    question: str
     outcome_label: str
     event_slug: str
+    is_active: bool
+    is_closed: bool
+    market_family: str
     canonical_proposition: str
+    proposition_type: str
+    expected_tokens: int
+    first_seen_ts: datetime | None = None
+    last_seen_ts: datetime | None = None
     plain_claim: str | None = None
 
 
 class Edge(BaseModel):
-    model_config = ConfigDict(extra="allow", frozen=True)
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     src_node_id: str
     dst_node_id: str
     edge_type: Relation
     edge_basis: str
     confidence: float
+    market_id_src: str
+    market_id_dst: str
+    event_slug_src: str
+    event_slug_dst: str
     evidence: str
     discovery_method: Literal["deterministic", "generative_consensus"]
+    rule_version: str | None = None
+    prompt_version: str | None = None
+    explanation: str
+    assumptions: tuple[str, ...] = ()
+    rule_id: str | None = None
+    proposal_id: str
+    solver_version: str
+    constraint_version: str
+    solver_component_id: str
+    primary_model_version: str | None = None
+    verifier_model_version: str | None = None
+    primary_assessment_id: str | None = None
+    verifier_assessment_id: str | None = None
+    primary_inference_fingerprint: str | None = None
+    verifier_inference_fingerprint: str | None = None
+    consensus_fingerprint: str | None = None
+    automation_profile_id: str | None = None
+    evidence_tier: EvidenceTier
+    extractor_id: str | None = None
+    extractor_version: str | None = None
+    source_spans_json: str | None = None
+    rule_applicability_fingerprint: str | None = None
+    proof_scope_key: str | None = None
+
+
+class NodeDetail(BaseModel):
+    """One analyst node plus its bounded accepted relationships."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    node: Node
+    edges: tuple[Edge, ...]
+    edges_truncated: bool = False
 
 
 class ProofStep(BaseModel):
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     src_node_id: str
     dst_node_id: str
@@ -98,7 +155,7 @@ class ProofStep(BaseModel):
 
 
 class Proof(BaseModel):
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     from_node_id: str
     to_node_id: str
@@ -108,7 +165,7 @@ class Proof(BaseModel):
 
 
 class Diagnostic(BaseModel):
-    model_config = ConfigDict(extra="allow", frozen=True)
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     status: Literal[
         "accepted",
@@ -130,14 +187,17 @@ class Diagnostic(BaseModel):
     proposition_b_id: str | None = None
     relation: str | None = None
     explanation: str
+    candidate_reasons: tuple[str, ...] = ()
+    provenance: tuple[JsonValue, ...] = ()
 
 
 class Graph:
     """A manifest-complete, immutable graph output directory."""
 
-    def __init__(self, out_dir: Path, *, build_mode: Literal["fast", "full"]) -> None:
+    def __init__(self, out_dir: Path, *, manifest: BuildManifest) -> None:
         self.out_dir = out_dir
-        self.build_mode = build_mode
+        self.build_mode = manifest.build_mode
+        self._build_manifest = manifest
 
     @classmethod
     def open(cls, out_dir: str | Path) -> Graph:
@@ -145,62 +205,19 @@ class Graph:
         manifest_path = resolved / "build_manifest.json"
         if not manifest_path.is_file():
             raise ValueError(f"Graph output is incomplete: missing {manifest_path}")
-        try:
-            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            raise ValueError(f"Graph manifest is invalid: {exc}") from exc
-        if not isinstance(manifest, dict):
-            raise ValueError("Graph manifest must be a JSON object")
-        if manifest.get("command") != "discover":
-            raise ValueError("Graph manifest is not a discovery output")
-        if manifest.get("version") != __version__:
+        manifest = load_build_manifest(manifest_path)
+        if manifest.version != __version__:
             raise ValueError(
                 f"Graph output is incompatible; run a clean v{__version__} discovery"
             )
-        build_mode = manifest.get("build_mode")
-        if build_mode not in {"fast", "full"}:
-            raise ValueError("Graph manifest has no valid v0.12 build mode")
-        versions = manifest.get("versions")
-        expected_versions = {
-            "rules": RULE_VERSION,
-            "publication": PUBLICATION_VERSION,
-            "viewer_api": VIEWER_API_VERSION,
-            "viewer_artifacts": VIEWER_ARTIFACT_VERSION,
-        }
-        if not isinstance(versions, dict) or any(
-            versions.get(name) != expected
-            for name, expected in expected_versions.items()
-        ):
-            raise ValueError(
-                f"Graph output uses stale discovery contracts; run a clean "
-                f"v{__version__} WC2026 discovery"
-            )
-        if (
-            manifest.get("discovery_semantics_fingerprint")
-            != discovery_semantics_fingerprint()
-        ):
+        if manifest.discovery_semantics_fingerprint != discovery_semantics_fingerprint():
             raise ValueError(
                 "Graph output has an incompatible discovery semantics "
                 "fingerprint; run a clean WC2026 discovery"
             )
-        input_value = manifest.get("input")
-        input_schema = (
-            input_value.get("schema")
-            if isinstance(input_value, dict)
-            else manifest.get("input_schema")
-        )
-        scope = manifest.get("scope")
-        if not isinstance(scope, dict):
-            raise ValueError("Graph output has no declared discovery scope")
-        if input_schema == WC2026_SOURCE_SCHEMA and any(
-            scope.get(key) != expected
-            for key, expected in {
-                "source": "oddsfox-pipeline",
-                "scope": "wc2026",
-                "universe": "knockout_progression",
-                "selection": "all_valid_pipeline_wc2026_markets",
-                "truncated": False,
-            }.items()
+        if (
+            manifest.input.schema == WC2026_SOURCE_SCHEMA
+            and not isinstance(manifest.scope, WC2026Scope)
         ):
             raise ValueError(
                 "Graph output is not a complete WC2026 knockout-progression scope"
@@ -221,67 +238,38 @@ class Graph:
             "coverage_summary.json",
             "viewer_manifest.json",
         )
-        declared = manifest.get("artifacts")
-        if not isinstance(declared, list) or any(
-            artifact not in declared for artifact in required
-        ):
+        if any(artifact not in manifest.artifacts for artifact in required):
             raise ValueError("Graph manifest does not declare the query artifacts")
         for artifact in required:
             require_artifact(resolved, artifact)
-        viewer = _read_manifest(resolved / "viewer_manifest.json", "viewer")
-        viewer_input = viewer.get("input")
-        build_input_sha = (
-            input_value.get("sha256")
-            if isinstance(input_value, dict)
-            else manifest.get("input_hash")
-        )
-        build_input_semantics = (
-            input_value.get("normalized_semantic_fingerprint")
-            if isinstance(input_value, dict)
-            else manifest.get("input_semantic_fingerprint")
-        )
-        if (
-            viewer.get("schema_version") != VIEWER_ARTIFACT_VERSION
-            or viewer.get("api_version") != VIEWER_API_VERSION
-            or viewer.get("build_mode") != build_mode
-            or viewer.get("validation_status") != manifest.get("validation_status")
-            or viewer.get("input_profile") != input_schema
-            or viewer.get("scope") != scope
-            or viewer.get("discovery_semantics_fingerprint")
-            != discovery_semantics_fingerprint()
-            or not isinstance(viewer.get("graph_content_fingerprint"), str)
-            or viewer.get("graph_content_fingerprint")
-            != manifest.get("graph_content_fingerprint")
-            or not isinstance(viewer_input, dict)
-            or viewer_input.get("sha256") != build_input_sha
-            or viewer_input.get("normalized_semantic_fingerprint")
-            != build_input_semantics
-        ):
-            raise ValueError(
-                "Graph viewer artifacts are incompatible; run a clean "
-                f"v{__version__} WC2026 discovery"
-            )
-        coverage = _read_manifest(resolved / "coverage_summary.json", "coverage")
-        if coverage.get("schema_version") != COVERAGE_SUMMARY_VERSION:
+        viewer = load_viewer_manifest(resolved / "viewer_manifest.json")
+        validate_manifest_pair(manifest, viewer)
+        coverage_path = resolved / "coverage_summary.json"
+        try:
+            coverage = CoverageSummary.model_validate_json(coverage_path.read_bytes())
+        except (OSError, ValueError) as exc:
             raise ValueError(
                 "Graph coverage artifacts are incompatible; run a clean "
                 f"v{__version__} WC2026 discovery"
-            )
-        artifact_hashes = manifest.get("artifact_hashes")
-        if isinstance(artifact_hashes, dict):
-            declared_viewer_hash = artifact_hashes.get("viewer_manifest.json")
-            if (
-                declared_viewer_hash is not None
-                and declared_viewer_hash
-                != sha256_file(resolved / "viewer_manifest.json")
-            ):
-                raise ValueError("Graph viewer manifest hash does not match its build")
-        return cls(resolved, build_mode=build_mode)
+            ) from exc
+        declared_coverage_hash = manifest.published_file_hashes.get(
+            "coverage_summary.json"
+        )
+        if declared_coverage_hash != sha256_file(coverage_path):
+            raise ValueError("Graph coverage summary hash does not match its build")
+        if coverage.input_selection != manifest.input.selection:
+            raise ValueError("Graph coverage selection does not match its build")
+        declared_viewer_hash = manifest.published_file_hashes.get(
+            "viewer_manifest.json"
+        )
+        if declared_viewer_hash != sha256_file(resolved / "viewer_manifest.json"):
+            raise ValueError("Graph viewer manifest hash does not match its build")
+        return cls(resolved, manifest=manifest)
 
     def metadata(self) -> ExplorerMetadata:
         return self._explorer().metadata()
 
-    def coverage(self) -> dict[str, object]:
+    def coverage(self) -> CoverageSummary:
         return self._explorer().coverage()
 
     def explore_home(
@@ -306,7 +294,7 @@ class Graph:
         *,
         cursor: str | None = None,
         limit: int = 100,
-    ) -> GraphPage:
+    ) -> GraphPage[TeamSummary]:
         return self._explorer().teams(cursor=cursor, limit=limit)
 
     def team(self, team_key: str) -> TeamDetail:
@@ -346,7 +334,7 @@ class Graph:
         *,
         cursor: str | None = None,
         limit: int = 100,
-    ) -> GraphPage:
+    ) -> GraphPage[EventSummary]:
         return self._explorer().events(filters, cursor=cursor, limit=limit)
 
     def components(
@@ -354,7 +342,7 @@ class Graph:
         *,
         cursor: str | None = None,
         limit: int = 100,
-    ) -> GraphPage:
+    ) -> GraphPage[ComponentSummary]:
         return self._explorer().components(cursor=cursor, limit=limit)
 
     def overview(
@@ -424,7 +412,7 @@ class Graph:
             min_confidence=min_confidence,
         )
 
-    def event(self, event_key: str) -> dict[str, object]:
+    def event(self, event_key: str) -> EventDetail:
         return self._explorer().event(event_key)
 
     def event_graph(
@@ -444,7 +432,7 @@ class Graph:
             edge_mode=edge_mode,
         )
 
-    def component(self, component_id: str) -> dict[str, object]:
+    def component(self, component_id: str) -> ComponentDetail:
         return self._explorer().component(component_id)
 
     def component_graph(
@@ -468,7 +456,7 @@ class Graph:
         status: str | None = None,
         cursor: str | None = None,
         limit: int = 100,
-    ) -> GraphPage:
+    ) -> GraphPage[QuarantineSummary]:
         return self._explorer().diagnostics(
             status=status,
             cursor=cursor,
@@ -482,13 +470,7 @@ class Graph:
         if top <= 0:
             return ()
         legacy_rows = search_nodes(self.out_dir, query, top)
-        build = self.metadata().build
-        build_input = build.get("input")
-        input_profile = (
-            build_input.get("schema")
-            if isinstance(build_input, dict)
-            else build.get("input_schema")
-        )
+        input_profile = self._build_manifest.input.schema
         if input_profile != WC2026_SOURCE_SCHEMA:
             return tuple(Node.model_validate(row) for row in legacy_rows)
         claim_matches = (
@@ -887,17 +869,6 @@ class Graph:
 
     def _explorer(self) -> ExplorerStore:
         return ExplorerStore(self.out_dir)
-
-
-def _read_manifest(path: Path, name: str) -> dict[str, object]:
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise ValueError(f"Graph {name} manifest is invalid: {exc}") from exc
-    if not isinstance(value, dict):
-        raise ValueError(f"Graph {name} manifest must be an object")
-    return {str(key): item for key, item in value.items()}
-
 
 def _pair_rows(
     out_dir: Path,

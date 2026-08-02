@@ -22,6 +22,10 @@ async function staticSnapshot() {
   return (await import("./staticData")).loadStaticSnapshot();
 }
 
+async function staticCoreSnapshot() {
+  return (await import("./staticData")).loadStaticCoreSnapshot();
+}
+
 async function staticProvider() {
   return import("./staticData");
 }
@@ -44,7 +48,7 @@ export async function metadata(): Promise<GraphMetadata> {
   try {
     return await json<GraphMetadata>("/api/v1/meta");
   } catch {
-    const loaded = await staticSnapshot();
+    const loaded = await staticCoreSnapshot();
     staticMode = true;
     return loaded.metadata;
   }
@@ -116,8 +120,11 @@ export async function overview(
 ): Promise<GraphView> {
   if (level === "proposition") {
     let base: GraphView;
+    let canonicalEssentialIds: ReadonlySet<string> | undefined;
     if (staticMode) {
-      base = (await staticSnapshot()).view;
+      const loaded = await staticSnapshot();
+      base = loaded.view;
+      canonicalEssentialIds = loaded.essentialEdgeIds;
     } else {
       const params = graphFilterParameters(relation, minConfidence, evidenceTier, "all");
       params.set("level", "proposition");
@@ -132,6 +139,7 @@ export async function overview(
       evidenceTier,
       true,
       edgeMode,
+      canonicalEssentialIds,
     );
   }
   if (staticMode) return (await staticSnapshot()).view;
@@ -163,6 +171,7 @@ export function filterGraphView(
   evidenceTier: EvidenceTier = "all",
   progressionOnly = true,
   edgeMode: EdgeMode = "essential",
+  canonicalEssentialIds?: ReadonlySet<string>,
 ): GraphView {
   const hasProgressionSemantics = view.nodes.some(
     (node) => typeof node.progression_outcome === "boolean",
@@ -182,7 +191,16 @@ export function filterGraphView(
     }
     return includeCompatible || edge.relation !== "compatible";
   });
-  const displayEdges = edgeMode === "essential" ? essentialGraphEdges(edges) : edges;
+  const canonicalInput = view.edges.filter((edge) => edge.relation !== "compatible");
+  const canonicalInputIds = new Set(canonicalInput.map((edge) => edge.id));
+  const canUseCanonicalProjection = canonicalEssentialIds !== undefined
+    && edges.length === canonicalInput.length
+    && edges.every((edge) => canonicalInputIds.has(edge.id));
+  const displayEdges = edgeMode === "essential"
+    ? canUseCanonicalProjection
+      ? edges.filter((edge) => canonicalEssentialIds.has(edge.id))
+      : essentialGraphEdges(edges)
+    : edges;
   const nodes = relation === "all" && evidenceTier === "all"
     ? view.nodes
     : filteredGraphNodes(view.nodes, displayEdges);

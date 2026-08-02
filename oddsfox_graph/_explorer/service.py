@@ -5,7 +5,7 @@ from __future__ import annotations
 import ipaddress
 from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
 from fastapi import FastAPI, Query, Request
 from fastapi.responses import JSONResponse, Response
@@ -14,8 +14,33 @@ from pydantic import BaseModel, ConfigDict
 
 from .._discovery.provenance import canonical_json_sha256, sha256_file
 from .._discovery.versions import WC2026_SOURCE_SCHEMA
-from .contracts import EdgeMode, EvidenceTier, GraphFilter
-from ..graph import Graph, Relation
+from .contracts import (
+    CompareResult,
+    ComponentDetail,
+    ComponentSummary,
+    EdgeMode,
+    EntitySearchResult,
+    EventDetail,
+    EventSummary,
+    EvidenceTier,
+    ExploreHome,
+    ExplorerMetadata,
+    GraphFilter,
+    GraphPage,
+    GraphView,
+    HumanHighlight,
+    MarketDetail,
+    QuarantineSummary,
+    RecordingPlan,
+    RelationshipDetail,
+    StageDetail,
+    StageSummary,
+    TeamDetail,
+    TeamSummary,
+)
+from .. import __version__
+from .._discovery.manifest_contracts import CoverageSummary
+from ..graph import Diagnostic, Edge, Graph, Node, NodeDetail, Proof, Relation
 
 
 class ErrorResponse(BaseModel):
@@ -50,12 +75,7 @@ def create_app(
     if not 0 <= max_response_edges <= 10_000:
         raise ValueError("max_response_edges must be between 0 and 10000")
     metadata = graph.metadata()
-    build_input = metadata.build.get("input")
-    input_profile = (
-        build_input.get("schema")
-        if isinstance(build_input, dict)
-        else metadata.build.get("input_schema")
-    )
+    input_profile = metadata.build.input.schema
     if input_profile != WC2026_SOURCE_SCHEMA:
         raise ValueError(
             "The FIFA World Cup 2026 Outcome Map requires a graph built with "
@@ -78,15 +98,50 @@ def create_app(
     )
     fingerprint = canonical_json_sha256(
         {
-            "graph": metadata.viewer.get("graph_content_fingerprint") or "unknown",
+            "graph": metadata.viewer.graph_content_fingerprint,
             "build_manifest": sha256_file(out_dir.resolve() / "build_manifest.json"),
             "client": client_fingerprint,
         }
     )
     etag = f'"{fingerprint}"'
+    return _create_http_app(
+        graph=graph,
+        metadata=metadata,
+        client_fingerprint=client_fingerprint,
+        etag=etag,
+        static_directory=static_directory,
+        max_response_nodes=max_response_nodes,
+        max_response_edges=max_response_edges,
+    )
+
+
+def create_schema_app() -> FastAPI:
+    """Build the route table without opening an operator graph directory."""
+
+    return _create_http_app(
+        graph=cast(Graph, object()),
+        metadata=None,
+        client_fingerprint="0" * 64,
+        etag='"schema"',
+        static_directory=None,
+        max_response_nodes=5_000,
+        max_response_edges=10_000,
+    )
+
+
+def _create_http_app(
+    *,
+    graph: Graph,
+    metadata: ExplorerMetadata | None,
+    client_fingerprint: str,
+    etag: str,
+    static_directory: Path | None,
+    max_response_nodes: int,
+    max_response_edges: int,
+) -> FastAPI:
     app = FastAPI(
         title="FIFA World Cup 2026 Outcome Map",
-        version=metadata.package_version,
+        version=metadata.package_version if metadata is not None else __version__,
         docs_url=None,
         openapi_url="/api/openapi.json",
     )
@@ -104,7 +159,7 @@ def create_app(
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "no-referrer"
         response.headers["Content-Security-Policy"] = (
-            "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; "
+            "default-src 'self'; script-src 'self'; "
             "style-src 'self' 'unsafe-inline'; "
             "img-src 'self' data:; connect-src 'self'; worker-src 'self' blob:; "
             "object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
@@ -126,98 +181,91 @@ def create_app(
         )
 
     @app.get("/api/v1/meta")
-    def get_meta() -> dict[str, object]:
-        payload = metadata.model_dump(mode="json")
-        viewer = payload["viewer"]
-        if isinstance(viewer, dict):
-            viewer["client_fingerprint"] = client_fingerprint
-        return payload
+    def get_meta() -> ExplorerMetadata:
+        if metadata is None:  # pragma: no cover - schema-only app is never served
+            raise RuntimeError("Schema-only explorer has no runtime metadata")
+        return metadata.model_copy(update={"client_fingerprint": client_fingerprint})
 
     @app.get("/api/v1/coverage")
-    def get_coverage() -> dict[str, object]:
+    def get_coverage() -> CoverageSummary:
         return graph.coverage()
 
     @app.get("/api/v1/explore")
     def explore(
         team_limit: int = Query(default=24, ge=1, le=100),
         highlight_limit: int = Query(default=6, ge=1, le=12),
-    ) -> dict[str, object]:
+    ) -> ExploreHome:
         return graph.explore_home(
             team_limit=team_limit,
             highlight_limit=highlight_limit,
-        ).model_dump(mode="json")
+        )
 
     @app.get("/api/v1/stages")
-    def stages() -> list[dict[str, object]]:
-        return [row.model_dump(mode="json") for row in graph.stages()]
+    def stages() -> list[StageSummary]:
+        return list(graph.stages())
 
     @app.get("/api/v1/stages/{stage_key}")
-    def stage(stage_key: str) -> dict[str, object]:
-        return graph.stage(stage_key).model_dump(mode="json")
+    def stage(stage_key: str) -> StageDetail:
+        return graph.stage(stage_key)
 
     @app.get("/api/v1/teams")
     def teams(
         cursor: str | None = None,
         limit: int = Query(default=100, ge=1, le=1_000),
-    ) -> dict[str, object]:
-        return graph.teams(cursor=cursor, limit=limit).model_dump(mode="json")
+    ) -> GraphPage[TeamSummary]:
+        return graph.teams(cursor=cursor, limit=limit)
 
     @app.get("/api/v1/teams/{team_key}")
-    def team(team_key: str) -> dict[str, object]:
-        return graph.team(team_key).model_dump(mode="json")
+    def team(team_key: str) -> TeamDetail:
+        return graph.team(team_key)
 
     @app.get("/api/v1/markets/{market_id}")
-    def market(market_id: str) -> dict[str, object]:
-        return graph.market(market_id).model_dump(mode="json")
+    def market(market_id: str) -> MarketDetail:
+        return graph.market(market_id)
 
     @app.get("/api/v1/relationships/{proposal_id}")
-    def relationship(proposal_id: str) -> dict[str, object]:
-        return graph.relationship(proposal_id).model_dump(mode="json")
+    def relationship(proposal_id: str) -> RelationshipDetail:
+        return graph.relationship(proposal_id)
 
     @app.get("/api/v1/entity-search")
     def entity_search(
         q: str,
         limit: int = Query(default=20, ge=1, le=100),
-    ) -> list[dict[str, object]]:
-        return [
-            row.model_dump(mode="json")
-            for row in graph.entity_search(q, limit=limit)
-        ]
+    ) -> list[EntitySearchResult]:
+        return list(graph.entity_search(q, limit=limit))
 
     @app.get("/api/v1/compare")
     def compare(
         a: str,
         b: str,
         max_hops: int = Query(default=4, ge=1, le=4),
-    ) -> dict[str, object]:
-        return graph.compare(a, b, max_hops=max_hops).model_dump(mode="json")
+    ) -> CompareResult:
+        return graph.compare(a, b, max_hops=max_hops)
 
     @app.get("/api/v1/highlights")
     def highlights(
         limit: int = Query(default=6, ge=1, le=12),
         min_confidence: float = Query(default=0.95, ge=0.0, le=1.0),
-    ) -> list[dict[str, object]]:
-        return [
-            row.model_dump(mode="json")
-            for row in graph.human_highlights(
-                limit=limit,
-                min_confidence=min_confidence,
+    ) -> list[HumanHighlight]:
+        return list(
+            graph.human_highlights(
+                limit=limit, min_confidence=min_confidence
             )
-        ]
+        )
 
     @app.get("/api/v1/recording-plan")
     def recording_plan(
         limit: int = Query(default=6, ge=1, le=12),
         min_confidence: float = Query(default=0.95, ge=0.0, le=1.0),
-    ) -> dict[str, object]:
+    ) -> RecordingPlan:
         return graph.recording_plan(
             limit=limit,
             min_confidence=min_confidence,
-        ).model_dump(mode="json")
+        )
 
     @app.get("/api/v1/search")
-    def search(q: str, limit: int = Query(default=20, ge=1, le=100)) -> list[dict[str, object]]:
-        return [row.model_dump(mode="json") for row in graph.search(q, limit)]
+    def search(q: str, limit: int = Query(default=20, ge=1, le=100)) -> list[Node]:
+        return list(graph.search(q, limit))
 
     @app.get("/api/v1/overview")
     def overview(
@@ -232,7 +280,7 @@ def create_app(
         edge_mode: EdgeMode = "all",
         max_nodes: int = Query(default=max_response_nodes, ge=1, le=max_response_nodes),
         max_edges: int = Query(default=max_response_edges, ge=0, le=max_response_edges),
-    ) -> dict[str, object]:
+    ) -> GraphView:
         filters = GraphFilter(
             domains=tuple(domains),
             relations=tuple(relations),
@@ -248,7 +296,7 @@ def create_app(
             max_nodes=max_nodes,
             max_edges=max_edges,
             edge_mode=edge_mode,
-        ).model_dump(mode="json")
+        )
 
     @app.get("/api/v1/events")
     def events(
@@ -257,7 +305,7 @@ def create_app(
         domains: list[str] = Query(default=[]),
         active_only: bool = False,
         closed_only: bool = False,
-    ) -> dict[str, object]:
+    ) -> GraphPage[EventSummary]:
         return graph.events(
             GraphFilter(
                 domains=tuple(domains),
@@ -266,10 +314,10 @@ def create_app(
             ),
             cursor=cursor,
             limit=limit,
-        ).model_dump(mode="json")
+        )
 
     @app.get("/api/v1/events/{event_key:path}")
-    def event(event_key: str) -> dict[str, object]:
+    def event(event_key: str) -> EventDetail:
         return graph.event(event_key)
 
     @app.get("/api/v1/event-graph/{event_key:path}")
@@ -280,7 +328,7 @@ def create_app(
         include_compatible: bool = False,
         evidence_tiers: list[EvidenceTier] = Query(default=[]),
         edge_mode: EdgeMode = "all",
-    ) -> dict[str, object]:
+    ) -> GraphView:
         return graph.event_graph(
             event_key,
             GraphFilter(
@@ -292,7 +340,7 @@ def create_app(
             max_nodes=max_response_nodes,
             max_edges=max_response_edges,
             edge_mode=edge_mode,
-        ).model_dump(mode="json")
+        )
 
     @app.get("/api/v1/component-graph/{component_id}")
     def component_graph(
@@ -301,7 +349,7 @@ def create_app(
         min_confidence: float = Query(default=0.0, ge=0.0, le=1.0),
         include_compatible: bool = False,
         evidence_tiers: list[EvidenceTier] = Query(default=[]),
-    ) -> dict[str, object]:
+    ) -> GraphView:
         return graph.component_graph(
             component_id,
             GraphFilter(
@@ -312,17 +360,17 @@ def create_app(
             ),
             max_nodes=max_response_nodes,
             max_edges=max_response_edges,
-        ).model_dump(mode="json")
+        )
 
     @app.get("/api/v1/components")
     def components(
         cursor: str | None = None,
         limit: int = Query(default=100, ge=1, le=1_000),
-    ) -> dict[str, object]:
-        return graph.components(cursor=cursor, limit=limit).model_dump(mode="json")
+    ) -> GraphPage[ComponentSummary]:
+        return graph.components(cursor=cursor, limit=limit)
 
     @app.get("/api/v1/components/{component_id}")
-    def component(component_id: str) -> dict[str, object]:
+    def component(component_id: str) -> ComponentDetail:
         return graph.component(component_id)
 
     @app.get("/api/v1/subgraph")
@@ -336,7 +384,7 @@ def create_app(
         max_nodes: int = Query(default=max_response_nodes, ge=1, le=max_response_nodes),
         max_edges: int = Query(default=max_response_edges, ge=0, le=max_response_edges),
         edge_mode: EdgeMode = "all",
-    ) -> dict[str, object]:
+    ) -> GraphView:
         return graph.subgraph(
             tuple(node),
             hops=hops,
@@ -349,15 +397,17 @@ def create_app(
             max_nodes=max_nodes,
             max_edges=max_edges,
             edge_mode=edge_mode,
-        ).model_dump(mode="json")
+        )
 
     @app.get("/api/v1/nodes/{node_id}")
-    def node(node_id: str) -> dict[str, object]:
-        return graph.explain_node(node_id, edge_limit=max_response_edges)
+    def node(node_id: str) -> NodeDetail:
+        return NodeDetail.model_validate(
+            graph.explain_node(node_id, edge_limit=max_response_edges)
+        )
 
     @app.get("/api/v1/edges/{proposal_id}")
-    def edge(proposal_id: str) -> dict[str, object]:
-        return graph.accepted_proposal(proposal_id)
+    def edge(proposal_id: str) -> Edge:
+        return Edge.model_validate(graph.accepted_proposal(proposal_id))
 
     @app.get("/api/v1/prove")
     def prove(
@@ -365,34 +415,30 @@ def create_app(
         to_node: str,
         max_hops: int = Query(default=4, ge=1, le=8),
         max_paths: int = Query(default=3, ge=1, le=20),
-    ) -> list[dict[str, object]]:
-        return [
-            row.model_dump(mode="json")
-            for row in graph.prove(
-                from_node,
-                to_node,
-                max_hops=max_hops,
-                max_paths=max_paths,
+    ) -> list[Proof]:
+        return list(
+            graph.prove(
+                from_node, to_node, max_hops=max_hops, max_paths=max_paths
             )
-        ]
+        )
 
     @app.get("/api/v1/why-not")
-    def why_not(a: str, b: str, relation: Relation) -> dict[str, object]:
-        return graph.why_not(a, b, relation).model_dump(mode="json")
+    def why_not(a: str, b: str, relation: Relation) -> Diagnostic:
+        return graph.why_not(a, b, relation)
 
     @app.get("/api/v1/diagnostics")
     def diagnostics(
         status: str | None = None,
         cursor: str | None = None,
         limit: int = Query(default=100, ge=1, le=1_000),
-    ) -> dict[str, object]:
+    ) -> GraphPage[QuarantineSummary]:
         return graph.diagnostics(
             status=status,
             cursor=cursor,
             limit=limit,
-        ).model_dump(mode="json")
+        )
 
-    if static_directory.is_dir():
+    if static_directory is not None and static_directory.is_dir():
         app.mount(
             "/",
             StaticFiles(directory=static_directory, html=True),

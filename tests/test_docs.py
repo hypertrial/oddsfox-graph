@@ -102,13 +102,29 @@ def test_removed_workflows_do_not_appear_in_product_or_docs() -> None:
 
 
 def test_current_versions_and_fixture_schema_are_documented() -> None:
-    assert __version__ == "0.12.0"
+    assert __version__ == "0.13.0"
     assert CACHE_ENTRY_VERSION == 8
     schema = (DOCS / "release-fixture-manifest.schema.json").read_text(
         encoding="utf-8"
     )
-    assert '"0.12.0"' in schema
+    assert '"0.13.0"' in schema
     assert RELEASE_FIXTURE_SCHEMA_VERSION in schema
+
+
+def test_release_fixture_producer_and_consumer_are_wired_and_documented() -> None:
+    producer = (
+        ROOT / ".github" / "workflows" / "manual-release-fixture.yml"
+    ).read_text(encoding="utf-8")
+    consumer = (ROOT / ".github" / "workflows" / "manual-full.yml").read_text(
+        encoding="utf-8"
+    )
+    release_docs = (DOCS / "release.md").read_text(encoding="utf-8")
+
+    assert "scripts/assemble_release_fixture.py" in producer
+    assert "name: discovery-release-fixture" in producer
+    assert "name: discovery-release-fixture" in consumer
+    assert "manual-release-fixture.yml" in release_docs
+    assert "Manual v0.13 Release Validation" in release_docs
 
 
 def test_local_markdown_links_resolve() -> None:

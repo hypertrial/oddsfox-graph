@@ -33,6 +33,18 @@ and why-not diagnostics are mode-aware. In fast mode, a missing semantic edge
 reports `full_mode_not_run` or `not_applicable_to_deterministic_rules`; it is
 never silently labeled unrelated.
 
+The service's 27 routes are defined by named Pydantic response contracts. The
+schema-only application exports the canonical OpenAPI document without opening
+an operator graph directory, and the web client derives its API types from that
+document. After changing an HTTP contract, regenerate and verify the checked-in
+contract before committing:
+
+```bash
+cd web
+npm run generate:api
+npm run check:api
+```
+
 The **Graph** route is a standalone plotter: it omits the product header,
 navigation, explanatory sections, and footer so only the graph, its controls,
 and selection inspector remain. It opens on every display-essential relation,
@@ -72,9 +84,12 @@ play/pause, seeking, previous/next highlight, regeneration at the current
 confidence threshold, and exit. Intro and outro are text-led; each highlight
 shows only its selected claims and bounded context.
 
-`explorer-export --scope graph` writes a `static-explorer-v4` copy of the
-complete exported WC2026 scope plus the bundled DuckDB-Wasm client. The static
-manifest declares capabilities explicitly. Hierarchy, search, relationship
-inspection, the Graph route, and direct comparison remain available; proof,
-why-not, story regeneration, and recording controls are omitted. Older static
-schemas are rejected with regeneration guidance.
+`explorer-export --scope graph` writes a `static-explorer-v5` copy of the
+complete exported WC2026 scope. The manifest binds two dependency-free,
+SHA-256-verified JSON payloads: the human Explore data loaded at startup and a
+frozen graph payload loaded only when the Graph route opens. Canonical essential
+edges, highlights, grouped constraints, display statistics, and coordinates are
+published by Python rather than recomputed during static startup. Hierarchy,
+search, relationship inspection, the Graph route, and direct comparison remain
+available; proof, why-not, story regeneration, and recording controls are
+omitted. Older static schemas are rejected with regeneration guidance.

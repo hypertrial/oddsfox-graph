@@ -14,7 +14,7 @@ catalog profile retains its five-domain 1,000-parse/5,000-pair contract.
 
 Qualification derives cases only from the selected canonical input, uses no
 human or model-authored truth, and binds the exact
-Qwen/Granite runtimes, v0.12 extractor, normalization, prompts, request/response
+Qwen/Granite runtimes, v0.13 extractor, normalization, prompts, request/response
 schemas, sampling, NLI, MiniLM, USearch version/parameters/insertion order, exact
 reranker, and rule registry. The resulting `AUTOMATION_VALIDATED` profile is a
 prerequisite to run full mode, but the resulting graph is still labeled
@@ -32,4 +32,4 @@ oddsfox-graph qualify \
 Generated-case metrics certify automated conformance and controlled logical-case
 behavior. They are not an independent real-world semantic-accuracy claim. Live
 Qwen/Granite quality, sustained thermal behavior, and the one-hour M4 target are
-explicitly deferred from the v0.12 fast release gate.
+explicitly deferred from the v0.13 fast release gate.

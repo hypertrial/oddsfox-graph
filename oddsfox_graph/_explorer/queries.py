@@ -11,9 +11,14 @@ from typing import Literal, cast
 from .contracts import (
     ClaimSummary,
     CompareResult,
+    ComponentDetail,
+    ComponentSummary,
     CoverageStatus,
     EdgeMode,
     EntitySearchResult,
+    EventDetail,
+    EventMarketSummary,
+    EventSummary,
     ExploreHome,
     ExplorerEdge,
     ExplorerMetadata,
@@ -29,13 +34,21 @@ from .contracts import (
     RecordingHighlight,
     RecordingPlan,
     RecordingScoreBreakdown,
+    QuarantineSummary,
     StageDetail,
     StageSummary,
     TeamDetail,
+    TeamSummary,
 )
-from .human import HumanExplorer, essential_relationship_rows, graph_display_stats
+from .derived import essential_relationship_rows, graph_display_stats
+from .human import HumanExplorer
 from .. import __version__
 from .._discovery.versions import WC2026_SOURCE_SCHEMA
+from .._discovery.manifest_contracts import (
+    CoverageSummary,
+    load_build_manifest,
+    load_viewer_manifest,
+)
 from ..queries import DuckDB
 
 
@@ -209,13 +222,20 @@ class ExplorerStore:
     def metadata(self) -> ExplorerMetadata:
         return ExplorerMetadata(
             package_version=__version__,
-            viewer=self._read_json("viewer_manifest.json"),
+            viewer=load_viewer_manifest(self.out_dir / "viewer_manifest.json"),
             coverage=self.coverage(),
-            build=self._read_json("build_manifest.json"),
+            build=load_build_manifest(self.out_dir / "build_manifest.json"),
         )
 
-    def coverage(self) -> dict[str, object]:
-        return self._read_json("coverage_summary.json")
+    def coverage(self) -> CoverageSummary:
+        path = self.out_dir / "coverage_summary.json"
+        try:
+            return CoverageSummary.model_validate_json(path.read_bytes())
+        except (OSError, ValueError) as exc:
+            raise ValueError(
+                "Graph coverage summary is incompatible; run a clean v0.13 "
+                "WC2026 discovery"
+            ) from exc
 
     def explore_home(
         self,
@@ -251,14 +271,14 @@ class ExplorerStore:
         *,
         cursor: str | None = None,
         limit: int = 100,
-    ) -> GraphPage:
+    ) -> GraphPage[TeamSummary]:
         db = self._db()
         try:
             rows, next_cursor, truncated = self._human(db).teams(
                 cursor=cursor, limit=limit
             )
-            return GraphPage(
-                rows=tuple(row.model_dump(mode="json") for row in rows),
+            return GraphPage[TeamSummary](
+                rows=rows,
                 next_cursor=next_cursor,
                 truncated=truncated,
             )
@@ -371,7 +391,7 @@ class ExplorerStore:
         *,
         cursor: str | None = None,
         limit: int = 100,
-    ) -> GraphPage:
+    ) -> GraphPage[EventSummary]:
         bounded = _bounded(limit, 1, 1_000, "event limit")
         active_filters = filters or GraphFilter()
         where, params = _event_filter(active_filters)
@@ -394,8 +414,8 @@ class ExplorerStore:
             db.close()
         truncated = len(rows) > bounded
         selected = rows[:bounded]
-        return GraphPage(
-            rows=tuple(selected),
+        return GraphPage[EventSummary](
+            rows=tuple(EventSummary.model_validate(row) for row in selected),
             next_cursor=(str(selected[-1]["event_key"]) if truncated else None),
             truncated=truncated,
         )
@@ -405,7 +425,7 @@ class ExplorerStore:
         *,
         cursor: str | None = None,
         limit: int = 100,
-    ) -> GraphPage:
+    ) -> GraphPage[ComponentSummary]:
         bounded = _bounded(limit, 1, 1_000, "component limit")
         params: list[object] = []
         where = ""
@@ -427,13 +447,13 @@ class ExplorerStore:
             db.close()
         truncated = len(rows) > bounded
         selected = rows[:bounded]
-        return GraphPage(
-            rows=tuple(selected),
+        return GraphPage[ComponentSummary](
+            rows=tuple(ComponentSummary.model_validate(row) for row in selected),
             next_cursor=(str(selected[-1]["component_id"]) if truncated else None),
             truncated=truncated,
         )
 
-    def event(self, event_key: str) -> dict[str, object]:
+    def event(self, event_key: str) -> EventDetail:
         db = self._db()
         try:
             summary = db.rows(
@@ -452,15 +472,18 @@ class ExplorerStore:
                 """,
                 [event_key],
             )
-            return {
-                "summary": summary[0],
-                "markets": markets[:1_000],
-                "markets_truncated": len(markets) > 1_000,
-            }
+            return EventDetail(
+                summary=EventSummary.model_validate(summary[0]),
+                markets=tuple(
+                    EventMarketSummary.model_validate(row)
+                    for row in markets[:1_000]
+                ),
+                markets_truncated=len(markets) > 1_000,
+            )
         finally:
             db.close()
 
-    def component(self, component_id: str) -> dict[str, object]:
+    def component(self, component_id: str) -> ComponentDetail:
         db = self._db()
         try:
             summary = db.rows(
@@ -479,11 +502,13 @@ class ExplorerStore:
                 """,
                 [component_id],
             )
-            return {
-                "summary": summary[0],
-                "event_keys": [str(row["event_key"]) for row in events[:1_000]],
-                "events_truncated": len(events) > 1_000,
-            }
+            return ComponentDetail(
+                summary=ComponentSummary.model_validate(summary[0]),
+                event_keys=tuple(
+                    str(row["event_key"]) for row in events[:1_000]
+                ),
+                events_truncated=len(events) > 1_000,
+            )
         finally:
             db.close()
 
@@ -821,7 +846,7 @@ class ExplorerStore:
         status: str | None = None,
         cursor: str | None = None,
         limit: int = 100,
-    ) -> GraphPage:
+    ) -> GraphPage[QuarantineSummary]:
         bounded = _bounded(limit, 1, 1_000, "diagnostic limit")
         where: list[str] = []
         params: list[object] = []
@@ -847,8 +872,8 @@ class ExplorerStore:
             db.close()
         truncated = len(rows) > bounded
         selected = rows[:bounded]
-        return GraphPage(
-            rows=tuple(selected),
+        return GraphPage[QuarantineSummary](
+            rows=tuple(QuarantineSummary.model_validate(row) for row in selected),
             next_cursor=(str(selected[-1]["quarantine_id"]) if truncated else None),
             truncated=truncated,
         )
@@ -948,17 +973,11 @@ class ExplorerStore:
 
         metadata = self.metadata()
         viewer = metadata.viewer
-        graph_fingerprint = str(
-            viewer.get("graph_content_fingerprint") or "unknown"
-        )
-        mode = str(viewer.get("build_mode") or metadata.build.get("build_mode"))
+        graph_fingerprint = viewer.graph_content_fingerprint
+        mode = viewer.build_mode
         if mode not in {"fast", "full"}:
             raise ValueError("Graph viewer manifest has no valid build mode")
-        validation_status = str(
-            viewer.get("validation_status")
-            or metadata.build.get("validation_status")
-            or "UNKNOWN"
-        )
+        validation_status = viewer.validation_status
         highlights = tuple(
             _recording_highlight(row, breakdown, rank=index)
             for index, (row, breakdown) in enumerate(selected, start=1)
@@ -999,7 +1018,7 @@ class ExplorerStore:
         )
         return RecordingPlan(
             graph_fingerprint=graph_fingerprint,
-            mode=cast(Literal["fast", "full"], mode),
+            mode=mode,
             validation_status=validation_status,
             requested_limit=bounded_limit,
             min_confidence=min_confidence,
@@ -1159,12 +1178,7 @@ class ExplorerStore:
 
     def _human(self, db: DuckDB) -> HumanExplorer:
         metadata = self.metadata()
-        build_input = metadata.build.get("input")
-        input_profile = (
-            build_input.get("schema")
-            if isinstance(build_input, dict)
-            else metadata.build.get("input_schema")
-        )
+        input_profile = metadata.build.input.schema
         if input_profile != WC2026_SOURCE_SCHEMA:
             raise ValueError(
                 "World Cup exploration and recording require a graph built "
@@ -1175,16 +1189,6 @@ class ExplorerStore:
             coverage=metadata.coverage,
             build=metadata.build,
         )
-
-    def _read_json(self, name: str) -> dict[str, object]:
-        path = self.out_dir / name
-        if not path.is_file():
-            raise ValueError(f"Missing explorer artifact {path}")
-        value = json.loads(path.read_text(encoding="utf-8"))
-        if not isinstance(value, dict):
-            raise ValueError(f"Explorer artifact {name} must be an object")
-        return {str(key): item for key, item in value.items()}
-
 
 def _event_filter(filters: GraphFilter) -> tuple[list[str], list[object]]:
     clauses: list[str] = []

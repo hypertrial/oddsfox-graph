@@ -4,10 +4,12 @@ import { parseRoute } from "./routes";
 import { coverageLabel, marketsByProgressionLevel, marketsForProgressionStage, relationshipSentenceFromParts, safeClaim } from "./human";
 import { closeTimeColumns, layoutGroupId } from "./layout";
 import { essentialGraphEdges } from "./graphEdges";
+import { emptyCoverage } from "./testFixtures";
 import type { GraphView, MarketDetail } from "./types";
 
 const fixture: GraphView = {
   level: "proposition",
+  layout_mode: "hierarchical",
   nodes: ["a", "b", "c", "isolated"].map((id) => ({
     id,
     label: id,
@@ -50,7 +52,7 @@ const fixture: GraphView = {
   ],
   truncated_nodes: false,
   truncated_edges: false,
-  coverage: {},
+  coverage: emptyCoverage,
   edge_mode: "all",
   display_stats: null,
 };

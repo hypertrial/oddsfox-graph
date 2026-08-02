@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { createLayoutTask } from "./layout";
 import { buildStory, captionFor, storyFrame } from "./story";
+import { emptyCoverage } from "./testFixtures";
 import type { GraphView, RecordingPlan } from "./types";
 
 const graph: GraphView = {
   level: "proposition",
+  layout_mode: "hierarchical",
   nodes: [
     { id: "a", label: "Alpha wins the World Cup", level: "proposition", parent_id: "event-a", x: -10, y: 0, size: 4, domain: "sports", component_id: "one", market_id: "m1", proposition_count: 1, edge_count: 1, classification_coverage: null, classification_status: "not_applicable" },
     { id: "b", label: "Alpha reaches the final", level: "proposition", parent_id: "event-b", x: 10, y: 0, size: 4, domain: "sports", component_id: "one", market_id: "m2", proposition_count: 1, edge_count: 1, classification_coverage: null, classification_status: "not_applicable" },
@@ -12,7 +14,7 @@ const graph: GraphView = {
   edges: [{ id: "p1", source: "a", target: "b", relation: "implies", count: 1, confidence: 0.99, discovery_method: "deterministic", evidence_tier: "deterministic_rule", aggregation_only: false }],
   truncated_nodes: false,
   truncated_edges: false,
-  coverage: {},
+  coverage: emptyCoverage,
   edge_mode: "essential",
   display_stats: null,
 };

@@ -1,16 +1,10 @@
-import * as duckdb from "@duckdb/duckdb-wasm";
-import duckdbMvp from "@duckdb/duckdb-wasm/dist/duckdb-mvp.wasm?url";
-import mvpWorker from "@duckdb/duckdb-wasm/dist/duckdb-browser-mvp.worker.js?url";
 import { marketsForProgressionStage, relationshipSentence } from "./human";
-import { closeTimeColumns } from "./layout";
-import { essentialGraphEdges } from "./graphEdges";
 import type {
   ClaimSummary,
   CompareResult,
+  CoverageSummary,
   EntitySearchResult,
   ExplorerCapabilities,
-  ExplorerEdge,
-  ExplorerNode,
   ExploreHome,
   GraphDisplayStats,
   GraphMetadata,
@@ -27,29 +21,34 @@ import type {
   TournamentScope,
 } from "./types";
 
-const snapshotFiles = [
-  "snapshot_nodes.parquet",
-  "snapshot_edges.parquet",
-  "snapshot_stages.parquet",
-  "snapshot_teams.parquet",
-  "snapshot_markets.parquet",
-  "snapshot_claims.parquet",
-  "snapshot_relationships.parquet",
-  "snapshot_relationship_groups.parquet",
-] as const;
+const STATIC_SCHEMA = "static-explorer-v5";
+const CORE_SCHEMA = "static-explorer-core-v1";
+const GRAPH_SCHEMA = "static-explorer-graph-v1";
+const DERIVED_SEMANTICS_VERSION = "explorer-derived-semantics-v1";
+const ESSENTIAL_PROJECTION_VERSION = "essential-projection-v2";
+
+interface StaticFile {
+  schema_version: string;
+  sha256: string;
+  bytes: number;
+}
 
 interface StaticManifest {
   schema_version: string;
   package_version: string;
   source_graph: string;
   graph_content_fingerprint: string;
-  build_mode: string;
+  client_fingerprint: string;
+  build_mode: "fast" | "full";
   validation_status: string;
-  coverage: Record<string, unknown>;
+  coverage: CoverageSummary;
   capabilities: ExplorerCapabilities;
   tournament_scope: TournamentScope;
-  display_stats: GraphDisplayStats | null;
-  snapshot_files: Record<string, string>;
+  display_stats: GraphDisplayStats;
+  derived_semantics_version: string;
+  essential_projection_version: string;
+  data_format: string;
+  files: Record<string, StaticFile>;
 }
 
 type MarketRow = Omit<MarketDetail, "claims">;
@@ -66,8 +65,31 @@ interface RelationshipRow {
   explanation: string;
 }
 
-export interface StaticSnapshot {
+interface StaticCorePayload {
+  schema_version: string;
+  scope: TournamentScope;
+  coverage: CoverageSummary;
+  capabilities: ExplorerCapabilities;
+  display_stats: GraphDisplayStats;
+  stages: StageSummary[];
+  teams: TeamSummary[];
+  markets: MarketRow[];
+  claims: ClaimSummary[];
+  relationships: RelationshipRow[];
+  essential_relationship_ids: string[];
+  highlight_relationship_ids: string[];
+  relationship_groups: RelationshipGroupSummary[];
+}
+
+interface StaticGraphPayload {
+  schema_version: string;
   view: GraphView;
+  essential_edge_ids: string[];
+  layout_version: string;
+  coordinate_fingerprint: string;
+}
+
+export interface StaticCoreSnapshot {
   metadata: GraphMetadata;
   scope: TournamentScope;
   capabilities: ExplorerCapabilities;
@@ -78,30 +100,39 @@ export interface StaticSnapshot {
   claims: ClaimSummary[];
   relationships: RelationshipDetail[];
   essentialRelationships: RelationshipDetail[];
+  highlights: HumanHighlight[];
   groups: RelationshipGroupSummary[];
 }
 
-let snapshot: Promise<StaticSnapshot> | null = null;
+export interface StaticSnapshot extends StaticCoreSnapshot {
+  view: GraphView;
+  essentialEdgeIds: ReadonlySet<string>;
+}
+
+let manifestPromise: Promise<StaticManifest> | null = null;
+let corePromise: Promise<StaticCoreSnapshot> | null = null;
+let graphPromise: Promise<StaticSnapshot> | null = null;
+
+export function loadStaticCoreSnapshot(): Promise<StaticCoreSnapshot> {
+  corePromise ??= loadCore();
+  return corePromise;
+}
 
 export function loadStaticSnapshot(): Promise<StaticSnapshot> {
-  snapshot ??= load();
-  return snapshot;
+  graphPromise ??= loadGraph();
+  return graphPromise;
 }
 
 export async function staticExploreHome(
   teamLimit = 24,
   highlightLimit = 6,
 ): Promise<ExploreHome> {
-  const loaded = await loadStaticSnapshot();
-  const notable_relationships = selectHumanHighlights(
-    loaded.essentialRelationships,
-    highlightLimit,
-  );
+  const loaded = await loadStaticCoreSnapshot();
   return {
     scope: loaded.scope,
     stages: loaded.stages,
     teams: loaded.teams.slice(0, teamLimit),
-    notable_relationships,
+    notable_relationships: loaded.highlights.slice(0, highlightLimit),
     relationship_groups: loaded.groups,
     capabilities: loaded.capabilities,
     display_stats: loaded.displayStats,
@@ -110,7 +141,7 @@ export async function staticExploreHome(
 }
 
 export async function staticStageDetail(stageKey: string): Promise<StageDetail> {
-  const loaded = await loadStaticSnapshot();
+  const loaded = await loadStaticCoreSnapshot();
   const summary = loaded.stages.find((item) => item.stage_key === stageKey);
   if (!summary) throw new Error(`Stage ${stageKey} is not in this snapshot`);
   const markets = marketsForProgressionStage(
@@ -126,24 +157,34 @@ export async function staticStageDetail(stageKey: string): Promise<StageDetail> 
 }
 
 export async function staticTeamDetail(teamKey: string): Promise<TeamDetail> {
-  const loaded = await loadStaticSnapshot();
+  const loaded = await loadStaticCoreSnapshot();
   const summary = loaded.teams.find((team) => team.team_key === teamKey);
   if (!summary) throw new Error(`Team ${teamKey} is not in this snapshot`);
   return {
     summary,
-    markets: loaded.markets.filter((market) => market.canonical_team_name === summary.canonical_team_name),
+    markets: loaded.markets.filter(
+      (market) => market.canonical_team_name === summary.canonical_team_name,
+    ),
   };
 }
 
 export async function staticMarketDetail(marketId: string): Promise<MarketDetail> {
-  const market = (await loadStaticSnapshot()).markets.find((item) => item.market_id === marketId);
+  const market = (await loadStaticCoreSnapshot()).markets.find(
+    (item) => item.market_id === marketId,
+  );
   if (!market) throw new Error(`Market ${marketId} is not in this snapshot`);
   return market;
 }
 
-export async function staticRelationshipDetail(proposalId: string): Promise<RelationshipDetail> {
-  const relationship = (await loadStaticSnapshot()).relationships.find((item) => item.proposal_id === proposalId);
-  if (!relationship) throw new Error(`Relationship ${proposalId} is not in this snapshot`);
+export async function staticRelationshipDetail(
+  proposalId: string,
+): Promise<RelationshipDetail> {
+  const relationship = (await loadStaticCoreSnapshot()).relationships.find(
+    (item) => item.proposal_id === proposalId,
+  );
+  if (!relationship) {
+    throw new Error(`Relationship ${proposalId} is not in this snapshot`);
+  }
   return relationship;
 }
 
@@ -151,20 +192,35 @@ export async function staticEntitySearch(
   query: string,
   limit = 12,
 ): Promise<EntitySearchResult[]> {
-  const loaded = await loadStaticSnapshot();
+  const loaded = await loadStaticCoreSnapshot();
   const lowered = query.trim().toLocaleLowerCase();
   if (!lowered) return [];
   const candidates: Array<{ position: number; result: EntitySearchResult }> = [];
-  const add = (kind: EntitySearchResult["kind"], id: string, label: string, description: string) => {
+  const add = (
+    kind: EntitySearchResult["kind"],
+    id: string,
+    label: string,
+    description: string,
+  ) => {
     const position = `${label} ${description}`.toLocaleLowerCase().indexOf(lowered);
     if (position >= 0) candidates.push({ position, result: { kind, id, label, description } });
   };
-  for (const team of loaded.teams) add("team", team.team_key, team.canonical_team_name, `${team.market_count} progression markets`);
-  for (const stage of loaded.stages) add("stage", stage.stage_key, stage.label, `${stage.team_count} teams`);
-  for (const market of loaded.markets) add("market", market.market_id, market.question, `${market.canonical_team_name} · ${market.stage_key.replaceAll("_", " ")}`);
-  for (const claim of loaded.claims) add("claim", claim.id, claim.plain_claim, `${claim.answer} outcome`);
+  for (const team of loaded.teams) {
+    add("team", team.team_key, team.canonical_team_name, `${team.market_count} progression markets`);
+  }
+  for (const stage of loaded.stages) {
+    add("stage", stage.stage_key, stage.label, `${stage.team_count} teams`);
+  }
+  for (const market of loaded.markets) {
+    add("market", market.market_id, market.question, `${market.canonical_team_name} · ${market.stage_key.replaceAll("_", " ")}`);
+  }
+  for (const claim of loaded.claims) {
+    add("claim", claim.id, claim.plain_claim, `${claim.answer} outcome`);
+  }
   return candidates
-    .sort((left, right) => left.position - right.position || left.result.label.localeCompare(right.result.label) || left.result.id.localeCompare(right.result.id))
+    .sort((left, right) => left.position - right.position
+      || left.result.label.localeCompare(right.result.label)
+      || left.result.id.localeCompare(right.result.id))
     .slice(0, limit)
     .map(({ result }) => result);
 }
@@ -174,10 +230,12 @@ export async function staticCompare(
   targetId: string,
   maxHops = 4,
 ): Promise<CompareResult> {
-  const loaded = await loadStaticSnapshot();
+  const loaded = await loadStaticCoreSnapshot();
   const source = loaded.claims.find((claim) => claim.id === sourceId);
   const target = loaded.claims.find((claim) => claim.id === targetId);
-  if (!source || !target) throw new Error("Both comparison outcomes must exist in this snapshot");
+  if (!source || !target) {
+    throw new Error("Both comparison outcomes must exist in this snapshot");
+  }
   if (sourceId === targetId) {
     return { status: "same_claim", source, target, direct: null, path: [], explanation: "You selected the same outcome twice." };
   }
@@ -185,12 +243,7 @@ export async function staticCompare(
   if (direct) {
     return { status: "direct", source, target, direct, path: [], explanation: relationshipSentence(direct) };
   }
-  const path = shortestPath(
-    loaded.essentialRelationships,
-    sourceId,
-    targetId,
-    maxHops,
-  );
+  const path = shortestPath(loaded.essentialRelationships, sourceId, targetId, maxHops);
   if (path.length > 0) {
     return { status: "path", source, target, direct: null, path, explanation: `A ${path.length}-step logic path connects these outcomes.` };
   }
@@ -205,255 +258,213 @@ export async function staticCompare(
 }
 
 export async function staticSearch(query: string): Promise<SearchNode[]> {
-  const loaded = await loadStaticSnapshot();
+  const loaded = await loadStaticCoreSnapshot();
   const lowered = query.toLocaleLowerCase();
-  const claimById = new Map(loaded.claims.map((claim) => [claim.id, claim]));
+  const marketById = new Map(loaded.markets.map((market) => [market.market_id, market]));
   const seenClaims = new Set<string>();
-  return loaded.view.nodes
-    .filter((node) => {
-      const claim = claimById.get(node.id);
-      return `${claim?.plain_claim ?? ""} ${claim?.question ?? ""} ${node.label}`.toLocaleLowerCase().includes(lowered)
-        || node.id.toLocaleLowerCase() === lowered;
-    })
-    .sort((left, right) => {
-      const leftClaim = claimById.get(left.id);
-      const rightClaim = claimById.get(right.id);
-      return Number(rightClaim?.is_progression_token ?? false) - Number(leftClaim?.is_progression_token ?? false)
-        || (rightClaim?.normalized_progression_level ?? -1) - (leftClaim?.normalized_progression_level ?? -1)
-        || (leftClaim?.plain_claim ?? left.label).localeCompare(rightClaim?.plain_claim ?? right.label)
-        || left.id.localeCompare(right.id);
-    })
-    .filter((node) => {
-      const label = claimById.get(node.id)?.plain_claim ?? node.label;
-      if (seenClaims.has(label)) return false;
-      seenClaims.add(label);
+  return loaded.claims
+    .filter((claim) => `${claim.plain_claim} ${claim.question} ${claim.technical_canonical_label}`.toLocaleLowerCase().includes(lowered)
+      || claim.id.toLocaleLowerCase() === lowered)
+    .sort((left, right) => Number(right.is_progression_token) - Number(left.is_progression_token)
+      || right.normalized_progression_level - left.normalized_progression_level
+      || left.plain_claim.localeCompare(right.plain_claim)
+      || left.id.localeCompare(right.id))
+    .filter((claim) => {
+      if (seenClaims.has(claim.plain_claim)) return false;
+      seenClaims.add(claim.plain_claim);
       return true;
     })
     .slice(0, 12)
-    .map((node) => {
-      const claim = claimById.get(node.id);
-      return {
-        node_id: node.id,
-        market_id: node.market_id ?? "",
-        outcome_label: claim?.answer ?? "",
-        event_slug: node.parent_id ?? "",
-        canonical_proposition: claim?.plain_claim ?? node.label,
-      };
-    });
-}
-
-async function load(): Promise<StaticSnapshot> {
-  const manifestResponse = await fetch("./static_manifest.json");
-  if (!manifestResponse.ok) throw new Error("Static explorer manifest is unavailable");
-  const manifest = (await manifestResponse.json()) as StaticManifest;
-  if (manifest.schema_version !== "static-explorer-v4") {
-    throw new Error(`Unsupported static explorer schema ${manifest.schema_version}. Regenerate this snapshot with oddsfox-graph 0.12.0.`);
-  }
-  for (const file of snapshotFiles) {
-    if (!manifest.snapshot_files[file]) throw new Error(`Static explorer manifest is missing ${file}`);
-  }
-  const worker = new Worker(mvpWorker);
-  const database = new duckdb.AsyncDuckDB(new duckdb.VoidLogger(), worker);
-  await database.instantiate(duckdbMvp);
-  for (const file of snapshotFiles) await register(database, file);
-  const connection = await database.connect();
-  try {
-    const nodes = await readRows<ExplorerNode>(connection, "snapshot_nodes", "id");
-    const stages = await readRows<StageSummary>(connection, "snapshot_stages", "stage_rank, stage_key");
-    const teams = await readRows<TeamSummary>(connection, "snapshot_teams", "team_key");
-    const marketRows = await readRows<MarketRow>(connection, "snapshot_markets", "stage_rank, market_id");
-    const claims = await readRows<ClaimSummary>(connection, "snapshot_claims", "id");
-    const relationshipRows = await readRows<RelationshipRow>(connection, "snapshot_relationships", "proposal_id");
-    const groups = await readRows<RelationshipGroupSummary>(connection, "snapshot_relationship_groups", "id");
-    const claimById = new Map(claims.map((claim) => [claim.id, claim]));
-    const markets = marketRows.map((market) => ({
-      ...market,
-      claims: claims
-        .filter((claim) => claim.market_id === market.market_id)
-        .sort((left, right) => Number(right.is_progression_token) - Number(left.is_progression_token) || left.id.localeCompare(right.id)),
+    .map((claim) => ({
+      node_id: claim.id,
+      market_id: claim.market_id,
+      outcome_label: claim.answer,
+      event_slug: marketById.get(claim.market_id)?.event_slug ?? "",
+      canonical_proposition: claim.plain_claim,
+      plain_claim: claim.plain_claim,
     }));
-    const relationships = relationshipRows.map((row) => {
-      const source = claimById.get(row.source_id);
-      const target = claimById.get(row.target_id);
-      if (!source || !target) throw new Error(`Static relationship ${row.proposal_id} references a missing claim`);
-      return {
-        proposal_id: row.proposal_id,
-        source,
-        target,
-        relation: row.relation,
-        basis: row.basis,
-        confidence: row.confidence,
-        evidence_tier: row.evidence_tier,
-        discovery_method: row.discovery_method,
-        explanation: row.explanation,
-      };
-    });
-    const teamRows = new Map(
-      [...new Set(claims.map((claim) => claim.canonical_team_name))]
-        .sort((left, right) => left.localeCompare(right))
-        .map((team, index) => [team, index]),
-    );
-    const closeEpochs = claims
-      .map((claim) => claim.market_close_epoch)
-      .filter((epoch): epoch is number => epoch !== null);
-    const hasCloseTimes = claims.length > 0 && closeEpochs.length === claims.length;
-    const closeColumns = closeTimeColumns(closeEpochs);
-    const hasProgressionSemantics = claims.length > 0 && claims.every(
-      (claim) => Number.isInteger(claim.normalized_progression_level),
-    );
-    const usesTournamentGrid = hasCloseTimes || hasProgressionSemantics;
-    const columnValue = (claim: ClaimSummary) => hasCloseTimes
-      ? claim.market_close_epoch!
-      : claim.normalized_progression_level;
-    const marketOffsets = usesTournamentGrid
-      ? marketColumnOffsets(claims, columnValue)
-      : new Map<string, number>();
-    const maxParallelMarkets = usesTournamentGrid
-      ? maximumParallelMarkets(claims, columnValue)
-      : 1;
-    const teamRowSpacing = Math.max(96, maxParallelMarkets * 48);
-    const humanNodes = nodes.map((node) => {
-      const claim = claimById.get(node.id);
-      return claim ? {
-        ...node,
-        label: claim.plain_claim,
-        domain: claim.canonical_team_name,
-        progression_outcome: claim.is_progression_token,
-        progression_level: claim.normalized_progression_level,
-        stage_key: claim.stage_key,
-        market_close_epoch: claim.market_close_epoch,
-        x: usesTournamentGrid
-          ? (hasCloseTimes
-              ? (closeColumns.get(claim.market_close_epoch!) ?? 0) * 260
-              : claim.normalized_progression_level * 260)
-            + (claim.is_progression_token ? -42 : 42)
-          : node.x,
-        y: usesTournamentGrid
-          ? (teamRows.get(claim.canonical_team_name) ?? 0) * teamRowSpacing
-            + (marketOffsets.get(claim.market_id) ?? 0) * 48
-          : node.y,
-      } : node;
-    });
-    const allEdges: ExplorerEdge[] = relationships.map((relationship) => ({
-      id: relationship.proposal_id,
-      source: relationship.source.id,
-      target: relationship.target.id,
-      relation: relationship.relation,
-      count: 1,
-      confidence: relationship.confidence,
-      discovery_method: relationship.discovery_method,
-      evidence_tier: relationship.evidence_tier,
-      aggregation_only: false,
-    }));
-    const graphEdges = allEdges.filter((edge) => edge.relation !== "compatible");
-    const essentialEdges = essentialGraphEdges(graphEdges);
-    const essentialRelationships = relationshipsFromEdges(
-      relationships,
-      essentialEdges,
-    );
-    const displayStats = manifest.display_stats
-      ?? calculateDisplayStats(humanNodes, essentialEdges, allEdges.length);
-    const view: GraphView = {
-      level: humanNodes[0]?.level ?? "proposition",
-      nodes: humanNodes,
-      edges: graphEdges,
-      truncated_nodes: false,
-      truncated_edges: false,
-      coverage: manifest.coverage,
-      edge_mode: "all",
-      layout_mode: hasCloseTimes
-        ? "close_time"
-        : hasProgressionSemantics
-          ? "progression"
-          : "hierarchical",
-      display_stats: displayStats,
-    };
-    return {
-      view,
-      scope: manifest.tournament_scope,
-      capabilities: manifest.capabilities,
-      displayStats,
-      stages,
-      teams,
-      markets,
-      claims,
-      relationships,
-      essentialRelationships,
-      groups,
-      metadata: {
-        package_version: manifest.package_version,
-        viewer: {
-          static: true,
-          source_graph: manifest.source_graph,
-          graph_content_fingerprint: manifest.graph_content_fingerprint,
-          build_mode: manifest.build_mode,
-          validation_status: manifest.validation_status,
-          capabilities: manifest.capabilities,
-          scope: manifest.tournament_scope,
-        },
-        coverage: manifest.coverage,
-        build: { static: true, build_mode: manifest.build_mode, validation_status: manifest.validation_status },
-      },
-    };
-  } finally {
-    await connection.close();
-    await database.terminate();
-  }
 }
 
-export function marketCloseOffsets(claims: ClaimSummary[]): Map<string, number> {
-  return marketColumnOffsets(claims, (claim) => claim.market_close_epoch);
+async function loadManifest(): Promise<StaticManifest> {
+  manifestPromise ??= (async () => {
+    const response = await fetch("./static_manifest.json");
+    if (!response.ok) throw new Error("Static explorer manifest is unavailable");
+    const value = await response.json() as StaticManifest;
+    if (value.schema_version !== STATIC_SCHEMA) {
+      throw new Error(`Unsupported static explorer schema ${value.schema_version}. Regenerate this snapshot with the current oddsfox-graph release.`);
+    }
+    if (value.data_format !== "canonical-json-v1") {
+      throw new Error(`Unsupported static explorer data format ${value.data_format}`);
+    }
+    if (value.derived_semantics_version !== DERIVED_SEMANTICS_VERSION
+      || value.essential_projection_version !== ESSENTIAL_PROJECTION_VERSION) {
+      throw new Error("Static explorer derived-semantics versions do not match this client");
+    }
+    for (const file of ["explore_snapshot.json", "graph_snapshot.json"]) {
+      const entry = value.files?.[file];
+      if (!entry?.sha256 || !Number.isInteger(entry.bytes) || entry.bytes < 1) {
+        throw new Error(`Static explorer manifest is missing ${file}`);
+      }
+    }
+    return value;
+  })();
+  return manifestPromise;
 }
 
-function marketColumnOffsets(
-  claims: ClaimSummary[],
-  columnValue: (claim: ClaimSummary) => number | null,
-): Map<string, number> {
-  const groups = new Map<string, Set<string>>();
-  for (const claim of claims) {
-    const key = `${claim.canonical_team_name}\u0000${columnValue(claim)}`;
-    const markets = groups.get(key) ?? new Set<string>();
-    markets.add(claim.market_id);
-    groups.set(key, markets);
-  }
-  const offsets = new Map<string, number>();
-  for (const markets of groups.values()) {
-    const ordered = [...markets].sort();
-    ordered.forEach((marketId, index) => offsets.set(marketId, index - (ordered.length - 1) / 2));
-  }
-  return offsets;
-}
-
-function maximumParallelMarkets(
-  claims: ClaimSummary[],
-  columnValue: (claim: ClaimSummary) => number | null,
-): number {
-  const groups = new Map<string, Set<string>>();
-  for (const claim of claims) {
-    const key = `${claim.canonical_team_name}\u0000${columnValue(claim)}`;
-    const markets = groups.get(key) ?? new Set<string>();
-    markets.add(claim.market_id);
-    groups.set(key, markets);
-  }
-  return Math.max(1, ...[...groups.values()].map((markets) => markets.size));
-}
-
-async function register(database: duckdb.AsyncDuckDB, name: string) {
-  await database.registerFileURL(
-    name,
-    new URL(`./${name}`, window.location.href).href,
-    duckdb.DuckDBDataProtocol.HTTP,
-    false,
+async function loadCore(): Promise<StaticCoreSnapshot> {
+  const manifest = await loadManifest();
+  const payload = await verifiedJson<StaticCorePayload>(
+    "explore_snapshot.json",
+    manifest.files["explore_snapshot.json"],
   );
+  if (payload.schema_version !== CORE_SCHEMA) {
+    throw new Error(`Unsupported static core schema ${payload.schema_version}`);
+  }
+  for (const field of [payload.stages, payload.teams, payload.markets, payload.claims, payload.relationships]) {
+    if (!Array.isArray(field)) throw new Error("Static core payload is malformed");
+  }
+  const claimById = uniqueMap(payload.claims, (claim) => claim.id, "claim");
+  const markets = payload.markets.map((market) => ({
+    ...market,
+    claims: payload.claims
+      .filter((claim) => claim.market_id === market.market_id)
+      .sort((left, right) => Number(right.is_progression_token) - Number(left.is_progression_token)
+        || left.id.localeCompare(right.id)),
+  }));
+  const relationships = payload.relationships.map((row) => {
+    const source = claimById.get(row.source_id);
+    const target = claimById.get(row.target_id);
+    if (!source || !target) {
+      throw new Error(`Static relationship ${row.proposal_id} references a missing claim`);
+    }
+    return { ...row, source, target } satisfies RelationshipDetail;
+  });
+  const relationshipById = uniqueMap(
+    relationships,
+    (relationship) => relationship.proposal_id,
+    "relationship",
+  );
+  const essentialRelationships = resolveRelationships(
+    payload.essential_relationship_ids,
+    relationshipById,
+    "essential relationship",
+  );
+  const highlights = resolveRelationships(
+    payload.highlight_relationship_ids,
+    relationshipById,
+    "highlight relationship",
+  ).map((relationship, index) => ({ rank: index + 1, relationship }));
+  return {
+    scope: payload.scope,
+    capabilities: payload.capabilities,
+    displayStats: payload.display_stats,
+    stages: payload.stages,
+    teams: payload.teams,
+    markets,
+    claims: payload.claims,
+    relationships,
+    essentialRelationships,
+    highlights,
+    groups: payload.relationship_groups,
+    metadata: {
+      package_version: manifest.package_version,
+      client_fingerprint: manifest.client_fingerprint,
+      viewer: {
+        static: true,
+        source_graph: manifest.source_graph,
+        graph_content_fingerprint: manifest.graph_content_fingerprint,
+        build_mode: manifest.build_mode,
+        validation_status: manifest.validation_status,
+        client_fingerprint: manifest.client_fingerprint,
+        capabilities: payload.capabilities,
+        scope: payload.scope,
+      },
+      coverage: payload.coverage,
+      build: {
+        static: true,
+        build_mode: manifest.build_mode,
+        validation_status: manifest.validation_status,
+      },
+    },
+  };
 }
 
-async function readRows<T>(
-  connection: duckdb.AsyncDuckDBConnection,
-  table: string,
-  orderBy: string,
-): Promise<T[]> {
-  const result = await connection.query(`SELECT * FROM read_parquet('${table}.parquet') ORDER BY ${orderBy}`);
-  return result.toArray().map((row) => normalize(row.toJSON()) as T);
+async function loadGraph(): Promise<StaticSnapshot> {
+  const [manifest, core] = await Promise.all([loadManifest(), loadStaticCoreSnapshot()]);
+  const payload = await verifiedJson<StaticGraphPayload>(
+    "graph_snapshot.json",
+    manifest.files["graph_snapshot.json"],
+  );
+  if (payload.schema_version !== GRAPH_SCHEMA) {
+    throw new Error(`Unsupported static graph schema ${payload.schema_version}`);
+  }
+  if (!Array.isArray(payload.view?.nodes) || !Array.isArray(payload.view?.edges)) {
+    throw new Error("Static graph payload is malformed");
+  }
+  const nodeIds = new Set(payload.view.nodes.map((node) => node.id));
+  const edgeIds = new Set<string>();
+  for (const edge of payload.view.edges) {
+    if (edgeIds.has(edge.id)) throw new Error(`Static graph contains duplicate edge ${edge.id}`);
+    edgeIds.add(edge.id);
+    if (!nodeIds.has(edge.source) || !nodeIds.has(edge.target)) {
+      throw new Error(`Static graph edge ${edge.id} references a missing node`);
+    }
+  }
+  for (const edgeId of payload.essential_edge_ids) {
+    if (!edgeIds.has(edgeId)) throw new Error(`Static essential edge ${edgeId} is missing`);
+  }
+  return {
+    ...core,
+    view: payload.view,
+    essentialEdgeIds: new Set(payload.essential_edge_ids),
+  };
+}
+
+async function verifiedJson<T>(name: string, expected: StaticFile): Promise<T> {
+  const response = await fetch(`./${name}`);
+  if (!response.ok) throw new Error(`Static explorer file ${name} is unavailable`);
+  const bytes = await response.arrayBuffer();
+  if (bytes.byteLength !== expected.bytes) {
+    throw new Error(`Static explorer file ${name} has the wrong size`);
+  }
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  const actual = [...new Uint8Array(digest)]
+    .map((value) => value.toString(16).padStart(2, "0"))
+    .join("");
+  if (actual !== expected.sha256) {
+    throw new Error(`Static explorer file ${name} failed integrity validation`);
+  }
+  try {
+    return JSON.parse(new TextDecoder().decode(bytes)) as T;
+  } catch {
+    throw new Error(`Static explorer file ${name} is not valid JSON`);
+  }
+}
+
+function uniqueMap<T>(
+  values: T[],
+  key: (value: T) => string,
+  label: string,
+): Map<string, T> {
+  const result = new Map<string, T>();
+  for (const value of values) {
+    const id = key(value);
+    if (result.has(id)) throw new Error(`Static snapshot contains duplicate ${label} ${id}`);
+    result.set(id, value);
+  }
+  return result;
+}
+
+function resolveRelationships(
+  ids: string[],
+  byId: Map<string, RelationshipDetail>,
+  label: string,
+): RelationshipDetail[] {
+  return ids.map((id) => {
+    const relationship = byId.get(id);
+    if (!relationship) throw new Error(`Static ${label} ${id} is missing`);
+    return relationship;
+  });
 }
 
 function directRelationship(
@@ -462,46 +473,10 @@ function directRelationship(
   targetId: string,
 ): RelationshipDetail | null {
   return relationships
-    .filter((item) => (
-      item.source.id === sourceId && item.target.id === targetId
-    ) || (
-      item.relation !== "implies" && item.source.id === targetId && item.target.id === sourceId
-    ))
-    .sort((left, right) => right.confidence - left.confidence || left.proposal_id.localeCompare(right.proposal_id))[0] ?? null;
-}
-
-function selectHumanHighlights(
-  relationships: RelationshipDetail[],
-  limit: number,
-): HumanHighlight[] {
-  const ordered = [...relationships].sort((left, right) =>
-    Math.max(right.source.stage_rank, right.target.stage_rank)
-      - Math.max(left.source.stage_rank, left.target.stage_rank)
-    || right.confidence - left.confidence
-    || left.proposal_id.localeCompare(right.proposal_id));
-  const teams = new Set<string>();
-  const templates = new Set<string>();
-  const endpoints = new Set<string>();
-  const selected: RelationshipDetail[] = [];
-  for (const item of ordered) {
-    const itemTeams = [item.source.canonical_team_name, item.target.canonical_team_name];
-    const template = [
-      item.relation,
-      item.source.stage_rank,
-      item.target.stage_rank,
-      item.source.is_progression_token,
-      item.target.is_progression_token,
-    ].join(":");
-    if (itemTeams.some((team) => teams.has(team)) || templates.has(template)) continue;
-    if (endpoints.has(item.source.id) || endpoints.has(item.target.id)) continue;
-    selected.push(item);
-    itemTeams.forEach((team) => teams.add(team));
-    templates.add(template);
-    endpoints.add(item.source.id);
-    endpoints.add(item.target.id);
-    if (selected.length === limit) break;
-  }
-  return selected.map((relationship, index) => ({ rank: index + 1, relationship }));
+    .filter((item) => (item.source.id === sourceId && item.target.id === targetId)
+      || (item.relation !== "implies" && item.source.id === targetId && item.target.id === sourceId))
+    .sort((left, right) => right.confidence - left.confidence
+      || left.proposal_id.localeCompare(right.proposal_id))[0] ?? null;
 }
 
 function shortestPath(
@@ -510,69 +485,36 @@ function shortestPath(
   targetId: string,
   maxHops: number,
 ): RelationshipDetail[] {
-  const eligible = relationships.filter((item) => item.relation === "implies" || item.relation === "equivalent");
+  const adjacency = new Map<string, Array<{ target: string; relationship: RelationshipDetail }>>();
+  for (const relationship of relationships) {
+    if (relationship.relation !== "implies" && relationship.relation !== "equivalent") continue;
+    adjacency.set(relationship.source.id, [
+      ...(adjacency.get(relationship.source.id) ?? []),
+      { target: relationship.target.id, relationship },
+    ]);
+    if (relationship.relation === "equivalent") {
+      adjacency.set(relationship.target.id, [
+        ...(adjacency.get(relationship.target.id) ?? []),
+        { target: relationship.source.id, relationship },
+      ]);
+    }
+  }
+  for (const values of adjacency.values()) {
+    values.sort((left, right) => right.relationship.confidence - left.relationship.confidence
+      || left.relationship.proposal_id.localeCompare(right.relationship.proposal_id));
+  }
   const queue: Array<{ id: string; path: RelationshipDetail[] }> = [{ id: sourceId, path: [] }];
-  const visited = new Set([sourceId]);
+  const bestHops = new Map([[sourceId, 0]]);
   while (queue.length > 0) {
     const current = queue.shift()!;
     if (current.path.length >= maxHops) continue;
-    for (const edge of eligible) {
-      const next = edge.source.id === current.id
-        ? edge.target.id
-        : edge.relation === "equivalent" && edge.target.id === current.id
-          ? edge.source.id
-          : null;
-      if (!next || visited.has(next)) continue;
-      const path = [...current.path, edge];
-      if (next === targetId) return path;
-      visited.add(next);
-      queue.push({ id: next, path });
+    for (const next of adjacency.get(current.id) ?? []) {
+      const path = [...current.path, next.relationship];
+      if (next.target === targetId) return path;
+      if ((bestHops.get(next.target) ?? maxHops + 1) <= path.length) continue;
+      bestHops.set(next.target, path.length);
+      queue.push({ id: next.target, path });
     }
   }
   return [];
-}
-
-function relationshipsFromEdges(
-  relationships: RelationshipDetail[],
-  edges: ExplorerEdge[],
-): RelationshipDetail[] {
-  const byId = new Map(relationships.map((relationship) => [
-    relationship.proposal_id,
-    relationship,
-  ]));
-  return edges.map((edge) => byId.get(edge.id)!).filter(Boolean);
-}
-
-function calculateDisplayStats(
-  nodes: ExplorerNode[],
-  edges: ExplorerEdge[],
-  inputEdgeCount = edges.length,
-): GraphDisplayStats {
-  const degree = new Map(nodes.map((node) => [node.id, 0]));
-  for (const edge of edges) {
-    degree.set(edge.source, (degree.get(edge.source) ?? 0) + 1);
-    degree.set(edge.target, (degree.get(edge.target) ?? 0) + 1);
-  }
-  const density = nodes.length > 1 ? Math.min(1, edges.length / (nodes.length * (nodes.length - 1))) : 0;
-  const labelUniqueness = nodes.length ? new Set(nodes.map((node) => node.label.toLocaleLowerCase())).size / nodes.length : 1;
-  const maxDegree = Math.max(0, ...degree.values());
-  const network = nodes.length <= 15 && edges.length <= 24 && density <= 0.15 && labelUniqueness >= 0.5 && maxDegree <= 8;
-  return {
-    input_node_count: nodes.length,
-    input_edge_count: inputEdgeCount,
-    display_node_count: nodes.length,
-    display_edge_count: edges.length,
-    omitted_edge_count: inputEdgeCount - edges.length,
-    density,
-    label_uniqueness: labelUniqueness,
-    max_degree: maxDegree,
-    recommended_representation: network ? "network" : "grouped",
-  };
-}
-
-function normalize(value: Record<string, unknown>): Record<string, unknown> {
-  return Object.fromEntries(Object.entries(value).map(([key, item]) => [
-    key,
-    typeof item === "bigint" ? Number(item) : item,
-  ]));
 }

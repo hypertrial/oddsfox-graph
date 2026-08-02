@@ -61,7 +61,7 @@ export function Analyst({ metadata, onEnterStory }: Props) {
   const graphFingerprint = String(metadata.viewer.graph_content_fingerprint ?? "unknown");
   const requestedFilterKey = `proposition:${relation}:${minConfidence.toFixed(2)}:${evidenceTier}:essential`;
   const [viewFilterKey, setViewFilterKey] = useState(requestedFilterKey);
-  const isStatic = metadata.viewer.static === true;
+  const isStatic = "static" in metadata.viewer && metadata.viewer.static === true;
 
   const loadOverview = useCallback(async (signal?: AbortSignal) => {
     detailRequest.current += 1;

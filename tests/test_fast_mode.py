@@ -3,10 +3,15 @@ from __future__ import annotations
 import json
 from dataclasses import replace
 from pathlib import Path
+from threading import Event, Thread
 
 import pytest
 
-from oddsfox_graph._discovery.contracts import DiscoveryConfig, SourceMarket, SourceOutcome
+from oddsfox_graph._discovery.contracts import (
+    DiscoveryConfig,
+    SourceMarket,
+    SourceOutcome,
+)
 from oddsfox_graph._discovery.extraction import extract_proposition
 from oddsfox_graph._discovery import fast as fast_module
 from oddsfox_graph._discovery.parsing import select_model_parse_fallback_markets
@@ -17,7 +22,9 @@ from oddsfox_graph.operability import run_summary
 from oddsfox_graph.queries import DuckDB, q
 
 
-def _market(question: str, *, outcome: str = "Yes") -> tuple[SourceMarket, SourceOutcome]:
+def _market(
+    question: str, *, outcome: str = "Yes"
+) -> tuple[SourceMarket, SourceOutcome]:
     source_outcome = SourceOutcome(0, outcome, "token")
     return (
         SourceMarket(
@@ -120,23 +127,35 @@ def test_fast_mode_publishes_shared_contract_without_inference(tmp_path: Path) -
     assert first["inference_resources_loaded"] == []
     assert not (first_out / "primary_model_manifest.json").exists()
     assert not (first_out / "automation_profile.json").exists()
+    assert manifest["schema_version"] == "graph-build-manifest-v1"
+    assert set(manifest["published_file_hashes"]) == set(manifest["artifacts"])
+    assert first["hash_io"]["files_read"] == len(manifest["artifacts"])
 
     db = DuckDB(first_out / "oddsfox_graph.duckdb", read_only=True)
     try:
-        assert db.scalar(
-            f"SELECT count(*) FROM read_parquet('{q(first_out / 'model_assessments.parquet')}')"
-        ) == 0
+        assert (
+            db.scalar(
+                f"SELECT count(*) FROM read_parquet('{q(first_out / 'model_assessments.parquet')}')"
+            )
+            == 0
+        )
         assert db.scalar("SELECT count(*) FROM quarantined_pairs_v") == 0
-        assert db.scalar(
-            "SELECT count(*) FROM logic_edges_v "
-            "WHERE rule_id LIKE 'same_market.%' "
-            "AND evidence_tier != 'source_contract'"
-        ) == 0
-        assert db.scalar(
-            "SELECT count(*) FROM logic_edges_v "
-            "WHERE json_type(json_extract(source_spans_json, '$.A')) != 'ARRAY' "
-            "OR json_type(json_extract(source_spans_json, '$.B')) != 'ARRAY'"
-        ) == 0
+        assert (
+            db.scalar(
+                "SELECT count(*) FROM logic_edges_v "
+                "WHERE rule_id LIKE 'same_market.%' "
+                "AND evidence_tier != 'source_contract'"
+            )
+            == 0
+        )
+        assert (
+            db.scalar(
+                "SELECT count(*) FROM logic_edges_v "
+                "WHERE json_type(json_extract(source_spans_json, '$.A')) != 'ARRAY' "
+                "OR json_type(json_extract(source_spans_json, '$.B')) != 'ARRAY'"
+            )
+            == 0
+        )
         assessors = db.rows(
             f"SELECT DISTINCT assessor_type FROM read_parquet('{q(first_out / 'parse_assessments.parquet')}')"
         )
@@ -146,7 +165,7 @@ def test_fast_mode_publishes_shared_contract_without_inference(tmp_path: Path) -
 
     graph = Graph.open(first_out)
     assert graph.build_mode == "fast"
-    assert graph.metadata().build["build_mode"] == "fast"
+    assert graph.metadata().build.build_mode == "fast"
     generic_search = graph.search("Alpha")
     assert generic_search
     assert generic_search[0].plain_claim is None
@@ -178,6 +197,118 @@ def test_fast_mode_publishes_shared_contract_without_inference(tmp_path: Path) -
     )
     assert replay["incremental"]["unchanged_replay"] is True
     assert replay_manifest["artifact_hashes"] == manifest["artifact_hashes"]
+
+
+def test_fast_unchanged_replay_skips_normalization_and_verifies_staged_copy(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    catalog = tmp_path / "catalog.parquet"
+    _write_catalog(catalog)
+    baseline = tmp_path / "baseline"
+    discover(
+        catalog,
+        baseline,
+        config=DiscoveryConfig(mode="fast", progress_format="quiet"),
+    )
+
+    def unexpected_normalization(*_: object, **__: object) -> object:
+        raise AssertionError("exact replay should not normalize the input")
+
+    monkeypatch.setattr(
+        fast_module,
+        "load_source_markets",
+        unexpected_normalization,
+    )
+    replay_out = tmp_path / "replay"
+    stats = discover(
+        catalog,
+        replay_out,
+        config=DiscoveryConfig(
+            mode="fast",
+            incremental_from=baseline,
+            progress_format="quiet",
+        ),
+    )
+    manifest = json.loads(
+        (replay_out / "build_manifest.json").read_text(encoding="utf-8")
+    )
+
+    assert stats["incremental"]["normalization_skipped"] is True
+    assert "normalize_input" not in stats["stage_metrics"]
+    assert stats["hash_io"]["files_verified"] == len(manifest["published_file_hashes"])
+    assert stats["hash_io"]["files_read"] == (
+        len(manifest["published_file_hashes"]) + 1
+    )
+
+
+def test_fast_replay_allows_audit_only_source_tree_drift(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    catalog = tmp_path / "catalog.parquet"
+    _write_catalog(catalog)
+    baseline = tmp_path / "baseline"
+    discover(
+        catalog,
+        baseline,
+        config=DiscoveryConfig(mode="fast", progress_format="quiet"),
+    )
+    audit_fingerprint = "f" * 64
+    monkeypatch.setattr(
+        fast_module,
+        "source_tree_fingerprint",
+        lambda: audit_fingerprint,
+    )
+
+    replay = tmp_path / "replay"
+    stats = discover(
+        catalog,
+        replay,
+        config=DiscoveryConfig(
+            mode="fast",
+            incremental_from=baseline,
+            progress_format="quiet",
+        ),
+    )
+    manifest = json.loads(
+        (replay / "build_manifest.json").read_text(encoding="utf-8")
+    )
+    viewer = json.loads(
+        (replay / "viewer_manifest.json").read_text(encoding="utf-8")
+    )
+
+    assert stats["incremental"]["unchanged_replay"] is True
+    assert manifest["source_tree_fingerprint"] == audit_fingerprint
+    assert viewer["source_tree_fingerprint"] == audit_fingerprint
+
+
+def test_fast_exact_input_with_changed_selection_is_rebuilt(
+    tmp_path: Path,
+) -> None:
+    catalog = tmp_path / "catalog.parquet"
+    _write_catalog(catalog)
+    baseline = tmp_path / "baseline"
+    discover(
+        catalog,
+        baseline,
+        config=DiscoveryConfig(mode="fast", progress_format="quiet"),
+    )
+
+    stats = discover(
+        catalog,
+        tmp_path / "bounded",
+        config=DiscoveryConfig(
+            mode="fast",
+            incremental_from=baseline,
+            max_propositions=4,
+            progress_format="quiet",
+        ),
+    )
+
+    assert stats["incremental"]["unchanged_replay"] is False
+    assert stats["incremental"]["normalization_skipped"] is False
+    assert "normalize_input" in stats["stage_metrics"]
 
 
 def test_fast_mode_rejects_full_flags_and_stale_baselines(tmp_path: Path) -> None:
@@ -304,6 +435,182 @@ def test_fast_mode_rejects_baseline_without_complete_file_hashes(
         )
 
 
+def test_fast_replay_validates_copied_bytes_before_publication(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    catalog = tmp_path / "catalog.parquet"
+    _write_catalog(catalog)
+    baseline = tmp_path / "baseline"
+    discover(
+        catalog,
+        baseline,
+        config=DiscoveryConfig(mode="fast", progress_format="quiet"),
+    )
+    out = tmp_path / "out"
+    out.mkdir()
+    (out / "preserved").write_text("old output", encoding="utf-8")
+    original_validate = fast_module._validate_incremental_baseline_files
+
+    def validate_corrupt_copy(
+        copied: Path,
+        manifest: dict[str, object],
+        hashes: object,
+    ) -> None:
+        target = copied / "nodes.parquet"
+        target.write_bytes(target.read_bytes() + b"corrupt")
+        original_validate(copied, manifest, hashes)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(
+        fast_module,
+        "_validate_incremental_baseline_files",
+        validate_corrupt_copy,
+    )
+
+    with pytest.raises(ValueError, match="artifact hashes"):
+        discover(
+            catalog,
+            out,
+            config=DiscoveryConfig(
+                mode="fast",
+                incremental_from=baseline,
+                progress_format="quiet",
+            ),
+        )
+
+    assert (out / "preserved").read_text(encoding="utf-8") == "old output"
+
+
+def test_fast_manifest_failure_rolls_back_previous_output(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    catalog = tmp_path / "catalog.parquet"
+    _write_catalog(catalog)
+    out = tmp_path / "out"
+    out.mkdir()
+    (out / "preserved").write_text("old output", encoding="utf-8")
+
+    def fail_manifest(*_: object, **__: object) -> None:
+        raise OSError("simulated manifest failure")
+
+    monkeypatch.setattr(fast_module, "write_manifest_last", fail_manifest)
+
+    with pytest.raises(OSError, match="simulated manifest failure"):
+        discover(
+            catalog,
+            out,
+            config=DiscoveryConfig(mode="fast", progress_format="quiet"),
+        )
+
+    assert (out / "preserved").read_text(encoding="utf-8") == "old output"
+
+
+def test_fast_publication_keeps_reader_on_complete_graph_at_swap_boundary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    catalog = tmp_path / "catalog.parquet"
+    _write_catalog(catalog)
+    out = tmp_path / "out"
+    discover(
+        catalog,
+        out,
+        config=DiscoveryConfig(mode="fast", progress_format="quiet"),
+    )
+
+    before_swap = Event()
+    allow_swap = Event()
+    after_swap = Event()
+    allow_finish = Event()
+    original_publish = fast_module.publish_directory_atomically
+
+    def blocking_publish(
+        staging: Path,
+        destination: Path,
+        *,
+        completion_marker: str | None = None,
+    ) -> fast_module.PublicationSwap:
+        assert completion_marker == "build_manifest.json"
+        assert Graph.open(staging).nodes()
+        before_swap.set()
+        assert allow_swap.wait(timeout=5)
+        swap = original_publish(
+            staging,
+            destination,
+            completion_marker=completion_marker,
+        )
+        after_swap.set()
+        assert allow_finish.wait(timeout=5)
+        return swap
+
+    monkeypatch.setattr(
+        fast_module,
+        "publish_directory_atomically",
+        blocking_publish,
+    )
+    errors: list[BaseException] = []
+
+    def rebuild() -> None:
+        try:
+            discover(
+                catalog,
+                out,
+                config=DiscoveryConfig(mode="fast", progress_format="quiet"),
+            )
+        except BaseException as exc:  # pragma: no cover - asserted below
+            errors.append(exc)
+
+    worker = Thread(target=rebuild)
+    worker.start()
+    assert before_swap.wait(timeout=5)
+    assert Graph.open(out).nodes()
+    allow_swap.set()
+    assert after_swap.wait(timeout=5)
+    assert Graph.open(out).nodes()
+    allow_finish.set()
+    worker.join(timeout=10)
+
+    assert not worker.is_alive()
+    assert errors == []
+
+
+def test_fast_keyboard_interrupt_after_swap_restores_previous_graph(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    catalog = tmp_path / "catalog.parquet"
+    _write_catalog(catalog)
+    out = tmp_path / "out"
+    discover(
+        catalog,
+        out,
+        config=DiscoveryConfig(mode="fast", progress_format="quiet"),
+    )
+    previous_manifest = (out / "build_manifest.json").read_bytes()
+
+    def interrupt_finalize(_swap: fast_module.PublicationSwap) -> None:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(
+        fast_module.PublicationSwap,
+        "finalize",
+        interrupt_finalize,
+    )
+
+    with pytest.raises(KeyboardInterrupt):
+        discover(
+            catalog,
+            out,
+            config=DiscoveryConfig(mode="fast", progress_format="quiet"),
+        )
+
+    assert (out / "build_manifest.json").read_bytes() == previous_manifest
+    assert Graph.open(out).nodes()
+    assert not list(tmp_path.glob(".out.previous-*"))
+    assert not list(tmp_path.glob(".out.withdrawn-*"))
+
+
 def test_cli_rejects_explicit_zero_deadline(tmp_path: Path) -> None:
     catalog = tmp_path / "catalog.parquet"
     _write_catalog(catalog)
@@ -413,9 +720,7 @@ def test_fast_deadline_includes_manifest_publication(
             mode="fast", deadline_seconds=2.0, progress_format="quiet"
         ),
     )
-    manifest = json.loads(
-        (out / "build_manifest.json").read_text(encoding="utf-8")
-    )
+    manifest = json.loads((out / "build_manifest.json").read_text(encoding="utf-8"))
     assert stats["deadline"]["met"] is False
     assert manifest["deadline"]["met"] is False
     assert manifest["deadline"]["elapsed_seconds"] == 3.0

@@ -1,6 +1,6 @@
 # OddsFox Graph
 
-OddsFox Graph 0.12 builds and visualizes the logical connections in the
+OddsFox Graph 0.13 builds and visualizes the logical connections in the
 pipeline's FIFA World Cup 2026 team-progression market export. The human
 explorer is deliberately scoped to that trusted universe; generic football
 props such as exact score, corners, and player markets are not admitted.
@@ -8,7 +8,8 @@ Discovery has two explicit modes:
 
 - `fast` is model-free, complete in node coverage, and publishes only exact
   source-contract or strict deterministic-rule edges. It is the release-gated
-  path and targets a ready explorer in under two minutes on an Apple M4 Air.
+  path and targets a ready explorer in under two minutes on the exact Apple M4
+  processor and Python 3.11 environment bound by the packaged release budget.
 - `full` upgrades that deterministic core with local embeddings, USearch ANN,
   NLI vetoes, and Qwen/Granite consensus. It is functional but carries the
   `EXPERIMENTAL_FULL` validation status until separate live certification.
@@ -58,8 +59,8 @@ uv run python scripts/export_polymarket_wc2026_graph_hourly_odds.py \
 ```
 
 The older `polymarket-market-snapshot-v1` contract remains available to the
-graph library, but generic outputs are not a supported human explorer surface
-in 0.12.
+graph library and release scalability benchmark, but generic outputs are not a
+supported human explorer surface in 0.13.
 
 ## Fast graph
 
@@ -103,7 +104,7 @@ oddsfox-graph discover --mode full \
 
 The WC2026 qualification profile parses every collapsed progression market and
 uses a deterministic, market-disjoint 60/40 split for 5,000 controlled pair
-cases. The profile must exactly bind the v0.12 extractor, ANN, NLI, prompts,
+cases. The profile must exactly bind the v0.13 extractor, ANN, NLI, prompts,
 schemas, settings, manifests, runtime pair, and WC input contract. A deadline cutoff stops new model work,
 finishes in-flight requests, and publishes the valid deterministic core plus any
 accepted enrichment; the command exits nonzero when the requested SLA is missed.

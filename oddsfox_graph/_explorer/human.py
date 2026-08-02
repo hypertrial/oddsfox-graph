@@ -13,6 +13,7 @@ from typing import Literal, cast
 
 from pydantic import BaseModel
 
+from .._discovery.manifest_contracts import BuildManifest, CoverageSummary
 from ..queries import DuckDB
 from .contracts import (
     ClaimSummary,
@@ -22,7 +23,6 @@ from .contracts import (
     EntitySearchResult,
     ExploreHome,
     ExplorerCapabilities,
-    GraphDisplayStats,
     HumanHighlight,
     MarketDetail,
     RelationshipDetail,
@@ -32,6 +32,13 @@ from .contracts import (
     TeamDetail,
     TeamSummary,
     TournamentScope,
+)
+from .derived import (
+    ProjectionEdge,
+    essential_projection,
+    essential_relationship_rows,
+    graph_display_stats,
+    human_highlight_ids,
 )
 
 
@@ -86,102 +93,6 @@ _NEGATIVE_PROGRESSION_PHRASES = {
 }
 
 
-def essential_relationship_rows(
-    rows: Iterable[dict[str, object]],
-    *,
-    preserve_proposal_ids: frozenset[str] = frozenset(),
-) -> list[dict[str, object]]:
-    """Return one deterministic relationship projection with redundant implications removed."""
-
-    deduplicated: dict[tuple[str, str, str], dict[str, object]] = {}
-    ordered = sorted(
-        rows,
-        key=lambda item: (
-            str(item["proposal_id"]) not in preserve_proposal_ids,
-            -float(cast(float, item["confidence"])),
-            str(item["proposal_id"]),
-        ),
-    )
-    for row in ordered:
-        relation = str(row["edge_type"])
-        source = str(row["src_node_id"])
-        target = str(row["dst_node_id"])
-        if relation != "implies" and source > target:
-            source, target = target, source
-        deduplicated.setdefault((relation, source, target), row)
-    candidates = list(deduplicated.values())
-    traversable = [
-        row
-        for row in candidates
-        if str(row["edge_type"]) in {"implies", "equivalent"}
-    ]
-
-    def reachable(
-        source: str,
-        target: str,
-        *,
-        excluded: str,
-        minimum_confidence: float,
-    ) -> bool:
-        adjacency: dict[str, list[str]] = defaultdict(list)
-        for edge in traversable:
-            if str(edge["proposal_id"]) == excluded:
-                continue
-            if float(cast(float, edge["confidence"])) < minimum_confidence:
-                continue
-            left = str(edge["src_node_id"])
-            right = str(edge["dst_node_id"])
-            adjacency[left].append(right)
-            if str(edge["edge_type"]) == "equivalent":
-                adjacency[right].append(left)
-        frontier = [source]
-        seen = {source}
-        while frontier:
-            node = frontier.pop()
-            for neighbor in adjacency.get(node, ()):
-                if neighbor == target:
-                    return True
-                if neighbor not in seen:
-                    seen.add(neighbor)
-                    frontier.append(neighbor)
-        return False
-
-    retained: list[dict[str, object]] = []
-    for row in candidates:
-        relation = str(row["edge_type"])
-        proposal_id = str(row["proposal_id"])
-        if relation != "implies" or proposal_id in preserve_proposal_ids:
-            retained.append(row)
-            continue
-        source = str(row["src_node_id"])
-        target = str(row["dst_node_id"])
-        confidence = float(cast(float, row["confidence"]))
-        in_cycle = reachable(
-            target,
-            source,
-            excluded=proposal_id,
-            minimum_confidence=0.0,
-        )
-        redundant = reachable(
-            source,
-            target,
-            excluded=proposal_id,
-            minimum_confidence=confidence,
-        )
-        if in_cycle or not redundant:
-            retained.append(row)
-    return sorted(
-        retained,
-        key=lambda row: (
-            -float(cast(float, row["confidence"])),
-            str(row["edge_type"]),
-            str(row["src_node_id"]),
-            str(row["dst_node_id"]),
-            str(row["proposal_id"]),
-        ),
-    )
-
-
 class HumanExplorer:
     """Structured WC2026 reads over one completed graph database."""
 
@@ -189,12 +100,12 @@ class HumanExplorer:
         self,
         db: DuckDB,
         *,
-        coverage: Mapping[str, object],
-        build: Mapping[str, object],
+        coverage: CoverageSummary,
+        build: BuildManifest,
     ) -> None:
         self.db = db
-        self.coverage = dict(coverage)
-        self.build = dict(build)
+        self.coverage = coverage
+        self.build = build
         columns = {
             str(row["column_name"])
             for row in db.rows("DESCRIBE explorer_propositions_v")
@@ -221,7 +132,7 @@ class HumanExplorer:
             raise ValueError("highlight_limit must be between 1 and 12")
         claims = self._claims()
         all_relationships = self._relationships(claims, edge_mode="all")
-        relationships = self._relationships(claims, edge_mode="essential")
+        relationships = self._essential_relationships(all_relationships)
         stages = self._stages(claims)
         teams = self._teams(claims)
         highlights = self._highlights(relationships, highlight_limit)
@@ -270,11 +181,7 @@ class HumanExplorer:
             edge_mode="all",
             proposal_ids=relationship_ids,
         )
-        relationships = self._relationships(
-            claims,
-            edge_mode="essential",
-            proposal_ids=relationship_ids,
-        )
+        relationships = self._essential_relationships(all_relationships)
         return {
             "stages": self._stages(claims),
             "teams": self._teams(claims),
@@ -375,7 +282,9 @@ class HumanExplorer:
         claims = self._claims()
         relationships = tuple(
             item
-            for item in self._relationships(claims, edge_mode="essential")
+            for item in self._essential_relationships(
+                self._relationships(claims, edge_mode="all")
+            )
             if item.confidence >= min_confidence
         )
         return self._highlights(relationships, limit)
@@ -490,7 +399,7 @@ class HumanExplorer:
                 direct=direct,
                 explanation=_relationship_explanation(direct),
             )
-        relationships = self._relationships(claims, edge_mode="essential")
+        relationships = self._essential_relationships(all_relationships)
         path = self._shortest_path(
             relationships, source_id, target_id, max_hops=max_hops
         )
@@ -705,6 +614,26 @@ class HumanExplorer:
             )
         return tuple(result)
 
+    @staticmethod
+    def _essential_relationships(
+        relationships: Iterable[RelationshipDetail],
+    ) -> tuple[RelationshipDetail, ...]:
+        materialized = tuple(
+            item for item in relationships if item.relation != "compatible"
+        )
+        by_id = {item.proposal_id: item for item in materialized}
+        projection = essential_projection(
+            ProjectionEdge(
+                id=item.proposal_id,
+                source=item.source.id,
+                target=item.target.id,
+                relation=item.relation,
+                confidence=item.confidence,
+            )
+            for item in materialized
+        )
+        return tuple(by_id[proposal_id] for proposal_id in projection.retained_ids)
+
     def _coverage_by(
         self,
         claims: Mapping[str, ClaimSummary],
@@ -846,8 +775,7 @@ class HumanExplorer:
         stages: tuple[StageSummary, ...],
         teams: tuple[TeamSummary, ...],
     ) -> TournamentScope:
-        selection = self.coverage.get("input_selection")
-        source = selection if isinstance(selection, dict) else {}
+        source = self.coverage.input_selection.model_dump(mode="json")
         return TournamentScope(
             input_hourly_rows=_first_int(
                 source, "input_hourly_rows", "source_rows", "rows"
@@ -864,7 +792,7 @@ class HumanExplorer:
             ),
             adapter_version=str(
                 source.get("adapter_version")
-                or self.build.get("input_profile")
+                or self.build.input.profile
                 or "polymarket-wc2026-graph-hourly-v1"
             ),
         )
@@ -873,43 +801,12 @@ class HumanExplorer:
     def _highlights(
         relationships: Iterable[RelationshipDetail], limit: int
     ) -> tuple[HumanHighlight, ...]:
-        ordered = sorted(
-            relationships,
-            key=lambda item: (
-                -max(item.source.stage_rank, item.target.stage_rank),
-                -item.confidence,
-                item.proposal_id,
-            ),
-        )
-        selected: list[RelationshipDetail] = []
-        teams: set[str] = set()
-        templates: set[tuple[object, ...]] = set()
-        endpoints: set[str] = set()
-        for item in ordered:
-            item_teams = {
-                item.source.canonical_team_name,
-                item.target.canonical_team_name,
-            }
-            template = (
-                item.relation,
-                item.source.stage_rank,
-                item.target.stage_rank,
-                item.source.is_progression_token,
-                item.target.is_progression_token,
-            )
-            if item_teams & teams or template in templates:
-                continue
-            if item.source.id in endpoints or item.target.id in endpoints:
-                continue
-            selected.append(item)
-            teams.update(item_teams)
-            templates.add(template)
-            endpoints.update((item.source.id, item.target.id))
-            if len(selected) == limit:
-                break
+        materialized = tuple(relationships)
+        by_id = {item.proposal_id: item for item in materialized}
+        selected = human_highlight_ids(materialized, limit=limit)
         return tuple(
-            HumanHighlight(rank=index, relationship=item)
-            for index, item in enumerate(selected, start=1)
+            HumanHighlight(rank=index, relationship=by_id[proposal_id])
+            for index, proposal_id in enumerate(selected, start=1)
         )
 
     @staticmethod
@@ -1035,46 +932,6 @@ class HumanExplorer:
                 ),
             )
         )
-
-
-def graph_display_stats(
-    labels: tuple[str, ...],
-    edges: tuple[tuple[str, str], ...],
-    *,
-    input_edge_count: int | None = None,
-) -> GraphDisplayStats:
-    node_count = len(labels)
-    edge_count = len(edges)
-    degree: dict[str, int] = defaultdict(int)
-    for source, target in edges:
-        degree[source] += 1
-        degree[target] += 1
-    density = (
-        min(1.0, edge_count / (node_count * (node_count - 1)))
-        if node_count > 1
-        else 0.0
-    )
-    uniqueness = len({label.casefold() for label in labels}) / node_count if node_count else 1.0
-    maximum_degree = max(degree.values(), default=0)
-    network = (
-        node_count <= 15
-        and edge_count <= 24
-        and density <= 0.15
-        and uniqueness >= 0.50
-        and maximum_degree <= 8
-    )
-    total_edges = edge_count if input_edge_count is None else input_edge_count
-    return GraphDisplayStats(
-        input_node_count=node_count,
-        input_edge_count=total_edges,
-        display_node_count=node_count,
-        display_edge_count=edge_count,
-        omitted_edge_count=max(0, total_edges - edge_count),
-        density=density,
-        label_uniqueness=uniqueness,
-        max_degree=maximum_degree,
-        recommended_representation="network" if network else "grouped",
-    )
 
 
 def _team_key(name: str) -> str:

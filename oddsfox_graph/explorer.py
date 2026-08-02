@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gzip
 import shutil
 import tempfile
 import threading
@@ -15,133 +16,29 @@ from ._discovery.provenance import (
     sha256_file,
 )
 from ._discovery.publication import publish_directory_atomically
-from ._discovery.versions import WC2026_SOURCE_SCHEMA
-from ._discovery.bulk import create_and_fill
+from ._discovery.versions import (
+    ESSENTIAL_PROJECTION_VERSION,
+    EXPLORER_DERIVED_SEMANTICS_VERSION,
+    STATIC_EXPLORER_CORE_VERSION,
+    STATIC_EXPLORER_GRAPH_VERSION,
+    STATIC_EXPLORER_VERSION,
+    WC2026_SOURCE_SCHEMA,
+)
 from fastapi import FastAPI
 
 from ._explorer.service import create_app, validate_loopback_host
-from ._explorer.human import HumanExplorer, graph_display_stats
+from ._explorer.derived import (
+    graph_display_stats,
+    human_highlight_ids,
+)
+from ._explorer.human import HumanExplorer
 from ._explorer.contracts import GraphFilter, RelationshipDetail
 from .graph import Graph
-from .queries import DuckDB, q
+from .queries import DuckDB
 
 
-STATIC_NODE_COLUMNS = {
-    "id": "VARCHAR",
-    "label": "VARCHAR",
-    "level": "VARCHAR",
-    "parent_id": "VARCHAR",
-    "x": "DOUBLE",
-    "y": "DOUBLE",
-    "size": "DOUBLE",
-    "domain": "VARCHAR",
-    "component_id": "VARCHAR",
-    "market_id": "VARCHAR",
-    "proposition_count": "BIGINT",
-    "edge_count": "BIGINT",
-    "classification_coverage": "DOUBLE",
-    "classification_status": "VARCHAR",
-    "progression_outcome": "BOOLEAN",
-    "progression_level": "BIGINT",
-    "stage_key": "VARCHAR",
-    "market_close_epoch": "BIGINT",
-}
-
-STATIC_STAGE_COLUMNS = {
-    "stage_key": "VARCHAR",
-    "label": "VARCHAR",
-    "stage_rank": "BIGINT",
-    "normalized_progression_level": "BIGINT",
-    "team_count": "BIGINT",
-    "market_count": "BIGINT",
-    "claim_count": "BIGINT",
-    "active_market_count": "BIGINT",
-    "closed_market_count": "BIGINT",
-    "classification_eligible_count": "BIGINT",
-    "classification_assessed_count": "BIGINT",
-    "classification_status": "VARCHAR",
-    "classification_coverage": "DOUBLE",
-}
-
-STATIC_TEAM_COLUMNS = {
-    "team_key": "VARCHAR",
-    "canonical_team_name": "VARCHAR",
-    "is_still_alive": "BOOLEAN",
-    "market_status": "VARCHAR",
-    "market_count": "BIGINT",
-    "claim_count": "BIGINT",
-    "stage_keys": "VARCHAR[]",
-    "min_stage_rank": "BIGINT",
-    "max_stage_rank": "BIGINT",
-    "classification_eligible_count": "BIGINT",
-    "classification_assessed_count": "BIGINT",
-    "classification_status": "VARCHAR",
-    "classification_coverage": "DOUBLE",
-}
-
-STATIC_MARKET_COLUMNS = {
-    "market_id": "VARCHAR",
-    "event_slug": "VARCHAR",
-    "question": "VARCHAR",
-    "canonical_team_name": "VARCHAR",
-    "stage_key": "VARCHAR",
-    "stage_rank": "BIGINT",
-    "normalized_progression_level": "BIGINT",
-    "market_direction": "VARCHAR",
-    "market_status": "VARCHAR",
-    "is_still_alive": "BOOLEAN",
-    "market_close_epoch": "BIGINT",
-}
-
-STATIC_CLAIM_COLUMNS = {
-    "id": "VARCHAR",
-    "market_id": "VARCHAR",
-    "canonical_team_name": "VARCHAR",
-    "stage_key": "VARCHAR",
-    "stage_rank": "BIGINT",
-    "normalized_progression_level": "BIGINT",
-    "question": "VARCHAR",
-    "answer": "VARCHAR",
-    "plain_claim": "VARCHAR",
-    "is_progression_token": "BOOLEAN",
-    "market_status": "VARCHAR",
-    "is_still_alive": "BOOLEAN",
-    "market_close_epoch": "BIGINT",
-    "technical_canonical_label": "VARCHAR",
-}
-
-STATIC_RELATIONSHIP_COLUMNS = {
-    "proposal_id": "VARCHAR",
-    "source_id": "VARCHAR",
-    "target_id": "VARCHAR",
-    "relation": "VARCHAR",
-    "basis": "VARCHAR",
-    "confidence": "DOUBLE",
-    "evidence_tier": "VARCHAR",
-    "discovery_method": "VARCHAR",
-    "explanation": "VARCHAR",
-}
-
-STATIC_RELATIONSHIP_GROUP_COLUMNS = {
-    "id": "VARCHAR",
-    "title": "VARCHAR",
-    "description": "VARCHAR",
-    "relation": "VARCHAR",
-    "member_claim_ids": "VARCHAR[]",
-    "relationship_count": "BIGINT",
-}
-
-STATIC_EDGE_COLUMNS = {
-    "id": "VARCHAR",
-    "source": "VARCHAR",
-    "target": "VARCHAR",
-    "relation": "VARCHAR",
-    "count": "BIGINT",
-    "confidence": "DOUBLE",
-    "discovery_method": "VARCHAR",
-    "evidence_tier": "VARCHAR",
-    "aggregation_only": "BOOLEAN",
-}
+MAX_STATIC_SNAPSHOT_BYTES = 5 * 1024 * 1024 // 4
+MAX_STATIC_SNAPSHOT_GZIP_BYTES = 200 * 1024
 
 
 def create_explorer_app(
@@ -232,11 +129,14 @@ def export_explorer(
     graph = Graph.open(source)
     export_filters = GraphFilter(include_compatible=True)
     metadata = graph.metadata()
-    build_input = metadata.build.get("input")
+    build_metadata = metadata.build.model_dump(mode="json")
+    viewer_metadata = metadata.viewer.model_dump(mode="json")
+    coverage_payload = metadata.coverage.model_dump(mode="json")
+    build_input = build_metadata.get("input")
     input_profile = (
         build_input.get("schema")
         if isinstance(build_input, dict)
-        else metadata.build.get("input_schema")
+        else build_metadata.get("input_schema")
     )
     if input_profile != WC2026_SOURCE_SCHEMA:
         raise ValueError(
@@ -319,104 +219,135 @@ def export_explorer(
             tuple(node.id for node in view.nodes),
             tuple(edge.id for edge in view.edges),
         )
+        claim_rows = cast(list[dict[str, object]], human_rows["claims"])
+        essential_rows = cast(
+            list[dict[str, object]], human_rows["essential_relationships"]
+        )
+        relationship_rows = cast(
+            list[dict[str, object]], human_rows["relationships"]
+        )
         human_display_stats = graph_display_stats(
-            tuple(str(row["plain_claim"]) for row in human_rows["claims"]),
+            tuple(str(row["plain_claim"]) for row in claim_rows),
             tuple(
                 (str(row["source_id"]), str(row["target_id"]))
-                for row in human_rows["essential_relationships"]
+                for row in essential_rows
             ),
-            input_edge_count=len(human_rows["relationships"]),
+            input_edge_count=len(relationship_rows),
         )
-        snapshot_db = DuckDB()
-        try:
-            create_and_fill(
-                snapshot_db,
-                "snapshot_nodes",
-                STATIC_NODE_COLUMNS,
-                [node.model_dump(mode="json") for node in view.nodes],
+        static_capabilities = {
+            "mode": "static",
+            "hierarchy": True,
+            "search": True,
+            "relationship_inspection": True,
+            "analyst_graph": True,
+            "compare": True,
+            "proof": False,
+            "why_not": False,
+            "recording": False,
+            "regeneration": False,
+        }
+        core_payload = {
+            "schema_version": STATIC_EXPLORER_CORE_VERSION,
+            "scope": human_rows["scope"],
+            "coverage": coverage_payload,
+            "capabilities": static_capabilities,
+            "display_stats": human_display_stats.model_dump(mode="json"),
+            "stages": human_rows["stages"],
+            "teams": human_rows["teams"],
+            "markets": human_rows["markets"],
+            "claims": human_rows["claims"],
+            "relationships": human_rows["relationships"],
+            "essential_relationship_ids": human_rows[
+                "essential_relationship_ids"
+            ],
+            "highlight_relationship_ids": human_rows[
+                "highlight_relationship_ids"
+            ],
+            "relationship_groups": human_rows["groups"],
+        }
+        graph_payload = {
+            "schema_version": STATIC_EXPLORER_GRAPH_VERSION,
+            "view": snapshot,
+            "essential_edge_ids": human_rows["essential_relationship_ids"],
+            "layout_version": viewer_metadata["layout_version"],
+            "coordinate_fingerprint": canonical_json_sha256(
+                [
+                    {"id": node.id, "x": node.x, "y": node.y}
+                    for node in sorted(view.nodes, key=lambda item: item.id)
+                ]
+            ),
+        }
+        core_path = staging / "explore_snapshot.json"
+        graph_path = staging / "graph_snapshot.json"
+        atomic_write_json(core_path, core_payload)
+        atomic_write_json(graph_path, graph_payload)
+        snapshot_payloads = (core_path.read_bytes(), graph_path.read_bytes())
+        snapshot_bytes = sum(len(payload) for payload in snapshot_payloads)
+        snapshot_gzip_bytes = sum(
+            len(gzip.compress(payload, mtime=0)) for payload in snapshot_payloads
+        )
+        if (
+            snapshot_bytes > MAX_STATIC_SNAPSHOT_BYTES
+            or snapshot_gzip_bytes > MAX_STATIC_SNAPSHOT_GZIP_BYTES
+        ):
+            raise ValueError(
+                "Static explorer data exceeds the v0.13 delivery budget "
+                f"({snapshot_bytes} raw bytes, {snapshot_gzip_bytes} gzip bytes); "
+                "use a narrower export scope"
             )
-            create_and_fill(
-                snapshot_db,
-                "snapshot_edges",
-                STATIC_EDGE_COLUMNS,
-                [edge.model_dump(mode="json") for edge in view.edges],
-            )
-            static_tables = {
-                "snapshot_nodes": (STATIC_NODE_COLUMNS, [node.model_dump(mode="json") for node in view.nodes]),
-                "snapshot_edges": (STATIC_EDGE_COLUMNS, [edge.model_dump(mode="json") for edge in view.edges]),
-                "snapshot_stages": (STATIC_STAGE_COLUMNS, human_rows["stages"]),
-                "snapshot_teams": (STATIC_TEAM_COLUMNS, human_rows["teams"]),
-                "snapshot_markets": (STATIC_MARKET_COLUMNS, human_rows["markets"]),
-                "snapshot_claims": (STATIC_CLAIM_COLUMNS, human_rows["claims"]),
-                "snapshot_relationships": (STATIC_RELATIONSHIP_COLUMNS, human_rows["relationships"]),
-                "snapshot_relationship_groups": (STATIC_RELATIONSHIP_GROUP_COLUMNS, human_rows["groups"]),
+        snapshot_files = {
+            path.name: {
+                "schema_version": payload["schema_version"],
+                "sha256": sha256_file(path),
+                "bytes": path.stat().st_size,
             }
-            for table, (columns, rows) in static_tables.items():
-                if table not in {"snapshot_nodes", "snapshot_edges"}:
-                    create_and_fill(snapshot_db, table, columns, rows)
-                snapshot_db.execute(
-                    f"COPY {table} TO '{q(staging / f'{table}.parquet')}' "
-                    "(FORMAT PARQUET, COMPRESSION ZSTD)"
-                )
-        finally:
-            snapshot_db.close()
+            for path, payload in (
+                (core_path, core_payload),
+                (graph_path, graph_payload),
+            )
+        }
         manifest = {
-            "schema_version": "static-explorer-v4",
+            "schema_version": STATIC_EXPLORER_VERSION,
             "package_version": metadata.package_version,
-            "source_graph": canonical_json_sha256(metadata.build),
-            "graph_content_fingerprint": metadata.viewer[
+            "source_graph": canonical_json_sha256(build_metadata),
+            "graph_content_fingerprint": viewer_metadata[
                 "graph_content_fingerprint"
             ],
             "input_profile": input_profile,
             "source_file_sha256": (
                 build_input.get("sha256")
                 if isinstance(build_input, dict)
-                else metadata.build.get("input_hash")
+                else build_metadata.get("input_hash")
             ),
             "normalized_semantic_fingerprint": (
                 build_input.get("normalized_semantic_fingerprint")
                 if isinstance(build_input, dict)
-                else metadata.build.get("input_semantic_fingerprint")
+                else build_metadata.get("input_semantic_fingerprint")
             ),
-            "discovery_semantics_fingerprint": metadata.build[
+            "discovery_semantics_fingerprint": build_metadata[
                 "discovery_semantics_fingerprint"
             ],
-            "source_tree_fingerprint": metadata.build[
+            "source_tree_fingerprint": build_metadata[
                 "source_tree_fingerprint"
             ],
             "client_fingerprint": client_fingerprint,
-            "build_mode": metadata.build["build_mode"],
-            "validation_status": metadata.build["validation_status"],
+            "build_mode": build_metadata["build_mode"],
+            "validation_status": build_metadata["validation_status"],
             "scope": scope,
             "identifier": identifier,
             "max_nodes": max_nodes,
             "max_edges": max_edges,
-            "snapshot_hash": canonical_json_sha256(snapshot),
-            "snapshot_files": {
-                name: sha256_file(staging / name)
-                for name in sorted(
-                    path.name for path in staging.glob("snapshot_*.parquet")
-                )
-            },
-            "coverage": graph.coverage(),
-            "capabilities": {
-                "mode": "static",
-                "hierarchy": True,
-                "search": True,
-                "relationship_inspection": True,
-                "analyst_graph": True,
-                "compare": True,
-                "proof": False,
-                "why_not": False,
-                "recording": False,
-                "regeneration": False,
-            },
-            "tournament_scope": graph.explore_home(
-                team_limit=100,
-                highlight_limit=6,
-            ).scope.model_dump(mode="json"),
+            "snapshot_hash": canonical_json_sha256(snapshot_files),
+            "snapshot_bytes": snapshot_bytes,
+            "snapshot_gzip_bytes": snapshot_gzip_bytes,
+            "files": snapshot_files,
+            "coverage": core_payload["coverage"],
+            "capabilities": static_capabilities,
+            "tournament_scope": core_payload["scope"],
             "display_stats": human_display_stats.model_dump(mode="json"),
-            "data_format": "duckdb-wasm-parquet",
+            "derived_semantics_version": EXPLORER_DERIVED_SEMANTICS_VERSION,
+            "essential_projection_version": ESSENTIAL_PROJECTION_VERSION,
+            "data_format": "canonical-json-v1",
         }
         atomic_write_json(staging / "static_manifest.json", manifest)
         publish_directory_atomically(staging, destination).finalize()
@@ -473,17 +404,20 @@ def _static_human_rows(
     out_dir: Path,
     node_ids: tuple[str, ...],
     relationship_ids: tuple[str, ...],
-) -> dict[str, list[dict[str, object]]]:
+) -> dict[str, object]:
+    graph = Graph.open(out_dir)
+    metadata = graph.metadata()
     db = DuckDB(out_dir / "oddsfox_graph.duckdb", read_only=True)
     try:
-        snapshot = HumanExplorer(
+        explorer = HumanExplorer(
             db,
-            coverage=Graph.open(out_dir).coverage(),
-            build=Graph.open(out_dir).metadata().build,
-        ).snapshot(node_ids, relationship_ids)
+            coverage=graph.coverage(),
+            build=metadata.build,
+        )
+        snapshot = explorer.snapshot(node_ids, relationship_ids)
     finally:
         db.close()
-    rows: dict[str, list[dict[str, object]]] = {}
+    rows: dict[str, object] = {}
     for name in ("stages", "teams", "claims", "groups"):
         rows[name] = [
             item.model_dump(mode="json")
@@ -498,6 +432,16 @@ def _static_human_rows(
     )
     essential_relationships = cast(
         tuple[RelationshipDetail, ...], snapshot["essential_relationships"]
+    )
+    rows["scope"] = graph.explore_home(
+        team_limit=100,
+        highlight_limit=6,
+    ).scope.model_dump(mode="json")
+    rows["essential_relationship_ids"] = [
+        item.proposal_id for item in essential_relationships
+    ]
+    rows["highlight_relationship_ids"] = list(
+        human_highlight_ids(essential_relationships, limit=12)
     )
     for name, items in (
         ("relationships", relationships),

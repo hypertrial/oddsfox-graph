@@ -18,6 +18,10 @@ from ._discovery.contracts import (
     InputProfile,
 )
 from ._discovery.input import load_source_markets
+from ._discovery.performance_contracts import (
+    load_performance_budget,
+    performance_budget_applicability,
+)
 from ._discovery.inference import (
     load_automation_profile,
     load_compute_profile,
@@ -43,7 +47,7 @@ class Check(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     name: str
-    status: Literal["pass", "warn", "fail"]
+    status: Literal["pass", "warn", "fail", "not_applicable"]
     message: str
     details: dict[str, object] = Field(default_factory=dict)
 
@@ -75,12 +79,15 @@ def doctor(
         raise ValueError("doctor mode must be fast or full")
     checks: list[Check] = []
     estimates: dict[str, object] = {}
+    resolved_input_profile: str | None = None
+    source_hash: str | None = None
     try:
         schema, rows, _, selection = load_source_markets(
             input_path,
             max_propositions=None,
             input_profile=input_profile,
         )
+        resolved_input_profile = schema
         eligible = selection.get("eligible_propositions")
         if not isinstance(eligible, int):
             raise ValueError("Input selection did not report an eligible proposition count")
@@ -145,18 +152,57 @@ def doctor(
         )
     )
     if mode == "fast":
-        budget = (
-            Path(__file__).resolve().parent
-            / "benchmarks"
-            / "m4-v0.11-fast-performance-budget.json"
-        )
-        checks.append(
-            Check(
-                name="fast_performance_budget",
-                status="pass" if budget.is_file() else "warn",
-                message=("compatible v0.11 budget is present" if budget.is_file() else "no local M4 fast performance budget found"),
+        try:
+            budget = load_performance_budget()
+            applicability = performance_budget_applicability(
+                budget,
+                input_profile=resolved_input_profile,
+                input_sha256=source_hash,
+                repetitions=3,
             )
-        )
+            if applicability.applicable:
+                checks.append(
+                    Check(
+                        name="fast_performance_budget",
+                        status="pass",
+                        message="current M4 canonical-catalog budget applies",
+                        details={
+                            "applicable": True,
+                            "schema_version": budget.schema_version,
+                            "benchmark_contract": (
+                                budget.versions.benchmark_contract
+                            ),
+                        },
+                    )
+                )
+            else:
+                checks.append(
+                    Check(
+                        name="fast_performance_budget",
+                        status="not_applicable",
+                        message=(
+                            "current M4 canonical-catalog budget is installed "
+                            "but does not apply to this input or hardware"
+                        ),
+                        details={
+                            "applicable": False,
+                            "reasons": list(applicability.reasons),
+                            "schema_version": budget.schema_version,
+                            "benchmark_contract": (
+                                budget.versions.benchmark_contract
+                            ),
+                        },
+                    )
+                )
+        except ValueError as exc:
+            checks.append(
+                Check(
+                    name="fast_performance_budget",
+                    status="fail",
+                    message=str(exc),
+                    details={"applicable": False},
+                )
+            )
         return DoctorReport(
             passed=not any(check.status == "fail" for check in checks),
             checks=tuple(checks),

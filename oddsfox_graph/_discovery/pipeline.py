@@ -105,11 +105,21 @@ from .nli import (
     scores_to_columns,
 )
 from .incremental import EXECUTION_PLAN_COLUMNS, ExecutionPlan
+from .manifest_contracts import (
+    FullBuildManifest,
+    current_version_bindings,
+    load_build_manifest,
+)
 from .publication import (
+    FinalizedFileHashRegistry,
+    PublicationSwap,
     copy_sorted_parquet as _copy_table,
+    json_text,
     publish_directory_atomically,
     validate_source_output_paths,
     write_conditionals,
+    write_coverage_summary,
+    write_viewer_manifest,
 )
 from .types import (
     ConsensusStageResult,
@@ -134,6 +144,7 @@ from .solver import (
 from .versions import (
     AGGREGATION_CONTRACT_VERSION,
     AUTOMATION_PROFILE_SCHEMA_VERSION,
+    BUILD_MANIFEST_SCHEMA_VERSION,
     CACHE_ENTRY_VERSION,
     CANONICAL_CATALOG_SHA256,
     CANDIDATE_STATE_VERSION,
@@ -141,6 +152,7 @@ from .versions import (
     CONSTRAINT_VERSION,
     DOMAIN_TAXONOMY_VERSION,
     EXECUTION_PLAN_VERSION,
+    EXTRACTOR_VERSION,
     INPUT_ADAPTER_VERSION,
     NLI_INFERENCE_VERSION,
     NORMALIZATION_VERSION,
@@ -154,7 +166,9 @@ from .versions import (
     VIEWER_ARTIFACT_VERSION,
     VISUALIZATION_LAYOUT_VERSION,
     WC2026_SOURCE_SCHEMA,
+    ann_version_binding,
     discovery_semantics_fingerprint,
+    rule_registry_hash,
     source_tree_fingerprint,
 )
 from ..qualification import (
@@ -212,6 +226,8 @@ _ACTIVE_PROGRESS: ContextVar[StageRecorder | None] = ContextVar(
     "oddsfox_graph_progress",
     default=None,
 )
+
+
 @dataclass(frozen=True)
 class _InferenceContext:
     primary_manifest: ModelManifest
@@ -224,6 +240,7 @@ class _InferenceContext:
     owns_verifier_client: bool
     qualification_cases: tuple[dict[str, Any], ...] = ()
     qualification_report: dict[str, Any] | None = None
+
 
 def _prepare_inference_context(
     config: DiscoveryConfig,
@@ -263,7 +280,11 @@ def _prepare_inference_context(
     profile = None
     qualification_report: dict[str, Any] | None = None
     profile_path = config.automation_profile
-    if profile_path is None and config.offline and (provenance_root / "automation_profile.json").is_file():
+    if (
+        profile_path is None
+        and config.offline
+        and (provenance_root / "automation_profile.json").is_file()
+    ):
         profile_path = provenance_root / "automation_profile.json"
     if profile_path is not None:
         profile_path = profile_path.resolve()
@@ -339,18 +360,27 @@ def _role_manifest(
         path = fallback_path
     if path is not None:
         manifest = load_model_manifest(path)
-        origin = manifest.inference_origin if config.offline else normalize_inference_base_url(
-            configured_origin,
-            allow_remote=config.allow_remote_inference,
+        origin = (
+            manifest.inference_origin
+            if config.offline
+            else normalize_inference_base_url(
+                configured_origin,
+                allow_remote=config.allow_remote_inference,
+            )
         )
         if not config.offline and origin != manifest.inference_origin:
             raise ValueError(f"Configured {role} endpoint does not match its manifest")
-        if configured_model not in {manifest.model_id, manifest.loaded_model_identifier}:
+        if configured_model not in {
+            manifest.model_id,
+            manifest.loaded_model_identifier,
+        }:
             raise ValueError(f"Configured {role} model does not match its manifest")
         return manifest, origin
     if injected_client is None:
         flag = f"--{role}-model-manifest"
-        raise ValueError(f"{flag} is required for {'offline' if config.offline else 'online'} discovery")
+        raise ValueError(
+            f"{flag} is required for {'offline' if config.offline else 'online'} discovery"
+        )
     origin = normalize_inference_base_url(
         configured_origin,
         allow_remote=config.allow_remote_inference,
@@ -410,7 +440,7 @@ def _role_client(
 def _ensure_automation_profile(
     input_path: Path,
     out_dir: Path,
-    selected_markets: Sequence[SourceMarket],
+    qualification_markets: Sequence[SourceMarket] | None,
     source_schema: str,
     config: DiscoveryConfig,
     cache: InferenceCache,
@@ -420,9 +450,7 @@ def _ensure_automation_profile(
     embedder: Callable[[list[str], DiscoveryConfig], Any],
 ) -> _InferenceContext:
     qualification_contract = qualification_case_contract(source_schema)
-    fixture_qualification = (
-        injected and _sha256(input_path) != CANONICAL_CATALOG_SHA256
-    )
+    fixture_qualification = injected and _sha256(input_path) != CANONICAL_CATALOG_SHA256
     if (
         config.offline
         and inference.profile is not None
@@ -445,12 +473,18 @@ def _ensure_automation_profile(
         thresholds = {relation: 0.0 for relation in config.relation_thresholds}
         status = "AUTOMATION_VALIDATED"
     else:
-        qualification_schema, _, all_markets, _ = _load_source_markets(
-            input_path,
-            input_profile=config.input_profile,
-        )
-        if qualification_schema != source_schema:
-            raise RuntimeError("Qualification input profile changed during validation")
+        all_markets: Sequence[SourceMarket]
+        if qualification_markets is None:
+            qualification_schema, _, all_markets, _ = _load_source_markets(
+                input_path,
+                input_profile=config.input_profile,
+            )
+            if qualification_schema != source_schema:
+                raise RuntimeError(
+                    "Qualification input profile changed during validation"
+                )
+        else:
+            all_markets = qualification_markets
         cases = (
             generate_wc2026_qualification_cases(
                 all_markets,
@@ -632,7 +666,9 @@ def _ensure_automation_profile(
             publish_directory_atomically(failure_staging, failure_dir).finalize()
         finally:
             shutil.rmtree(failure_staging, ignore_errors=True)
-        raise RuntimeError("Automated qualification did not produce AUTOMATION_VALIDATED")
+        raise RuntimeError(
+            "Automated qualification did not produce AUTOMATION_VALIDATED"
+        )
     return replace(
         inference,
         profile=profile,
@@ -649,13 +685,9 @@ def _qualification_report(profile: AutomationProfile) -> dict[str, Any]:
         "status": profile.status,
         "profile_id": profile.profile_id,
         "case_set_hash": profile.case_set_hash,
-        "qualification_generator_version": (
-            profile.qualification_generator_version
-        ),
+        "qualification_generator_version": (profile.qualification_generator_version),
         "input_profile": metrics.get("qualification_input_profile"),
-        "case_schema_version": metrics.get(
-            "qualification_case_schema_version"
-        ),
+        "case_schema_version": metrics.get("qualification_case_schema_version"),
         "gates": gates,
         "metrics": metrics,
         "semantic_accuracy_claim": False,
@@ -755,12 +787,8 @@ def _run_qualification_cases(
         config,
         cache,
         inference,
-        primary_seed_zero=(
-            primary_entries if config.sampling_seed == 0 else None
-        ),
-        verifier_seed_zero=(
-            verifier_entries if config.sampling_seed == 0 else None
-        ),
+        primary_seed_zero=(primary_entries if config.sampling_seed == 0 else None),
+        verifier_seed_zero=(verifier_entries if config.sampling_seed == 0 else None),
     )
     return [
         row.model_copy(
@@ -780,7 +808,13 @@ def _qualification_stability_cases(
     cases: Sequence[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     selected: list[dict[str, Any]] = []
-    for relation in ("complement", "equivalent", "mutually_exclusive", "implies", "compatible"):
+    for relation in (
+        "complement",
+        "equivalent",
+        "mutually_exclusive",
+        "implies",
+        "compatible",
+    ):
         relation_rows = sorted(
             (
                 row
@@ -858,10 +892,7 @@ def _qualification_seed_stability(
         relations_by_seed[seed] = relations
     return {
         str(case["case_id"]): len(
-            {
-                relations_by_seed[seed][str(case["case_id"])]
-                for seed in (0, 1, 2)
-            }
+            {relations_by_seed[seed][str(case["case_id"])] for seed in (0, 1, 2)}
         )
         == 1
         for case in cases
@@ -883,7 +914,9 @@ def _qualification_role_entries(
         else replace(config, sampling_seed=sampling_seed)
     )
     model = config.primary_model if role == "primary" else config.verifier_model
-    client = inference.primary_client if role == "primary" else inference.verifier_client
+    client = (
+        inference.primary_client if role == "primary" else inference.verifier_client
+    )
     if client is None:
         raise RuntimeError(f"Online qualification requires the {role} model endpoint")
     requests: list[tuple[str, str, str, dict[str, object]]] = []
@@ -920,16 +953,16 @@ def _qualification_role_entries(
                     else classify_request_hash()
                 ),
                 schema_hash=_model_schema_hash(
-                    ParsedMarket
-                    if task_kind == "parse"
-                    else AtomicPairAssessment
+                    ParsedMarket if task_kind == "parse" else AtomicPairAssessment
                 ),
                 settings=_generation_settings(
                     effective_config,
                     role=cast(Literal["parse", "classify"], task_kind),
                 ),
             )
-        prompt_version = PARSE_PROMPT_VERSION if task_kind == "parse" else CLASSIFY_PROMPT_VERSION
+        prompt_version = (
+            PARSE_PROMPT_VERSION if task_kind == "parse" else CLASSIFY_PROMPT_VERSION
+        )
         prompt = _PARSE_PROMPT if task_kind == "parse" else _CLASSIFY_PROMPT
         response_model = ParsedMarket if task_kind == "parse" else AtomicPairAssessment
         payload = cast(dict[str, object], json.loads(str(case["payload_json"])))
@@ -945,15 +978,20 @@ def _qualification_role_entries(
     cached_by_key = cache.get_many([row[1] for row in requests])
     missing = [row for row in requests if row[1] not in cached_by_key]
     if missing:
+
         async def call(payload: dict[str, object], kind: str) -> Any:
             response_model = ParsedMarket if kind == "parse" else AtomicPairAssessment
             return await _with_retries(
                 lambda: client.generate(
                     model=model,
-                    system_prompt=_PARSE_PROMPT if kind == "parse" else _CLASSIFY_PROMPT,
+                    system_prompt=_PARSE_PROMPT
+                    if kind == "parse"
+                    else _CLASSIFY_PROMPT,
                     payload=payload,
                     response_model=response_model,
-                    settings=_generation_settings(effective_config, role=cast(Literal["parse", "classify"], kind)),
+                    settings=_generation_settings(
+                        effective_config, role=cast(Literal["parse", "classify"], kind)
+                    ),
                 )
             )
 
@@ -962,7 +1000,9 @@ def _qualification_role_entries(
         ) -> list[tuple[tuple[str, str, str, dict[str, object]], Any]]:
             semaphore = asyncio.Semaphore(config.llm_concurrency)
 
-            async def run_one(row: tuple[str, str, str, dict[str, object]]) -> tuple[tuple[str, str, str, dict[str, object]], Any]:
+            async def run_one(
+                row: tuple[str, str, str, dict[str, object]],
+            ) -> tuple[tuple[str, str, str, dict[str, object]], Any]:
                 async with semaphore:
                     try:
                         return row, await call(row[3], row[2])
@@ -973,9 +1013,7 @@ def _qualification_role_entries(
 
         for start in range(0, len(missing), 256):
             pending: dict[str, dict[str, Any]] = {}
-            for row, result in _run_async(
-                run_chunk(missing[start : start + 256])
-            ):
+            for row, result in _run_async(run_chunk(missing[start : start + 256])):
                 _, key, task_kind, payload = row
                 task = (
                     f"qualification_{role}_{task_kind}"
@@ -1041,8 +1079,18 @@ def _qualification_parse_prediction(
     consensus = merge_parsed_markets(source_market, primary, verifier)
     agreed = all(row.status == "agreed" for row in consensus.values())
     fields = (
-        "subject", "predicate", "object", "operator", "threshold", "unit",
-        "time_start", "time_end", "competition", "event_scope", "jurisdiction", "polarity",
+        "subject",
+        "predicate",
+        "object",
+        "operator",
+        "threshold",
+        "unit",
+        "time_start",
+        "time_end",
+        "competition",
+        "event_scope",
+        "jurisdiction",
+        "polarity",
     )
     field_scores = {field: 0.0 for field in fields}
     primary_by_outcome = {
@@ -1164,10 +1212,18 @@ def _qualification_pair_prediction(
 ) -> QualificationPrediction:
     proposition_a = cast(dict[str, Any], payload["proposition_A"])
     proposition_b = cast(dict[str, Any], payload["proposition_B"])
-    primary = _validated_qualification_assessment(primary_entry, str(payload["pair_id"]))
-    verifier = _validated_qualification_assessment(verifier_entry, str(payload["pair_id"]))
-    primary_relation = _derive_atomic_relation(primary)[0] if primary is not None else None
-    verifier_relation = _derive_atomic_relation(verifier)[0] if verifier is not None else None
+    primary = _validated_qualification_assessment(
+        primary_entry, str(payload["pair_id"])
+    )
+    verifier = _validated_qualification_assessment(
+        verifier_entry, str(payload["pair_id"])
+    )
+    primary_relation = (
+        _derive_atomic_relation(primary)[0] if primary is not None else None
+    )
+    verifier_relation = (
+        _derive_atomic_relation(verifier)[0] if verifier is not None else None
+    )
     consensus = relation_consensus(
         primary,
         verifier,
@@ -1177,8 +1233,10 @@ def _qualification_pair_prediction(
     )
     citations_valid = consensus.status not in {"invalid_citation", "inference_failure"}
     assumptions_empty = bool(
-        primary is not None and verifier is not None
-        and not primary.assumptions and not verifier.assumptions
+        primary is not None
+        and verifier is not None
+        and not primary.assumptions
+        and not verifier.assumptions
     )
     return QualificationPrediction(
         case_id=str(case["case_id"]),
@@ -1280,6 +1338,7 @@ def _discover_impl(
             input_profile=config.input_profile,
         ),
     )
+    embedder = _embedder or _RunScopedEmbeddingEncoder()
     if inference.profile is not None:
         _validate_qualification_source_contract(inference.profile, source_schema)
     cache_dir = (config.cache_dir or Path(str(out_dir) + ".cache")).resolve()
@@ -1294,13 +1353,13 @@ def _discover_impl(
                 lambda: _ensure_automation_profile(
                     input_path,
                     out_dir,
-                    markets,
+                    (markets if not bool(input_selection.get("truncated")) else None),
                     source_schema,
                     config,
                     cache,
                     inference,
                     injected=True,
-                    embedder=_embedder or _embed_texts,
+                    embedder=embedder,
                 ),
             )
         else:
@@ -1309,7 +1368,9 @@ def _discover_impl(
             )
     recorder.event(
         "qualification_complete",
-        status=(inference.profile.status if inference.profile else "QUALIFICATION_FAILED"),
+        status=(
+            inference.profile.status if inference.profile else "QUALIFICATION_FAILED"
+        ),
         case_count=len(inference.qualification_cases),
     )
     incremental = recorder.run(
@@ -1340,9 +1401,7 @@ def _discover_impl(
             or incremental_stats.get("offline_state_replay")
         )
     )
-    current_market_hashes = {
-        market.market_id: market.source_hash for market in markets
-    }
+    current_market_hashes = {market.market_id: market.source_hash for market in markets}
     for market_id, source_hash in sorted(current_market_hashes.items()):
         prior_hash = prior_market_hashes.get(market_id)
         execution_plan.add(
@@ -1395,10 +1454,7 @@ def _discover_impl(
     enabled_rule_ids = set(rule_support["enabled"])
     reusable_candidates_path = incremental_resources.reusable_candidates_path
     prior_enabled_rules = set(incremental_resources.prior_enabled_rules)
-    if (
-        reusable_candidates_path is not None
-        and prior_enabled_rules != enabled_rule_ids
-    ):
+    if reusable_candidates_path is not None and prior_enabled_rules != enabled_rule_ids:
         reusable_candidates_path = None
         incremental_stats["invalidation_reasons"] = sorted(
             {
@@ -1408,12 +1464,8 @@ def _discover_impl(
         )
     baseline_candidate_blocks = incremental_resources.baseline_candidate_blocks
     baseline_candidate_reasons = incremental_resources.baseline_candidate_reasons
-    baseline_embedding_state_path = (
-        incremental_resources.baseline_embedding_state_path
-    )
-    baseline_semantic_state_path = (
-        incremental_resources.baseline_semantic_state_path
-    )
+    baseline_embedding_state_path = incremental_resources.baseline_embedding_state_path
+    baseline_semantic_state_path = incremental_resources.baseline_semantic_state_path
     semantic_execution: list[dict[str, Any]] = []
     if reusable_candidates_path is not None:
         if (
@@ -1453,9 +1505,7 @@ def _discover_impl(
             }
             for row in propositions
         )
-        incremental_stats["candidate_generation_reused"] = (
-            retrieval_result.reused
-        )
+        incremental_stats["candidate_generation_reused"] = retrieval_result.reused
     else:
         retrieval_result = recorder.run(
             "generate_candidates",
@@ -1463,19 +1513,13 @@ def _discover_impl(
                 workspace=generate_candidate_workspace(
                     propositions,
                     config,
-                    _embedder or _embed_texts,
-                    baseline_embedding_path=(
-                        baseline_embedding_state_path
-                    ),
-                    baseline_neighbor_path=(
-                        baseline_semantic_state_path
-                    ),
+                    embedder,
+                    baseline_embedding_path=(baseline_embedding_state_path),
+                    baseline_neighbor_path=(baseline_semantic_state_path),
                     neighborhood_execution_sink=semantic_execution,
                     baseline_candidate_blocks=baseline_candidate_blocks,
                     baseline_candidate_reasons=baseline_candidate_reasons,
-                    baseline_neighborhood_fingerprints=(
-                        baseline_fingerprint_by_id
-                    ),
+                    baseline_neighborhood_fingerprints=(baseline_fingerprint_by_id),
                     enabled_rule_ids=enabled_rule_ids,
                 ),
                 reused=False,
@@ -1483,9 +1527,7 @@ def _discover_impl(
         )
         candidate_store = retrieval_result.workspace
         resources.callback(candidate_store.close)
-        incremental_stats["candidate_generation_reused"] = (
-            retrieval_result.reused
-        )
+        incremental_stats["candidate_generation_reused"] = retrieval_result.reused
     block_execution = recorder.run(
         "plan_candidate_blocks",
         candidate_store.block_execution_rows,
@@ -1677,9 +1719,7 @@ def _discover_impl(
             input_fingerprint=proposal_hash if reused else None,
             output_fingerprint=proposal_hash,
         )
-    for proposal_hash in sorted(
-        prior_solver_hashes - set(current_solver_hashes)
-    ):
+    for proposal_hash in sorted(prior_solver_hashes - set(current_solver_hashes)):
         execution_plan.add(
             stage="solver_components",
             unit_type="proposal_component",
@@ -1746,12 +1786,13 @@ def _discover_impl(
     staging = Path(
         tempfile.mkdtemp(prefix=f".{out_dir.name}.discovery-", dir=out_dir.parent)
     )
+    input_hash = recorder.run("hash_input", lambda: _sha256(input_path))
+    finalized_hashes = FinalizedFileHashRegistry(staging)
     try:
         publication_result = recorder.run(
             "publish_artifacts",
             lambda: _write_discovery_artifacts(
                 staging,
-                input_path,
                 markets,
                 propositions,
                 candidate_store,
@@ -1769,6 +1810,8 @@ def _discover_impl(
                 incremental_stats=incremental_stats,
                 config=config,
                 inference=inference,
+                input_hash=input_hash,
+                finalized_hashes=finalized_hashes,
             ),
         )
         # Qualification truth is immutable for an exact profile. Reuse the
@@ -1780,8 +1823,9 @@ def _discover_impl(
             if replay_cases.is_file():
                 shutil.copyfile(replay_cases, staging / "qualification_cases.parquet")
         stats = publication_result.stats
+        if isinstance(embedder, _RunScopedEmbeddingEncoder):
+            stats["embedding_runtime"] = embedder.instrumentation()
         shutil.rmtree(staging / ".duckdb-spill", ignore_errors=True)
-        input_hash = recorder.run("hash_input", lambda: _sha256(input_path))
         stats["runtime_seconds"] = recorder.runtime_seconds()
         stats["peak_rss_mb"] = _peak_rss_mb()
         stats["stage_metrics"] = recorder.stage_metrics
@@ -1800,53 +1844,92 @@ def _discover_impl(
         }
         artifact_hashes = recorder.run(
             "hash_artifacts",
-            lambda: {
-                name: _sha256(staging / name)
-                for name in (
-                    *DISCOVERY_PARQUET_ARTIFACTS,
-                    *DISCOVERY_JSON_ARTIFACTS,
-                    "primary_model_manifest.json",
-                    "verifier_model_manifest.json",
-                    "automation_profile.json",
-                    "qualification_report.json",
-                    *(
-                        ("compute_profile.json",)
-                        if (staging / "compute_profile.json").is_file()
-                        else ()
-                    ),
-                )
-            },
+            lambda: finalized_hashes.hashes(
+                [
+                    name
+                    for name in (
+                        *DISCOVERY_PARQUET_ARTIFACTS,
+                        *DISCOVERY_JSON_ARTIFACTS,
+                        "primary_model_manifest.json",
+                        "verifier_model_manifest.json",
+                        "automation_profile.json",
+                        "qualification_report.json",
+                        *(
+                            ("compute_profile.json",)
+                            if (staging / "compute_profile.json").is_file()
+                            else ()
+                        ),
+                    )
+                ]
+            ),
         )
         state_hashes = recorder.run(
             "hash_incremental_state",
-            lambda: {
-                name: _sha256(staging / name) for name in STATE_ARTIFACTS
-            },
+            lambda: finalized_hashes.hashes(list(STATE_ARTIFACTS)),
         )
-        stats["runtime_seconds"] = recorder.runtime_seconds()
+        # Keep the prior graph readable until the replacement is fully
+        # manifest-complete. The completion marker is part of staging before
+        # any public directory rename occurs.
+        elapsed_seconds = recorder.runtime_seconds()
+        stats["runtime_seconds"] = elapsed_seconds
         stats["peak_rss_mb"] = _peak_rss_mb()
         stats["stage_metrics"] = recorder.stage_metrics
+        stats["deadline"] = {
+            "seconds": config.deadline_seconds,
+            "elapsed_seconds": elapsed_seconds,
+            "met": elapsed_seconds <= config.deadline_seconds,
+            "cutoff_triggered": deadline_unassessed > 0,
+            "assessed_pairs": coverage_state["assessed"],
+            "unassessed_pairs": deadline_unassessed,
+        }
         write_summary_report(staging, stats)
-        publication_swap = recorder.run(
-            "publish_files",
-            lambda: publish_directory_atomically(staging, out_dir),
+        finalized_hashes.invalidate("reports/summary.md")
+        published_file_hashes = recorder.run(
+            "hash_publication_files",
+            lambda: finalized_hashes.hashes(_full_artifact_names(config)),
         )
-        try:
-            # The deadline covers the manifest-complete graph, not merely the
-            # inference cutoff. Finalize it after atomic directory publication.
-            elapsed_seconds = recorder.runtime_seconds()
-            stats["runtime_seconds"] = elapsed_seconds
-            stats["peak_rss_mb"] = _peak_rss_mb()
-            stats["stage_metrics"] = recorder.stage_metrics
+        stats["hash_io"] = {
+            "input_files_read": 1,
+            "input_bytes_read": input_path.stat().st_size,
+            **finalized_hashes.instrumentation(),
+        }
+        stats["stage_metrics"] = recorder.stage_metrics
+        manifest = _discovery_manifest(
+            input_path,
+            input_hash,
+            artifact_hashes,
+            source_schema,
+            stats,
+            config,
+            cache,
+            state,
+            recorder.timings,
+            state_hashes,
+            published_file_hashes,
+            inference,
+        )
+        discovery_publication.write_manifest_last(staging, manifest)
+        ready_elapsed_seconds = recorder.runtime_seconds()
+        if (
+            ready_elapsed_seconds > config.deadline_seconds
+            and stats["deadline"]["met"]
+        ):
+            stats["runtime_seconds"] = ready_elapsed_seconds
             stats["deadline"] = {
-                "seconds": config.deadline_seconds,
-                "elapsed_seconds": elapsed_seconds,
-                "met": elapsed_seconds <= config.deadline_seconds,
-                "cutoff_triggered": deadline_unassessed > 0,
-                "assessed_pairs": coverage_state["assessed"],
-                "unassessed_pairs": deadline_unassessed,
+                **stats["deadline"],
+                "elapsed_seconds": ready_elapsed_seconds,
+                "met": False,
             }
-            write_summary_report(out_dir, stats)
+            write_summary_report(staging, stats)
+            finalized_hashes.invalidate("reports/summary.md")
+            published_file_hashes["reports/summary.md"] = finalized_hashes.hash(
+                "reports/summary.md"
+            )
+            stats["hash_io"] = {
+                "input_files_read": 1,
+                "input_bytes_read": input_path.stat().st_size,
+                **finalized_hashes.instrumentation(),
+            }
             manifest = _discovery_manifest(
                 input_path,
                 input_hash,
@@ -1858,39 +1941,33 @@ def _discover_impl(
                 state,
                 recorder.timings,
                 state_hashes,
+                published_file_hashes,
                 inference,
             )
-            discovery_publication.write_manifest_last(out_dir, manifest)
-            ready_elapsed_seconds = recorder.runtime_seconds()
-            if (
-                ready_elapsed_seconds > config.deadline_seconds
-                and stats["deadline"]["met"]
-            ):
-                stats["runtime_seconds"] = ready_elapsed_seconds
-                stats["deadline"] = {
-                    **stats["deadline"],
-                    "elapsed_seconds": ready_elapsed_seconds,
-                    "met": False,
-                }
-                write_summary_report(out_dir, stats)
-                manifest = _discovery_manifest(
-                    input_path,
-                    input_hash,
-                    artifact_hashes,
-                    source_schema,
-                    stats,
-                    config,
-                    cache,
-                    state,
-                    recorder.timings,
-                    state_hashes,
-                    inference,
-                )
-                discovery_publication.write_manifest_last(out_dir, manifest)
-        except Exception:
-            publication_swap.rollback()
+            discovery_publication.write_manifest_last(staging, manifest)
+
+        swap_holder: list[PublicationSwap] = []
+
+        def publish_complete_staging() -> PublicationSwap:
+            swap = publish_directory_atomically(
+                staging,
+                out_dir,
+                completion_marker="build_manifest.json",
+            )
+            swap_holder.append(swap)
+            return swap
+
+        try:
+            publication_swap = recorder.run(
+                "publish_files",
+                publish_complete_staging,
+            )
+            finalized_hashes.rebase(out_dir)
+            publication_swap.finalize()
+        except BaseException:
+            if swap_holder:
+                swap_holder[0].rollback()
             raise
-        publication_swap.finalize()
         manifest_stats = manifest["stats"]
         if not isinstance(manifest_stats, dict):
             raise RuntimeError("Discovery manifest stats must be an object")
@@ -1949,6 +2026,7 @@ def _qualify_only_impl(
         input_path,
         input_profile=config.input_profile,
     )
+    embedder = _embedder or _RunScopedEmbeddingEncoder()
     inference = _prepare_inference_context(
         config,
         out_dir,
@@ -1976,10 +2054,8 @@ def _qualify_only_impl(
             config,
             cache,
             inference,
-            injected=(
-                _primary_client is not None and _verifier_client is not None
-            ),
-            embedder=_embedder or _embed_texts,
+            injected=(_primary_client is not None and _verifier_client is not None),
+            embedder=embedder,
         )
         if inference.profile is None or inference.qualification_report is None:
             raise RuntimeError("Qualification did not produce a profile")
@@ -2034,7 +2110,9 @@ def _prepare_incremental(
     cache: InferenceCache,
     inference: _InferenceContext,
 ) -> IncrementalPreparation:
-    explicit_baseline = config.incremental_from.resolve() if config.incremental_from else None
+    explicit_baseline = (
+        config.incremental_from.resolve() if config.incremental_from else None
+    )
     offline_replay_baseline = (
         out_dir
         if config.offline
@@ -2069,25 +2147,33 @@ def _prepare_incremental(
         raise ValueError(
             "Incremental baseline is incomplete; missing " + str(manifest_path)
         )
-    manifest_value = json.loads(manifest_path.read_text(encoding="utf-8"))
-    if not isinstance(manifest_value, dict):
+    try:
+        validated_manifest = load_build_manifest(manifest_path)
+    except ValueError as exc:
         raise ValueError(
             "Incremental baseline is incompatible. Run a clean discovery and "
             "use that completed output as --incremental-from."
-        )
-    manifest: dict[str, Any] = {
-        str(key): value for key, value in manifest_value.items()
-    }
-    baseline_versions = manifest.get("versions") or {}
+        ) from exc
+    expected_versions = current_version_bindings(
+        domain_taxonomy=DOMAIN_TAXONOMY_VERSION,
+        retrieval=RETRIEVAL_VERSION,
+        parse_fallback=PARSE_FALLBACK_VERSION,
+        ann=ann_version_binding(),
+        cache=CACHE_ENTRY_VERSION,
+        rule_registry_hash=rule_registry_hash(),
+    )
     if (
-        str(manifest.get("version") or "").split(".")[:2]
-        != __version__.split(".")[:2]
-        or baseline_versions.get("candidate_state") != CANDIDATE_STATE_VERSION
+        not isinstance(validated_manifest, FullBuildManifest)
+        or validated_manifest.version != __version__
+        or validated_manifest.discovery_semantics_fingerprint
+        != discovery_semantics_fingerprint()
+        or validated_manifest.versions != expected_versions
     ):
         raise ValueError(
             "Incremental baseline is incompatible. Run a clean discovery and "
             "use that completed output as --incremental-from."
         )
+    manifest = validated_manifest.model_dump(mode="json")
     market_state_path = baseline / "state" / "market_state.parquet"
     proposition_fingerprint_path = (
         baseline / "state" / "proposition_fingerprints.parquet"
@@ -2095,12 +2181,8 @@ def _prepare_incremental(
     embedding_state_path = baseline / "state" / "proposition_embeddings.parquet"
     candidate_state_path = baseline / "state" / "candidate_components.parquet"
     candidate_blocks_path = baseline / "state" / "candidate_blocks.parquet"
-    candidate_reasons_path = (
-        baseline / "state" / "candidate_reason_rows.parquet"
-    )
-    semantic_neighbor_state_path = (
-        baseline / "state" / "semantic_neighbors.parquet"
-    )
+    candidate_reasons_path = baseline / "state" / "candidate_reason_rows.parquet"
+    semantic_neighbor_state_path = baseline / "state" / "semantic_neighbors.parquet"
     solver_state_path = baseline / "state" / "solver_components.parquet"
     execution_plan_path = baseline / "state" / "execution_plan.parquet"
     propositions_path = baseline / "propositions.parquet"
@@ -2176,7 +2258,7 @@ def _prepare_incremental(
         )
         embedding_row_count = int(
             db.scalar(
-            f"""
+                f"""
             SELECT count(*)
             FROM read_parquet('{q(embedding_state_path)}')
             """
@@ -2231,10 +2313,9 @@ def _prepare_incremental(
     removed_market_ids = set(prior_markets) - set(current_hashes)
     models = manifest.get("models") or {}
     previous_inference = manifest.get("inference") or {}
-    parse_compatible = (
-        (previous_inference.get("fingerprints") or {}).get("consensus")
-        == inference.fingerprints["consensus"]
-    )
+    parse_compatible = (previous_inference.get("fingerprints") or {}).get(
+        "consensus"
+    ) == inference.fingerprints["consensus"]
     seeded = 0
 
     embedding_manifest = models.get("embedding") or {}
@@ -2277,10 +2358,9 @@ def _prepare_incremental(
         and previous_limits.get("top_k") == config.top_k
         and previous_limits.get("max_candidates") == config.max_candidates
     )
-    classification_compatible = (
-        (previous_inference.get("fingerprints") or {}).get("consensus")
-        == inference.fingerprints["consensus"]
-    )
+    classification_compatible = (previous_inference.get("fingerprints") or {}).get(
+        "consensus"
+    ) == inference.fingerprints["consensus"]
     if not classification_compatible:
         reasons.append("classifier_model_prompt_or_schema")
     previous_profile_id = previous_inference.get("automation_profile_id")
@@ -2324,22 +2404,16 @@ def _prepare_incremental(
             "enabled": explicit_baseline is not None,
             "offline_state_replay": offline_replay_baseline is not None,
             "baseline_manifest_hash": _sha256(manifest_path),
-            "markets_reused": (
-                len(unchanged_market_ids) if parse_compatible else 0
-            ),
+            "markets_reused": (len(unchanged_market_ids) if parse_compatible else 0),
             "markets_changed": (
-                len(changed_market_ids)
-                if parse_compatible
-                else len(current_hashes)
+                len(changed_market_ids) if parse_compatible else len(current_hashes)
             ),
             "markets_removed": len(removed_market_ids),
             "baseline_parse_entries_seeded": seeded,
             "baseline_embedding_vectors_available": (
                 embedding_row_count if embedding_compatible else 0
             ),
-            "baseline_solver_components_available": len(
-                reusable_solver_components
-            ),
+            "baseline_solver_components_available": len(reusable_solver_components),
             "invalidation_reasons": sorted(set(reasons)) or ["none"],
         },
         resources=IncrementalResources(
@@ -2374,14 +2448,12 @@ def _prepare_incremental(
             ),
             baseline_candidate_blocks=(
                 candidate_blocks_path
-                if previous_limits.get("max_candidates")
-                == config.max_candidates
+                if previous_limits.get("max_candidates") == config.max_candidates
                 else None
             ),
             baseline_candidate_reasons=(
                 candidate_reasons_path
-                if previous_limits.get("max_candidates")
-                == config.max_candidates
+                if previous_limits.get("max_candidates") == config.max_candidates
                 else None
             ),
         ),
@@ -2439,13 +2511,17 @@ def _parse_propositions(
         verifier_market, verifier_error = _validated_parse_entry(market, verifier_entry)
         consensus = merge_parsed_markets(market, primary_market, verifier_market)
         primary_by_outcome = {
-            item.outcome: item for item in (primary_market.propositions if primary_market else [])
+            item.outcome: item
+            for item in (primary_market.propositions if primary_market else [])
         }
         verifier_by_outcome = {
-            item.outcome: item for item in (verifier_market.propositions if verifier_market else [])
+            item.outcome: item
+            for item in (verifier_market.propositions if verifier_market else [])
         }
         primary_model = str(primary_entry.get("observed_model") or config.primary_model)
-        verifier_model = str(verifier_entry.get("observed_model") or config.verifier_model)
+        verifier_model = str(
+            verifier_entry.get("observed_model") or config.verifier_model
+        )
         for source_outcome in market.outcomes:
             outcome_consensus = consensus[source_outcome.outcome]
             parsed = outcome_consensus.parsed
@@ -2512,7 +2588,9 @@ def _parse_propositions(
                         verifier_model=verifier_model,
                         primary_fingerprint=inference.fingerprints["primary_parse"],
                         verifier_fingerprint=inference.fingerprints["verifier_parse"],
-                        automation_profile_id=(inference.profile.profile_id if inference.profile else None),
+                        automation_profile_id=(
+                            inference.profile.profile_id if inference.profile else None
+                        ),
                     )
                 )
             propositions.append(proposition)
@@ -2545,7 +2623,9 @@ def _parse_propositions(
             propositions,
             key=lambda row: str(row["proposition_id"]),
         ),
-        parse_assessments=sorted(assessments, key=lambda row: str(row["assessment_id"])),
+        parse_assessments=sorted(
+            assessments, key=lambda row: str(row["assessment_id"])
+        ),
         quarantines=quarantines,
     )
 
@@ -2637,9 +2717,7 @@ def _deterministic_parse_propositions(
                 {"assessment_id": canonical_json_sha256(content), **content}
             )
     return ParsingStageResult(
-        propositions=sorted(
-            propositions, key=lambda row: str(row["proposition_id"])
-        ),
+        propositions=sorted(propositions, key=lambda row: str(row["proposition_id"])),
         parse_assessments=sorted(
             assessments, key=lambda row: str(row["assessment_id"])
         ),
@@ -2693,7 +2771,9 @@ def _parse_role_entries(
     task = f"{role}_parse"
     fingerprint = inference.fingerprints[task]
     model = config.primary_model if role == "primary" else config.verifier_model
-    client = inference.primary_client if role == "primary" else inference.verifier_client
+    client = (
+        inference.primary_client if role == "primary" else inference.verifier_client
+    )
     requests = []
     for market in markets:
         payload = _market_payload(market)
@@ -2727,7 +2807,9 @@ def _parse_role_entries(
             _run_inference_stage(
                 client,
                 [row[2] for row in missing],
-                lambda batch: _local_parse_market(client, batch[0], config, model=model),
+                lambda batch: _local_parse_market(
+                    client, batch[0], config, model=model
+                ),
                 concurrency=config.llm_concurrency,
                 close_after=False,
             )
@@ -2746,7 +2828,11 @@ def _parse_role_entries(
                     observed_model=model,
                     usage={},
                     usage_scope=None,
-                    state=("transient_failure" if _is_transient_error(result) else "stable_failure"),
+                    state=(
+                        "transient_failure"
+                        if _is_transient_error(result)
+                        else "stable_failure"
+                    ),
                     error_type=type(result).__name__,
                     status_code=getattr(result, "status_code", None),
                 )
@@ -2765,12 +2851,9 @@ def _parse_role_entries(
             pending[key] = entry
             entries[key] = entry
         cache.put_many(pending)
-    result_by_market = {
-        market.market_id: entries[key] for market, key, _ in requests
-    }
+    result_by_market = {market.market_id: entries[key] for market, key, _ in requests}
     observed = {
-        str(entry.get("observed_model") or model)
-        for entry in result_by_market.values()
+        str(entry.get("observed_model") or model) for entry in result_by_market.values()
     }
     target = (
         state.observed_primary_parse_models
@@ -2930,24 +3013,58 @@ def _automated_rule_gates() -> dict[str, Any]:
     return qualify_rule_registry(RULE_REGISTRY, _deterministic_relation)
 
 
+class _RunScopedEmbeddingEncoder:
+    """Lazily construct one immutable embedding model per discovery command."""
+
+    def __init__(self) -> None:
+        self._model: Any | None = None
+        self._model_key: tuple[str, str] | None = None
+        self._model_initializations = 0
+        self._encode_calls = 0
+        self._texts_encoded = 0
+
+    def __call__(self, texts: list[str], config: DiscoveryConfig) -> Any:
+        model_key = (config.embedding_model, config.embedding_revision)
+        if self._model is None:
+            try:
+                from sentence_transformers import SentenceTransformer
+            except ImportError as exc:  # pragma: no cover - installation guard
+                raise ImportError(
+                    "Automated discovery dependencies are missing; "
+                    "reinstall oddsfox-graph."
+                ) from exc
+            self._model = SentenceTransformer(
+                config.embedding_model,
+                revision=config.embedding_revision,
+                local_files_only=True,
+            )
+            self._model_key = model_key
+            self._model_initializations += 1
+        elif self._model_key != model_key:
+            raise ValueError(
+                "A run-scoped embedding encoder cannot change model or revision"
+            )
+        self._encode_calls += 1
+        self._texts_encoded += len(texts)
+        return self._model.encode(
+            texts,
+            normalize_embeddings=True,
+            convert_to_numpy=True,
+            show_progress_bar=False,
+        )
+
+    def instrumentation(self) -> dict[str, int]:
+        return {
+            "model_initializations": self._model_initializations,
+            "encode_calls": self._encode_calls,
+            "texts_encoded": self._texts_encoded,
+        }
+
+
 def _embed_texts(texts: list[str], config: DiscoveryConfig) -> Any:
-    try:
-        from sentence_transformers import SentenceTransformer
-    except ImportError as exc:  # pragma: no cover - dependency installation guard
-        raise ImportError(
-            "Automated discovery dependencies are missing; reinstall oddsfox-graph."
-        ) from exc
-    model = SentenceTransformer(
-        config.embedding_model,
-        revision=config.embedding_revision,
-        local_files_only=True,
-    )
-    return model.encode(
-        texts,
-        normalize_embeddings=True,
-        convert_to_numpy=True,
-        show_progress_bar=False,
-    )
+    """Compatibility helper for direct callers outside a discovery command."""
+
+    return _RunScopedEmbeddingEncoder()(texts, config)
 
 
 def _derive_deterministic_edges(
@@ -2955,8 +3072,7 @@ def _derive_deterministic_edges(
     propositions: Sequence[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     by_id = {
-        str(proposition["proposition_id"]): proposition
-        for proposition in propositions
+        str(proposition["proposition_id"]): proposition for proposition in propositions
     }
     edges = []
     for candidate in candidates:
@@ -2989,8 +3105,7 @@ def _apply_nli_scores(
     if not candidates:
         return
     by_id = {
-        str(proposition["proposition_id"]): proposition
-        for proposition in propositions
+        str(proposition["proposition_id"]): proposition for proposition in propositions
     }
     fingerprint = inference.fingerprints["nli"]
     missing: list[tuple[dict[str, Any], str, dict[str, object]]] = []
@@ -3047,15 +3162,10 @@ def _apply_nli_scores(
             )
             directional = score_bidirectional(
                 effective_scorer,
-                [
-                    (str(payload["a"]), str(payload["b"]))
-                    for _, _, payload in missing
-                ],
+                [(str(payload["a"]), str(payload["b"])) for _, _, payload in missing],
                 batch_size=32,
             )
-            parsed_rows = [
-                scores_to_columns(scores) for scores in directional
-            ]
+            parsed_rows = [scores_to_columns(scores) for scores in directional]
         pending_cache_writes: dict[str, dict[str, Any]] = {}
         for (_, key, payload), parsed in zip(missing, parsed_rows, strict=True):
             entry = cache_entry(
@@ -3079,10 +3189,7 @@ def _apply_nli_scores(
         if entry is None or not isinstance(entry.get("parsed"), dict):
             candidate["nli_action"] = "advisory_unavailable"
             continue
-        columns = {
-            key: float(value)
-            for key, value in dict(entry["parsed"]).items()
-        }
+        columns = {key: float(value) for key, value in dict(entry["parsed"]).items()}
         candidate.update(columns)
         candidate["nli_action"] = "veto_only"
 
@@ -3101,11 +3208,7 @@ def _score_nli_candidate_batches(
 ) -> ConsensusStageResult:
     candidate_store.prepare_inference_queue(limit, proposition_scopes)
     effective_scorer = scorer
-    if (
-        effective_scorer is None
-        and not injected_client
-        and not config.offline
-    ):
+    if effective_scorer is None and not injected_client and not config.offline:
         effective_scorer = ModernBertNliScorer(
             config.nli_model,
             config.nli_revision,
@@ -3168,9 +3271,7 @@ def _classify_candidate_batches(
     # batch can drain inside the five-minute reserve on a local M4. Throughput
     # still comes from bounded HTTP concurrency and server-side batching.
     scheduling_batch_size = max(1, min(16, config.llm_concurrency * 2))
-    for batch in candidate_store.inference_batches(
-        batch_size=scheduling_batch_size
-    ):
+    for batch in candidate_store.inference_batches(batch_size=scheduling_batch_size):
         if cutoff is not None and time.perf_counter() >= cutoff:
             exhausted = candidate_store.mark_deadline_exhausted()
             if recorder is not None:
@@ -3190,11 +3291,7 @@ def _classify_candidate_batches(
             inference,
         )
         candidate_store.update_generative_rows(
-            [
-                row
-                for row in batch
-                if row.get("consensus_status") is not None
-            ]
+            [row for row in batch if row.get("consensus_status") is not None]
         )
         edges.extend(result.edges)
         assessments.extend(result.model_assessments)
@@ -3215,8 +3312,7 @@ def _classify_candidates(
     inference: _InferenceContext,
 ) -> ConsensusStageResult:
     by_id = {
-        str(proposition["proposition_id"]): proposition
-        for proposition in propositions
+        str(proposition["proposition_id"]): proposition for proposition in propositions
     }
     unresolved = sorted(
         (
@@ -3229,8 +3325,7 @@ def _classify_candidates(
     )
     selected = unresolved[: config.max_llm_pairs]
     selected_ids = {
-        (str(row["proposition_a_id"]), str(row["proposition_b_id"]))
-        for row in selected
+        (str(row["proposition_a_id"]), str(row["proposition_b_id"])) for row in selected
     }
     for candidate in unresolved:
         pair = (
@@ -3354,9 +3449,7 @@ def _classify_candidates(
                     },
                     sort_keys=True,
                 ),
-                "rule_applicability_fingerprint": inference.fingerprints[
-                    "consensus"
-                ],
+                "rule_applicability_fingerprint": inference.fingerprints["consensus"],
                 "proof_scope_key": canonical_json_sha256(
                     {
                         "pair_id": pair_id,
@@ -3368,9 +3461,7 @@ def _classify_candidates(
         )
         accepted_label = relation not in {None, "unrelated", "uncertain"}
         profile_relation = (
-            "implies"
-            if relation in {"A_implies_B", "B_implies_A"}
-            else relation
+            "implies" if relation in {"A_implies_B", "B_implies_A"} else relation
         )
         qualified = (
             inference.profile is not None
@@ -3423,9 +3514,7 @@ def _classify_candidates(
                     assumptions=[],
                     primary_model_version=primary_model,
                     verifier_model_version=verifier_model,
-                    primary_assessment_id=str(
-                        primary_assessment_row["assessment_id"]
-                    ),
+                    primary_assessment_id=str(primary_assessment_row["assessment_id"]),
                     verifier_assessment_id=str(
                         verifier_assessment_row["assessment_id"]
                     ),
@@ -3463,12 +3552,8 @@ def _classify_candidates(
                     explanation=explanation,
                     primary_model=primary_model,
                     verifier_model=verifier_model,
-                    primary_fingerprint=inference.fingerprints[
-                        "primary_classify"
-                    ],
-                    verifier_fingerprint=inference.fingerprints[
-                        "verifier_classify"
-                    ],
+                    primary_fingerprint=inference.fingerprints["primary_classify"],
+                    verifier_fingerprint=inference.fingerprints["verifier_classify"],
                     automation_profile_id=(
                         inference.profile.profile_id if inference.profile else None
                     ),
@@ -3512,7 +3597,9 @@ def _classification_role_entries(
 ) -> dict[str, dict[str, Any]]:
     fingerprint = inference.fingerprints[f"{role}_classify"]
     model = config.primary_model if role == "primary" else config.verifier_model
-    client = inference.primary_client if role == "primary" else inference.verifier_client
+    client = (
+        inference.primary_client if role == "primary" else inference.verifier_client
+    )
     task = f"{role}_classify"
     requests: list[tuple[str, str, dict[str, object]]] = []
     for candidate in candidates:
@@ -3772,7 +3859,8 @@ def _logic_edge_row(
             )
         ),
         "extractor_id": src.get("extractor_id") or dst.get("extractor_id"),
-        "extractor_version": src.get("extractor_version") or dst.get("extractor_version"),
+        "extractor_version": src.get("extractor_version")
+        or dst.get("extractor_version"),
         "source_spans_json": relation.get("_source_spans_json")
         or json.dumps(
             {
@@ -3836,9 +3924,7 @@ def _solver_component_state_rows(
     for row in rejected:
         rejected_by_component[str(row["solver_component_id"])].append(row)
     rows = []
-    for component_id in sorted(
-        set(accepted_by_component) | set(rejected_by_component)
-    ):
+    for component_id in sorted(set(accepted_by_component) | set(rejected_by_component)):
         accepted_rows = accepted_by_component[component_id]
         rejected_rows = rejected_by_component[component_id]
         proposals = [*accepted_rows, *rejected_rows]
@@ -3860,9 +3946,7 @@ def _solver_component_state_rows(
                 "soft_clause_count": int(
                     representative["_solver_component_soft_clauses"]
                 ),
-                "objective_cost": int(
-                    representative["_solver_component_objective"]
-                ),
+                "objective_cost": int(representative["_solver_component_objective"]),
                 "solver_version": SOLVER_VERSION,
                 "constraint_version": CONSTRAINT_VERSION,
             }
@@ -3922,8 +4006,7 @@ def _record_candidate_component_reuse(
         len(candidate_components) - reused
     )
     incremental_stats["candidate_components_removed"] = len(
-        set(prior)
-        - {str(row["component_id"]) for row in candidate_components}
+        set(prior) - {str(row["component_id"]) for row in candidate_components}
     )
 
 
@@ -3939,9 +4022,7 @@ def _record_semantic_neighborhood_reuse(
     ) -> dict[str, str]:
         if rows and "neighborhood_fingerprint" in rows[0]:
             return {
-                str(row["proposition_id"]): str(
-                    row["neighborhood_fingerprint"]
-                )
+                str(row["proposition_id"]): str(row["neighborhood_fingerprint"])
                 for row in rows
             }
         grouped: dict[str, list[tuple[str, float, int]]] = defaultdict(list)
@@ -3966,8 +4047,7 @@ def _record_semantic_neighborhood_reuse(
     prior = fingerprints(prior_rows)
     current = fingerprints(current_rows)
     execution_status = {
-        str(row["proposition_id"]): str(row["status"])
-        for row in execution_rows or []
+        str(row["proposition_id"]): str(row["status"]) for row in execution_rows or []
     }
     reused = sum(
         execution_status.get(proposition_id) == "reused"
@@ -3975,12 +4055,8 @@ def _record_semantic_neighborhood_reuse(
         for proposition_id, fingerprint in current.items()
     )
     incremental_stats["semantic_neighborhoods_reused"] = reused
-    incremental_stats["semantic_neighborhoods_recomputed"] = (
-        len(current) - reused
-    )
-    incremental_stats["semantic_neighborhoods_removed"] = len(
-        set(prior) - set(current)
-    )
+    incremental_stats["semantic_neighborhoods_recomputed"] = len(current) - reused
+    incremental_stats["semantic_neighborhoods_removed"] = len(set(prior) - set(current))
     if execution_plan is None:
         return
     for proposition_id, fingerprint in sorted(current.items()):
@@ -4028,8 +4104,7 @@ def _stage_workspace_tables(
 ) -> None:
     db = candidates.db
     parser_by_market = {
-        str(row["market_id"]): str(row["primary_parser_model"])
-        for row in propositions
+        str(row["market_id"]): str(row["primary_parser_model"]) for row in propositions
     }
     _create_and_fill(
         db,
@@ -4196,7 +4271,6 @@ def _stage_workspace_tables(
 
 def _write_discovery_artifacts(
     directory: Path,
-    input_path: Path,
     markets: Sequence[SourceMarket],
     propositions: Sequence[dict[str, Any]],
     candidates: CandidateStore,
@@ -4213,6 +4287,8 @@ def _write_discovery_artifacts(
     incremental_stats: dict[str, Any],
     config: DiscoveryConfig,
     inference: _InferenceContext,
+    input_hash: str,
+    finalized_hashes: FinalizedFileHashRegistry,
 ) -> PublicationStageResult:
     publication_started = time.perf_counter()
     publication_checkpoint = publication_started
@@ -4235,9 +4311,7 @@ def _write_discovery_artifacts(
         db.execute("SET memory_limit = '192MB'")
         db.execute("SET preserve_insertion_order = false")
         db.execute("SET threads = 2")
-        db.execute(
-            f"SET temp_directory = '{q(directory / '.duckdb-spill')}'"
-        )
+        db.execute(f"SET temp_directory = '{q(directory / '.duckdb-spill')}'")
         CandidateStore.promote_public_tables(db)
         coverage = build_explorer_tables(
             db,
@@ -4426,10 +4500,8 @@ def _write_discovery_artifacts(
         write_conditionals(db, directory)
         write_graph_snapshot(db, directory)
         record_publication_stage("derived_artifacts")
-        _write_json_atomic(directory / "coverage_summary.json", coverage)
-        source_watermark = db.scalar(
-            "SELECT max(last_seen_ts) FROM nodes_table"
-        )
+        coverage = write_coverage_summary(directory, coverage)
+        source_watermark = db.scalar("SELECT max(last_seen_ts) FROM nodes_table")
         viewer_content_artifacts = (
             "nodes.parquet",
             "propositions.parquet",
@@ -4446,14 +4518,11 @@ def _write_discovery_artifacts(
         graph_content_fingerprint = canonical_json_sha256(
             {
                 "coverage": coverage,
-                "artifacts": {
-                    name: _sha256(directory / name)
-                    for name in viewer_content_artifacts
-                },
+                "artifacts": finalized_hashes.hashes(list(viewer_content_artifacts)),
             }
         )
-        _write_json_atomic(
-            directory / "viewer_manifest.json",
+        write_viewer_manifest(
+            directory,
             {
                 "schema_version": VIEWER_ARTIFACT_VERSION,
                 "api_version": VIEWER_API_VERSION,
@@ -4462,7 +4531,7 @@ def _write_discovery_artifacts(
                 "validation_status": "EXPERIMENTAL_FULL",
                 "input_profile": source_schema,
                 "input": {
-                    "sha256": _sha256(input_path),
+                    "sha256": input_hash,
                     "normalized_semantic_fingerprint": input_selection.get(
                         "normalized_semantic_fingerprint"
                     ),
@@ -4477,10 +4546,8 @@ def _write_discovery_artifacts(
                     "truncated": bool(input_selection.get("truncated", False)),
                 },
                 "source_tree_fingerprint": source_tree_fingerprint(),
-                "discovery_semantics_fingerprint": (
-                    discovery_semantics_fingerprint()
-                ),
-                "source_watermark": source_watermark,
+                "discovery_semantics_fingerprint": (discovery_semantics_fingerprint()),
+                "source_watermark": json_text(source_watermark),
                 "graph_content_fingerprint": graph_content_fingerprint,
                 "response_limits": {"nodes": 5_000, "edges": 10_000},
             },
@@ -4498,9 +4565,7 @@ def _write_discovery_artifacts(
             )
             for key, where in {
                 "candidate_edges": "",
-                "classified_pairs": (
-                    "WHERE discovery_method = 'generative_consensus'"
-                ),
+                "classified_pairs": ("WHERE discovery_method = 'generative_consensus'"),
                 "unclassified_budget_pairs": (
                     "WHERE status IN ('not_classified_budget','deadline_budget_exhausted')"
                 ),
@@ -4525,8 +4590,7 @@ def _write_discovery_artifacts(
             "model_logic_edges": sum(
                 1
                 for row in logic_edges
-                if row.get("discovery_method")
-                == "generative_consensus"
+                if row.get("discovery_method") == "generative_consensus"
             ),
             "conditional_edges": int(
                 db.scalar("SELECT count(*) FROM conditional_edges_v") or 0
@@ -4557,41 +4621,26 @@ def _write_discovery_artifacts(
                     or 0
                 ),
                 "persisted_reason_contributions": int(
-                    db.scalar(
-                        "SELECT count(*) FROM candidate_reason_rows_v"
-                    )
-                    or 0
+                    db.scalar("SELECT count(*) FROM candidate_reason_rows_v") or 0
                 ),
                 "state_rows": {
                     "embeddings": int(
-                        db.scalar(
-                            "SELECT count(*) FROM proposition_embeddings_v"
-                        )
-                        or 0
+                        db.scalar("SELECT count(*) FROM proposition_embeddings_v") or 0
                     ),
                     "semantic_neighbors": int(
-                        db.scalar(
-                            "SELECT count(*) FROM semantic_neighbors_v"
-                        )
-                        or 0
+                        db.scalar("SELECT count(*) FROM semantic_neighbors_v") or 0
                     ),
                     "candidate_components": int(
-                        db.scalar(
-                            "SELECT count(*) FROM candidate_components_v"
-                        )
-                        or 0
+                        db.scalar("SELECT count(*) FROM candidate_components_v") or 0
                     ),
                     "execution_plan": int(
-                        db.scalar("SELECT count(*) FROM execution_plan_v")
-                        or 0
+                        db.scalar("SELECT count(*) FROM execution_plan_v") or 0
                     ),
                 },
             },
             "incremental": {
                 **incremental_stats,
-                "embedding_vectors_reused": (
-                    candidates.embedding_vectors_reused
-                ),
+                "embedding_vectors_reused": (candidates.embedding_vectors_reused),
                 "embedding_vectors_recomputed": (
                     candidates.embedding_vectors_recomputed
                 ),
@@ -4600,9 +4649,7 @@ def _write_discovery_artifacts(
                 (
                     timestamp
                     for market in markets
-                    if (
-                        timestamp := market.first_seen_ts or market.time_start
-                    )
+                    if (timestamp := market.first_seen_ts or market.time_start)
                     is not None
                 ),
                 default=None,
@@ -4611,10 +4658,7 @@ def _write_discovery_artifacts(
                 (
                     timestamp
                     for market in markets
-                    if (
-                        timestamp := market.last_seen_ts or market.time_end
-                    )
-                    is not None
+                    if (timestamp := market.last_seen_ts or market.time_end) is not None
                 ),
                 default=None,
             ),
@@ -4626,11 +4670,15 @@ def _write_discovery_artifacts(
         assert isinstance(candidate_workspace, dict)
         candidate_workspace["database_bytes"] = database_path.stat().st_size
         spill_directory = directory / ".duckdb-spill"
-        candidate_workspace["spill_bytes"] = sum(
-            path.stat().st_size
-            for path in spill_directory.rglob("*")
-            if path.is_file()
-        ) if spill_directory.is_dir() else 0
+        candidate_workspace["spill_bytes"] = (
+            sum(
+                path.stat().st_size
+                for path in spill_directory.rglob("*")
+                if path.is_file()
+            )
+            if spill_directory.is_dir()
+            else 0
+        )
         write_reports(db, directory, stats)
         _write_json_atomic(
             directory / "primary_model_manifest.json",
@@ -4641,7 +4689,9 @@ def _write_discovery_artifacts(
             inference.verifier_manifest.model_dump(mode="json"),
         )
         if inference.profile is None or inference.qualification_report is None:
-            raise RuntimeError("Publication requires an automated qualification profile")
+            raise RuntimeError(
+                "Publication requires an automated qualification profile"
+            )
         _write_json_atomic(
             directory / "automation_profile.json",
             inference.profile.model_dump(mode="json"),
@@ -4763,8 +4813,7 @@ def _validate_discovery_artifacts(db: DuckDB, directory: Path) -> None:
         "rejected_edges.parquet": REJECTED_EDGE_COLUMNS,
         "parse_errors.parquet": PARSE_ERROR_COLUMNS,
         "conditional_edges.parquet": {
-            name: ""
-            for name in ARTIFACT_COLUMNS["conditional_edges.parquet"]
+            name: "" for name in ARTIFACT_COLUMNS["conditional_edges.parquet"]
         },
         "parse_assessments.parquet": PARSE_ASSESSMENT_COLUMNS,
         "model_assessments.parquet": MODEL_ASSESSMENT_COLUMNS,
@@ -4791,9 +4840,7 @@ def _validate_discovery_artifacts(db: DuckDB, directory: Path) -> None:
             raise RuntimeError(f"Missing discovery artifact {artifact}")
         actual = [
             str(row["column_name"])
-            for row in db.rows(
-                f"DESCRIBE SELECT * FROM read_parquet('{q(path)}')"
-            )
+            for row in db.rows(f"DESCRIBE SELECT * FROM read_parquet('{q(path)}')")
         ]
         if actual != list(expected):
             raise RuntimeError(
@@ -4814,7 +4861,9 @@ def _validate_discovery_artifacts(db: DuckDB, directory: Path) -> None:
         or 0
     )
     if duplicate_edges:
-        raise RuntimeError(f"logic_edges.parquet contains {duplicate_edges} duplicate edges")
+        raise RuntimeError(
+            f"logic_edges.parquet contains {duplicate_edges} duplicate edges"
+        )
     invalid_candidates = int(
         db.scalar(
             """
@@ -4845,9 +4894,7 @@ def _validate_discovery_artifacts(db: DuckDB, directory: Path) -> None:
         or 0
     )
     if invalid_execution_rows:
-        raise RuntimeError(
-            "execution_plan.parquet contains invalid reuse evidence"
-        )
+        raise RuntimeError("execution_plan.parquet contains invalid reuse evidence")
     invalid_edge_provenance = int(
         db.scalar(
             """
@@ -4907,6 +4954,22 @@ def _validate_discovery_artifacts(db: DuckDB, directory: Path) -> None:
         )
 
 
+def _full_artifact_names(config: DiscoveryConfig) -> list[str]:
+    return [
+        *DISCOVERY_PARQUET_ARTIFACTS,
+        *DISCOVERY_JSON_ARTIFACTS,
+        *STATE_ARTIFACTS,
+        GRAPH_DATABASE_ARTIFACT,
+        GRAPH_SNAPSHOT_ARTIFACT,
+        "primary_model_manifest.json",
+        "verifier_model_manifest.json",
+        "automation_profile.json",
+        "qualification_report.json",
+        *(("compute_profile.json",) if config.compute_profile is not None else ()),
+        *reports(),
+    ]
+
+
 def _discovery_manifest(
     input_path: Path,
     input_hash: str,
@@ -4918,38 +4981,31 @@ def _discovery_manifest(
     state: RunState,
     timings: dict[str, float],
     state_hashes: dict[str, str],
+    published_file_hashes: dict[str, str],
     inference: _InferenceContext,
 ) -> dict[str, object]:
     compute = _compute_accounting(config, state, timings)
-    artifact_names = [
-        *DISCOVERY_PARQUET_ARTIFACTS,
-        *DISCOVERY_JSON_ARTIFACTS,
-        *STATE_ARTIFACTS,
-        GRAPH_DATABASE_ARTIFACT,
-        GRAPH_SNAPSHOT_ARTIFACT,
-        "primary_model_manifest.json",
-        "verifier_model_manifest.json",
-        "automation_profile.json",
-        "qualification_report.json",
-        *(("compute_profile.json",) if config.compute_profile is not None else ()),
-    ]
+    artifact_names = _full_artifact_names(config)
     input_selection = stats.get("input_selection")
     if not isinstance(input_selection, dict):
         input_selection = {}
     manifest = {
+        "schema_version": BUILD_MANIFEST_SCHEMA_VERSION,
         "command": "discover",
         "version": __version__,
         "build_mode": "full",
         "validation_status": "EXPERIMENTAL_FULL",
         "deadline": stats.get("deadline"),
-        "input": str(input_path),
-        "input_hash": input_hash,
-        "input_schema": source_schema,
-        "input_profile": source_schema,
-        "input_selection": input_selection,
-        "input_semantic_fingerprint": input_selection.get(
-            "normalized_semantic_fingerprint"
-        ),
+        "input": {
+            "path": str(input_path),
+            "sha256": input_hash,
+            "schema": source_schema,
+            "profile": source_schema,
+            "normalized_semantic_fingerprint": input_selection.get(
+                "normalized_semantic_fingerprint"
+            ),
+            "selection": input_selection,
+        },
         "scope": {
             "source": input_selection.get("source", "input-parquet"),
             "scope": input_selection.get("scope", "catalog"),
@@ -5038,23 +5094,13 @@ def _discovery_manifest(
         },
         "versions": {
             "input_adapter": INPUT_ADAPTER_VERSION,
+            "extractor": EXTRACTOR_VERSION,
             "normalization": NORMALIZATION_VERSION,
             "domain_taxonomy": DOMAIN_TAXONOMY_VERSION,
             "rules": RULE_VERSION,
             "retrieval": RETRIEVAL_VERSION,
             "parse_fallback": PARSE_FALLBACK_VERSION,
-            "ann": {
-                "implementation": "usearch",
-                "version": "2.26.0",
-                "metric": "cos",
-                "dtype": "f32",
-                "connectivity": 32,
-                "construction_expansion": 128,
-                "search_expansion": 128,
-                "query_neighbors": 64,
-                "exact_reranking": "exact-cosine-score-id-v1",
-                "construction_threads": 1,
-            },
+            "ann": ann_version_binding(),
             "candidate_state": CANDIDATE_STATE_VERSION,
             "execution_plan": EXECUTION_PLAN_VERSION,
             "publication": PUBLICATION_VERSION,
@@ -5063,9 +5109,7 @@ def _discovery_manifest(
             "visualization_layout": VISUALIZATION_LAYOUT_VERSION,
             "aggregation": AGGREGATION_CONTRACT_VERSION,
             "cache": CACHE_ENTRY_VERSION,
-            "rule_registry_hash": _text_hash(
-                json.dumps(RULE_REGISTRY, sort_keys=True)
-            ),
+            "rule_registry_hash": rule_registry_hash(),
             "constraints": CONSTRAINT_VERSION,
             "solver": SOLVER_VERSION,
         },
@@ -5079,9 +5123,7 @@ def _discovery_manifest(
             "all_propositions": config.max_propositions is None,
             "max_candidates": config.max_candidates,
             "max_llm_pairs": config.max_llm_pairs,
-            "classification_coverage_target": (
-                config.classification_coverage_target
-            ),
+            "classification_coverage_target": (config.classification_coverage_target),
             "max_visible_coverage_gap": config.max_visible_coverage_gap,
             "nli_candidate_pool": min(
                 config.max_candidates,
@@ -5109,6 +5151,7 @@ def _discovery_manifest(
         "artifacts": artifact_names,
         "artifact_hashes": artifact_hashes,
         "state_hashes": state_hashes,
+        "published_file_hashes": published_file_hashes,
         "reports": list(reports()),
         "stats": stats,
         "stage_timings": timings,
@@ -5148,9 +5191,7 @@ def _parse_error_rows(
     propositions: Sequence[dict[str, Any]],
     assessments: Sequence[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    proposition_by_id = {
-        str(row["proposition_id"]): row for row in propositions
-    }
+    proposition_by_id = {str(row["proposition_id"]): row for row in propositions}
     rows = []
     for assessment in assessments:
         if assessment.get("status") == "valid":
@@ -5198,7 +5239,9 @@ async def _run_batched(
     ]
     semaphore = asyncio.Semaphore(concurrency)
 
-    async def run(batch: list[dict[str, object]]) -> tuple[list[dict[str, object]], Any]:
+    async def run(
+        batch: list[dict[str, object]],
+    ) -> tuple[list[dict[str, object]], Any]:
         async with semaphore:
             try:
                 return batch, await call(batch)

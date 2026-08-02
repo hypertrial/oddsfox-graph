@@ -17,7 +17,7 @@ qwen_id="Qwen/Qwen3-4B-GGUF:Q8_0"
 granite_id="ibm-granite/granite-3.3-2b-instruct-GGUF:Q8_0"
 
 model_root="$runtime_root/models"
-cache_root="$runtime_root/cache/v11"
+cache_root="$runtime_root/cache/v13"
 output_root="$runtime_root/output"
 manifest_root="$runtime_root/manifests"
 log_root="$runtime_root/logs"
@@ -30,11 +30,14 @@ granite_path="$model_root/granite/granite-3.3-2b-instruct-Q8_0.gguf"
 primary_manifest="$manifest_root/primary.json"
 verifier_manifest="$manifest_root/verifier.json"
 compute_profile="$repo_root/config/local-compute-profile.json"
-catalog="$repo_root/data/polymarket_all_markets_20260730T093857Z.parquet"
-qualification_out="$output_root/qualification"
-smoke_out="$output_root/smoke"
-fast_out="$output_root/fast"
-full_out="$output_root/full"
+requested_input="${2:-${ODDSFOX_WC2026_INPUT:-}}"
+generic_catalog="${2:-${ODDSFOX_GENERIC_CATALOG:-}}"
+qualification_out="$output_root/wc2026-qualification"
+generic_smoke_out="$output_root/generic-benchmark-smoke"
+fast_out="$output_root/wc2026-fast"
+full_out="$output_root/wc2026-full"
+wc2026_profile="polymarket-wc2026-graph-hourly-v1"
+generic_profile="polymarket-market-snapshot-v1"
 
 export HF_HOME="$runtime_root/huggingface"
 export HF_HUB_CACHE="$HF_HOME/hub"
@@ -81,6 +84,18 @@ require_command() {
 
 require_file() {
   [[ -f "$1" ]] || die "required file is missing: $1"
+}
+
+require_wc2026_input() {
+  [[ -n "$requested_input" ]] || die \
+    "WC2026 input is required; pass it as the second argument or set ODDSFOX_WC2026_INPUT"
+  require_file "$requested_input"
+}
+
+require_generic_input() {
+  [[ -n "$generic_catalog" ]] || die \
+    "generic benchmark input is required; pass it as the second argument or set ODDSFOX_GENERIC_CATALOG"
+  require_file "$generic_catalog"
 }
 
 run_cli() {
@@ -252,10 +267,12 @@ create_manifests() {
 }
 
 check_stack() {
+  require_wc2026_input
   require_file "$primary_manifest"
   require_file "$verifier_manifest"
   run_cli doctor \
-    --mode full --input "$catalog" --out "$full_out" --cache-dir "$cache_root" \
+    --mode full --input "$requested_input" --input-profile "$wc2026_profile" \
+    --out "$full_out" --cache-dir "$cache_root" \
     --automation-profile "$qualification_out/automation_profile.json" \
     --primary-model-manifest "$primary_manifest" \
     --verifier-model-manifest "$verifier_manifest" \
@@ -265,8 +282,10 @@ check_stack() {
 }
 
 common_discovery_args() {
+  require_wc2026_input
   printf '%s\0' \
-    --input "$catalog" \
+    --input "$requested_input" \
+    --input-profile "$wc2026_profile" \
     --cache-dir "$cache_root" \
     --primary-model-manifest "$primary_manifest" \
     --verifier-model-manifest "$verifier_manifest" \
@@ -291,19 +310,22 @@ run_qualification() {
     --seed 0 --output-format json
 }
 
-run_smoke() {
-  read_common_args
-  run_cli_awake discover --mode full "${common_args[@]}" --out "$smoke_out" \
-    --automation-profile "$qualification_out/automation_profile.json" \
+run_generic_smoke() {
+  require_generic_input
+  run_cli discover --mode fast --input "$generic_catalog" \
+    --input-profile "$generic_profile" --out "$generic_smoke_out" \
     --max-propositions 5000 --progress-format plain --output-format json
 }
 
 run_fast() {
-  run_cli discover --mode fast --input "$catalog" --out "$fast_out" \
+  require_wc2026_input
+  run_cli discover --mode fast --input "$requested_input" \
+    --input-profile "$wc2026_profile" --out "$fast_out" \
     --deadline-seconds 120 --progress-format plain --output-format json
 }
 
 run_full() {
+  require_wc2026_input
   require_file "$qualification_out/automation_profile.json"
   start_models
   read_common_args
@@ -367,6 +389,7 @@ show_paths() {
   printf 'HF cache:   %s\n' "$HF_HOME"
   printf 'cache:      %s\n' "$cache_root"
   printf 'outputs:    %s\n' "$output_root"
+  printf 'WC input:   %s\n' "${requested_input:-<pass INPUT or set ODDSFOX_WC2026_INPUT>}"
   printf 'fast graph: %s\n' "$fast_out"
   printf 'full graph: %s\n' "$full_out"
   printf 'viewer:     http://127.0.0.1:8765\n'
@@ -374,7 +397,7 @@ show_paths() {
 
 usage() {
   cat <<'EOF'
-Usage: scripts/local_stack.sh COMMAND
+Usage: scripts/local_stack.sh COMMAND [INPUT]
 
 Commands:
   paths       Show all SSD-resident runtime paths.
@@ -385,15 +408,16 @@ Commands:
   stop        Stop model processes started by this script.
   status      Show process and loaded-model status.
   manifests   Create runtime-bound primary and verifier manifests.
-  check       Run doctor, including both model conformance checks.
-  qualify     Run automated catalog-derived qualification.
-  fast        Build the complete deterministic catalog graph without models.
-  full        Upgrade to the experimental ANN/NLI/dual-model graph.
+  check       Run WC2026 doctor, including both model conformance checks.
+  qualify     Run automated WC2026 qualification.
+  fast        Build the complete deterministic WC2026 graph without models.
+  full        Upgrade the WC2026 graph with ANN/NLI/dual-model inference.
   serve-fast  Serve the completed fast graph.
   serve-full  Serve the completed full graph.
-  smoke       Run a 5,000-proposition discovery build.
+  generic-benchmark-smoke
+              Build a bounded generic graph that is not a supported explorer.
   web-check   Build and test the explorer using SSD-resident browser/npm caches.
-  summary     Print the completed fast all-market run summary.
+  summary     Print the completed fast WC2026 run summary.
 EOF
 }
 
@@ -409,7 +433,7 @@ case "${1:-}" in
   manifests) create_manifests ;;
   check) check_stack ;;
   qualify) run_qualification ;;
-  smoke) run_smoke ;;
+  generic-benchmark-smoke) run_generic_smoke ;;
   fast) run_fast ;;
   full) run_full ;;
   web-check) run_web_checks ;;

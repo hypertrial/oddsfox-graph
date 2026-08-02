@@ -8,6 +8,7 @@ import shutil
 import sys
 import tempfile
 import time
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any, cast
 
@@ -29,23 +30,42 @@ from .artifact_contracts import (
     SOLVER_COMPONENT_STATE_COLUMNS,
     STATE_ARTIFACTS,
 )
-from .consensus import MODEL_ASSESSMENT_COLUMNS, PARSE_ASSESSMENT_COLUMNS, QUARANTINE_COLUMNS
+from .consensus import (
+    MODEL_ASSESSMENT_COLUMNS,
+    PARSE_ASSESSMENT_COLUMNS,
+    QUARANTINE_COLUMNS,
+)
 from .contracts import DiscoveryConfig, Operator, SourceMarket
 from .extraction import ExtractedProposition, extract_proposition
 from .incremental import EXECUTION_PLAN_COLUMNS
 from .input import load_source_markets
+from .manifest_contracts import (
+    FastBuildManifest,
+    load_viewer_manifest,
+    validate_manifest_pair,
+)
 from .metrics import StageRecorder
-from .provenance import atomic_write_json, canonical_json_sha256, peak_rss_mb, sha256_file
+from .provenance import (
+    canonical_json_sha256,
+    peak_rss_mb,
+    sha256_file,
+)
 from .publication import (
+    FinalizedFileHashRegistry,
+    PublicationSwap,
     copy_sorted_parquet,
+    json_text,
     publish_directory_atomically,
     validate_source_output_paths,
     write_conditionals,
+    write_coverage_summary,
     write_manifest_last,
+    write_viewer_manifest,
 )
 from .relations import RULE_REGISTRY, deterministic_relation
 from .versions import (
     AGGREGATION_CONTRACT_VERSION,
+    BUILD_MANIFEST_SCHEMA_VERSION,
     CANDIDATE_STATE_VERSION,
     CONSTRAINT_VERSION,
     INPUT_ADAPTER_VERSION,
@@ -147,24 +167,47 @@ def discover_fast(
     validate_source_output_paths(input_path, out_dir)
     out_dir.parent.mkdir(parents=True, exist_ok=True)
     recorder = StageRecorder(config.progress_format)
-    source_schema, input_rows, markets, selection = recorder.run(
-        "normalize_input",
-        lambda: load_source_markets(
-            input_path,
-            max_propositions=config.max_propositions,
-            input_profile=config.input_profile,
-        ),
+    input_hash = recorder.run("hash_input", lambda: sha256_file(input_path))
+    baseline_manifest = recorder.run(
+        "inspect_incremental_baseline",
+        lambda: _load_incremental_baseline(config, input_path, out_dir),
     )
-    baseline_manifest = _validate_incremental_baseline(config, input_path, out_dir)
+    normalization_skipped = bool(
+        baseline_manifest is not None
+        and _can_reuse_before_normalization(
+            config,
+            baseline_manifest,
+            input_hash,
+        )
+    )
+    if normalization_skipped:
+        assert baseline_manifest is not None
+        source_schema, input_rows, selection = _baseline_replay_metadata(
+            baseline_manifest
+        )
+        markets: list[SourceMarket] | None = None
+    else:
+        source_schema, input_rows, markets, selection = recorder.run(
+            "normalize_input",
+            lambda: load_source_markets(
+                input_path,
+                max_propositions=config.max_propositions,
+                input_profile=config.input_profile,
+            ),
+        )
     staging = Path(
         tempfile.mkdtemp(prefix=f".{out_dir.name}.fast-", dir=out_dir.parent)
     )
+    finalized_hashes = FinalizedFileHashRegistry(staging)
     try:
-        input_hash = sha256_file(input_path)
         can_reuse_unchanged = bool(
             baseline_manifest
-            and baseline_manifest.get("input", {}).get("sha256") == input_hash
-            and baseline_manifest.get("input", {}).get("selection") == selection
+            and _baseline_matches_normalized_input(
+                baseline_manifest,
+                input_hash,
+                selection,
+                config,
+            )
         )
         if (
             can_reuse_unchanged
@@ -175,41 +218,54 @@ def discover_fast(
             stats = recorder.run(
                 "reuse_unchanged_fast_baseline",
                 lambda: _reuse_unchanged_baseline(
-                    baseline_path, staging, baseline_manifest
+                    baseline_path,
+                    staging,
+                    baseline_manifest,
+                    finalized_hashes,
                 ),
             )
+            incremental_stats = stats.get("incremental")
+            if isinstance(incremental_stats, dict):
+                incremental_stats["normalization_skipped"] = normalization_skipped
         else:
+            if markets is None:
+                raise RuntimeError(
+                    "Exact replay metadata was selected without a reusable baseline"
+                )
             stats = recorder.run(
                 "build_deterministic_workspace",
                 lambda: _build_workspace(
                     staging,
-                    input_path,
                     source_schema,
                     markets,
                     selection,
                     config,
                     recorder,
+                    input_hash,
+                    finalized_hashes,
                 ),
             )
             stats["incremental"] = {
                 "enabled": baseline_manifest is not None,
                 "unchanged_replay": False,
                 "markets_reused": 0,
-                "markets_recomputed": int(selection["selected_markets"]),
+                "markets_recomputed": int(cast(int, selection["selected_markets"])),
                 "reason": (
                     "source_selection_changed"
                     if baseline_manifest is not None
                     else "clean_build"
                 ),
+                "normalization_skipped": False,
             }
         stats.update(
             input_rows=input_rows,
             input_schema=source_schema,
             input_selection=selection,
-            markets=int(selection["selected_markets"]),
-            tokens=int(selection["selected_propositions"]),
+            markets=int(cast(int, selection["selected_markets"])),
+            tokens=int(cast(int, selection["selected_propositions"])),
             build_mode="fast",
             validation_status="DETERMINISTIC_VALIDATED",
+            fast_execution_contract=_fast_execution_contract(config),
         )
         loaded_in_fast = sorted(
             module
@@ -243,17 +299,27 @@ def discover_fast(
             *reports(),
             *STATE_ARTIFACTS,
         ]
-        artifact_hashes = {
-            name: sha256_file(staging / name)
-            for name in (*DISCOVERY_PARQUET_ARTIFACTS, *DISCOVERY_JSON_ARTIFACTS)
-            if (staging / name).is_file()
-        }
-        state_hashes = {
-            name: sha256_file(staging / name)
-            for name in STATE_ARTIFACTS
-            if (staging / name).is_file()
-        }
+        artifact_hashes = recorder.run(
+            "hash_artifacts",
+            lambda: finalized_hashes.hashes(
+                [
+                    name
+                    for name in (
+                        *DISCOVERY_PARQUET_ARTIFACTS,
+                        *DISCOVERY_JSON_ARTIFACTS,
+                    )
+                    if (staging / name).is_file()
+                ]
+            ),
+        )
+        state_hashes = recorder.run(
+            "hash_incremental_state",
+            lambda: finalized_hashes.hashes(
+                [name for name in STATE_ARTIFACTS if (staging / name).is_file()]
+            ),
+        )
         manifest = {
+            "schema_version": BUILD_MANIFEST_SCHEMA_VERSION,
             "command": "discover",
             "version": __version__,
             "build_mode": "fast",
@@ -301,54 +367,81 @@ def discover_fast(
                 name for name in published_names if (staging / name).is_file()
             ),
         }
-        swap = recorder.run(
-            "publish_files",
-            lambda: publish_directory_atomically(staging, out_dir),
+        # The public path must never expose a newly generated directory without
+        # its completion marker. Finalize every byte, including the manifest,
+        # while the previous publication is still live.
+        elapsed_seconds = recorder.runtime_seconds()
+        deadline_met = elapsed_seconds <= config.deadline_seconds
+        stats["runtime_seconds"] = elapsed_seconds
+        stats["peak_rss_mb"] = peak_rss_mb()
+        stats["stage_metrics"] = recorder.stage_metrics
+        stats["deadline"] = {
+            "seconds": config.deadline_seconds,
+            "elapsed_seconds": elapsed_seconds,
+            "met": deadline_met,
+            "cutoff_triggered": False,
+            "assessed_pairs": stats["candidate_edges"],
+            "unassessed_pairs": 0,
+        }
+        manifest["deadline"] = stats["deadline"]
+        manifest["stats"] = stats
+        write_summary_report(staging, stats)
+        finalized_hashes.invalidate("reports/summary.md")
+        manifest["published_file_hashes"] = recorder.run(
+            "hash_publication_files",
+            lambda: finalized_hashes.hashes(published_names),
         )
-        try:
-            # The deadline covers a ready, manifest-complete graph, so decide it
-            # only after the atomic directory publication has finished.
-            elapsed_seconds = recorder.runtime_seconds()
-            deadline_met = elapsed_seconds <= config.deadline_seconds
-            stats["runtime_seconds"] = elapsed_seconds
-            stats["peak_rss_mb"] = peak_rss_mb()
-            stats["stage_metrics"] = recorder.stage_metrics
+        stats["hash_io"] = {
+            "input_files_read": 1,
+            "input_bytes_read": input_path.stat().st_size,
+            **finalized_hashes.instrumentation(),
+        }
+        stats["stage_metrics"] = recorder.stage_metrics
+        manifest["stats"] = stats
+        write_manifest_last(staging, manifest)
+        ready_elapsed_seconds = recorder.runtime_seconds()
+        if ready_elapsed_seconds > config.deadline_seconds and deadline_met:
+            deadline_met = False
+            stats["runtime_seconds"] = ready_elapsed_seconds
             stats["deadline"] = {
-                "seconds": config.deadline_seconds,
-                "elapsed_seconds": elapsed_seconds,
-                "met": deadline_met,
-                "cutoff_triggered": False,
-                "assessed_pairs": stats["candidate_edges"],
-                "unassessed_pairs": 0,
+                **stats["deadline"],
+                "elapsed_seconds": ready_elapsed_seconds,
+                "met": False,
             }
             manifest["deadline"] = stats["deadline"]
             manifest["stats"] = stats
-            write_summary_report(out_dir, stats)
-            manifest["published_file_hashes"] = {
-                name: sha256_file(out_dir / name) for name in sorted(published_names)
+            write_summary_report(staging, stats)
+            finalized_hashes.invalidate("reports/summary.md")
+            manifest["published_file_hashes"]["reports/summary.md"] = (
+                finalized_hashes.hash("reports/summary.md")
+            )
+            stats["hash_io"] = {
+                "input_files_read": 1,
+                "input_bytes_read": input_path.stat().st_size,
+                **finalized_hashes.instrumentation(),
             }
-            write_manifest_last(out_dir, manifest)
-            ready_elapsed_seconds = recorder.runtime_seconds()
-            if ready_elapsed_seconds > config.deadline_seconds and deadline_met:
-                deadline_met = False
-                stats["runtime_seconds"] = ready_elapsed_seconds
-                stats["deadline"] = {
-                    **stats["deadline"],
-                    "elapsed_seconds": ready_elapsed_seconds,
-                    "met": False,
-                }
-                manifest["deadline"] = stats["deadline"]
-                manifest["stats"] = stats
-                write_summary_report(out_dir, stats)
-                manifest["published_file_hashes"] = {
-                    name: sha256_file(out_dir / name)
-                    for name in sorted(published_names)
-                }
-                write_manifest_last(out_dir, manifest)
-        except Exception:
-            swap.rollback()
+            manifest["stats"] = stats
+            write_manifest_last(staging, manifest)
+
+        swap_holder: list[PublicationSwap] = []
+
+        def publish_complete_staging() -> PublicationSwap:
+            swap = publish_directory_atomically(
+                staging,
+                out_dir,
+                completion_marker="build_manifest.json",
+            )
+            swap_holder.append(swap)
+            return swap
+
+        try:
+            swap = recorder.run("publish_files", publish_complete_staging)
+            finalized_hashes.rebase(out_dir)
+            swap.finalize()
+        except BaseException:
+            if swap_holder:
+                swap_holder[0].rollback()
             raise
-        swap.finalize()
         recorder.event(
             "run_complete",
             build_mode="fast",
@@ -381,7 +474,7 @@ def _validate_fast_config(config: DiscoveryConfig) -> None:
         )
 
 
-def _validate_incremental_baseline(
+def _load_incremental_baseline(
     config: DiscoveryConfig,
     input_path: Path,
     out_dir: Path,
@@ -390,14 +483,25 @@ def _validate_incremental_baseline(
         return None
     baseline = config.incremental_from.resolve()
     manifest_path = baseline / "build_manifest.json"
-    if baseline == out_dir or baseline == input_path.parent or not manifest_path.is_file():
-        raise ValueError("Incremental baseline is incomplete; run a clean v0.12 discovery")
+    if (
+        baseline == out_dir
+        or baseline == input_path.parent
+        or not manifest_path.is_file()
+    ):
+        raise ValueError(
+            "Incremental baseline is incomplete; run a clean v0.13 discovery"
+        )
     try:
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise ValueError("Incremental baseline is incompatible; run a clean v0.12 discovery") from exc
+        validated = FastBuildManifest.model_validate_json(manifest_path.read_bytes())
+        manifest = validated.model_dump(mode="json")
+    except (OSError, ValueError) as exc:
+        raise ValueError(
+            "Incremental baseline is incompatible; run a clean v0.13 discovery"
+        ) from exc
     if manifest.get("version") != __version__ or manifest.get("build_mode") != "fast":
-        raise ValueError("Incremental baseline is incompatible; run a clean v0.12 discovery")
+        raise ValueError(
+            "Incremental baseline is incompatible; run a clean v0.13 discovery"
+        )
     versions = manifest.get("versions")
     if not isinstance(versions, dict) or any(
         versions.get(key) != expected
@@ -410,16 +514,22 @@ def _validate_incremental_baseline(
             "execution_plan": EXECUTION_PLAN_VERSION,
         }.items()
     ):
-        raise ValueError("Incremental baseline is incompatible; run a clean v0.12 discovery")
-    _validate_incremental_baseline_files(baseline, manifest)
+        raise ValueError(
+            "Incremental baseline is incompatible; run a clean v0.13 discovery"
+        )
+    if (
+        manifest.get("discovery_semantics_fingerprint")
+        != discovery_semantics_fingerprint()
+    ):
+        raise ValueError(
+            "Incremental baseline is incompatible; run a clean v0.13 discovery"
+        )
+    _validate_incremental_baseline_manifest(manifest)
     return {str(key): value for key, value in manifest.items()}
 
 
-def _validate_incremental_baseline_files(
-    baseline: Path,
-    manifest: dict[str, Any],
-) -> None:
-    required_artifacts = {
+def _required_fast_artifacts() -> set[str]:
+    return {
         *DISCOVERY_PARQUET_ARTIFACTS,
         *DISCOVERY_JSON_ARTIFACTS,
         GRAPH_DATABASE_ARTIFACT,
@@ -427,28 +537,31 @@ def _validate_incremental_baseline_files(
         *reports(),
         *STATE_ARTIFACTS,
     }
+
+
+def _validate_incremental_baseline_manifest(
+    manifest: dict[str, Any],
+) -> None:
+    required_artifacts = _required_fast_artifacts()
     declared = manifest.get("artifacts")
     if not isinstance(declared, list) or not required_artifacts <= {
         str(name) for name in declared
     }:
         raise ValueError(
-            "Incremental baseline is incomplete; run a clean v0.12 discovery"
-        )
-    if any(not (baseline / name).is_file() for name in required_artifacts):
-        raise ValueError(
-            "Incremental baseline is incomplete; run a clean v0.12 discovery"
+            "Incremental baseline is incomplete; run a clean v0.13 discovery"
         )
     published_hashes = manifest.get("published_file_hashes")
-    if not isinstance(published_hashes, dict) or set(published_hashes) != required_artifacts:
+    if (
+        not isinstance(published_hashes, dict)
+        or set(published_hashes) != required_artifacts
+    ):
         raise ValueError(
-            "Incremental baseline is incomplete; run a clean v0.12 discovery"
+            "Incremental baseline is incomplete; run a clean v0.13 discovery"
         )
     for name in sorted(required_artifacts):
-        expected = published_hashes.get(name)
-        if not isinstance(expected, str) or sha256_file(baseline / name) != expected:
+        if not isinstance(published_hashes.get(name), str):
             raise ValueError(
-                "Incremental baseline artifact hashes do not match; "
-                "run a clean v0.12 discovery"
+                "Incremental baseline is incomplete; run a clean v0.13 discovery"
             )
     for field, expected_names in (
         (
@@ -460,30 +573,169 @@ def _validate_incremental_baseline_files(
         hashes = manifest.get(field)
         if not isinstance(hashes, dict) or set(hashes) != expected_names:
             raise ValueError(
-                "Incremental baseline is incomplete; run a clean v0.12 discovery"
+                "Incremental baseline is incomplete; run a clean v0.13 discovery"
             )
         for name in sorted(expected_names):
             expected = hashes.get(name)
             if not isinstance(expected, str) or published_hashes.get(name) != expected:
                 raise ValueError(
                     "Incremental baseline artifact hashes do not match; "
-                    "run a clean v0.12 discovery"
+                    "run a clean v0.13 discovery"
                 )
+
+
+def _validate_incremental_baseline_files(
+    baseline: Path,
+    manifest: dict[str, Any],
+    hashes: FinalizedFileHashRegistry,
+) -> None:
+    required_artifacts = _required_fast_artifacts()
+    if any(not (baseline / name).is_file() for name in required_artifacts):
+        raise ValueError(
+            "Incremental baseline is incomplete; run a clean v0.13 discovery"
+        )
+    published_hashes = cast(dict[str, str], manifest["published_file_hashes"])
+    try:
+        hashes.verify(published_hashes)
+    except (OSError, ValueError) as exc:
+        raise ValueError(
+            "Incremental baseline artifact hashes do not match; "
+            "run a clean v0.13 discovery"
+        ) from exc
+
+
+def _can_reuse_before_normalization(
+    config: DiscoveryConfig,
+    manifest: dict[str, Any],
+    input_hash: str,
+) -> bool:
+    """Conservatively identify exact full-catalog replays from manifest data."""
+
+    if config.max_propositions is not None:
+        return False
+    if not _baseline_execution_contract_matches(config, manifest):
+        return False
+    input_metadata = manifest.get("input")
+    if not isinstance(input_metadata, dict):
+        return False
+    selection = input_metadata.get("selection")
+    if (
+        input_metadata.get("sha256") != input_hash
+        or not isinstance(selection, dict)
+        or bool(selection.get("truncated"))
+    ):
+        return False
+    profile = input_metadata.get("profile") or input_metadata.get("schema")
+    return isinstance(profile, str) and config.input_profile in {"auto", profile}
+
+
+def _baseline_matches_normalized_input(
+    manifest: dict[str, Any],
+    input_hash: str,
+    selection: dict[str, object],
+    config: DiscoveryConfig | None = None,
+) -> bool:
+    input_metadata = manifest.get("input")
+    input_matches = bool(
+        isinstance(input_metadata, dict)
+        and input_metadata.get("sha256") == input_hash
+        and input_metadata.get("selection") == selection
+    )
+    return input_matches and (
+        config is None or _baseline_execution_contract_matches(config, manifest)
+    )
+
+
+def _fast_execution_contract(config: DiscoveryConfig) -> dict[str, int | None]:
+    return {
+        "max_candidates": config.max_candidates,
+        "max_propositions": config.max_propositions,
+    }
+
+
+def _baseline_execution_contract_matches(
+    config: DiscoveryConfig,
+    manifest: dict[str, Any],
+) -> bool:
+    stats = manifest.get("stats")
+    return bool(
+        isinstance(stats, dict)
+        and stats.get("fast_execution_contract") == _fast_execution_contract(config)
+    )
+
+
+def _baseline_replay_metadata(
+    manifest: dict[str, Any],
+) -> tuple[str, int, dict[str, object]]:
+    input_metadata = manifest.get("input")
+    stats = manifest.get("stats")
+    if not isinstance(input_metadata, dict) or not isinstance(stats, dict):
+        raise ValueError(
+            "Incremental baseline is incomplete; run a clean v0.13 discovery"
+        )
+    source_schema = input_metadata.get("schema")
+    selection = input_metadata.get("selection")
+    input_rows = stats.get("input_rows")
+    if (
+        not isinstance(source_schema, str)
+        or not isinstance(selection, dict)
+        or not isinstance(input_rows, int)
+    ):
+        raise ValueError(
+            "Incremental baseline is incomplete; run a clean v0.13 discovery"
+        )
+    return (
+        source_schema,
+        input_rows,
+        {str(key): value for key, value in selection.items()},
+    )
 
 
 def _reuse_unchanged_baseline(
     baseline: Path,
     staging: Path,
     manifest: dict[str, Any],
+    hashes: FinalizedFileHashRegistry,
 ) -> dict[str, object]:
-    shutil.copytree(baseline, staging, dirs_exist_ok=True)
-    (staging / "build_manifest.json").unlink(missing_ok=True)
+    names = sorted(_required_fast_artifacts())
+    if any(not (baseline / name).is_file() for name in names):
+        raise ValueError(
+            "Incremental baseline is incomplete; run a clean v0.13 discovery"
+        )
+    try:
+        for name in names:
+            destination = staging / name
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(baseline / name, destination)
+    except OSError as exc:
+        raise ValueError(
+            "Incremental baseline could not be copied; "
+            "run a clean v0.13 discovery"
+        ) from exc
+    _validate_incremental_baseline_files(staging, manifest, hashes)
+    validated_manifest = FastBuildManifest.model_validate_json(
+        json.dumps(manifest, sort_keys=True, default=str)
+    )
+    viewer = load_viewer_manifest(staging / "viewer_manifest.json")
+    validate_manifest_pair(validated_manifest, viewer)
+    current_audit_fingerprint = source_tree_fingerprint()
+    if viewer.source_tree_fingerprint != current_audit_fingerprint:
+        write_viewer_manifest(
+            staging,
+            {
+                **viewer.model_dump(mode="json"),
+                "source_tree_fingerprint": current_audit_fingerprint,
+            },
+        )
+        hashes.invalidate("viewer_manifest.json")
     prior_stats = manifest.get("stats")
     if not isinstance(prior_stats, dict):
         raise ValueError("Incremental baseline has no valid stats")
     stats = json.loads(json.dumps(prior_stats))
     selection = manifest.get("input", {}).get("selection", {})
-    selected_markets = int(selection.get("selected_markets") or stats.get("markets") or 0)
+    selected_markets = int(
+        selection.get("selected_markets") or stats.get("markets") or 0
+    )
     stats["incremental"] = {
         "enabled": True,
         "unchanged_replay": True,
@@ -496,12 +748,13 @@ def _reuse_unchanged_baseline(
 
 def _build_workspace(
     staging: Path,
-    input_path: Path,
     source_schema: str,
-    markets: list[SourceMarket],
+    markets: Iterable[SourceMarket],
     selection: dict[str, object],
     config: DiscoveryConfig,
     recorder: StageRecorder,
+    input_hash: str,
+    finalized_hashes: FinalizedFileHashRegistry,
 ) -> dict[str, object]:
     database_path = staging / GRAPH_DATABASE_ARTIFACT
     db = DuckDB(database_path)
@@ -528,10 +781,12 @@ def _build_workspace(
             [],
             temporary=True,
         )
-        active_market_count = sum(market.is_active for market in markets)
-        closed_market_count = sum(market.is_closed for market in markets)
-        proposition_count = _insert_extracted_propositions(db, markets)
-        markets.clear()
+        (
+            proposition_count,
+            active_market_count,
+            closed_market_count,
+        ) = _insert_extracted_propositions(db, markets)
+        markets = ()
         gc.collect()
         mark("extract")
         recorder.event("fast_substage", stage="extract", rows=proposition_count)
@@ -582,20 +837,24 @@ def _build_workspace(
         write_graph_snapshot(db, staging)
         mark("artifact_export")
         recorder.event("fast_substage", stage="artifact_export")
-        atomic_write_json(staging / "coverage_summary.json", coverage)
+        coverage = write_coverage_summary(staging, coverage)
         graph_content_fingerprint = _write_viewer_manifest(
             db,
             staging,
             coverage,
-            input_path=input_path,
+            input_hash=input_hash,
             source_schema=source_schema,
             selection=selection,
+            finalized_hashes=finalized_hashes,
         )
         mark("viewer_manifest")
-        candidate_count = int(db.scalar("SELECT count(*) FROM relation_candidates_v") or 0)
+        candidate_count = int(
+            db.scalar("SELECT count(*) FROM relation_candidates_v") or 0
+        )
         edge_count = int(db.scalar("SELECT count(*) FROM logic_edges_v") or 0)
         complement_count = int(
-            db.scalar("SELECT count(*) FROM logic_edges_v WHERE edge_type='complement'") or 0
+            db.scalar("SELECT count(*) FROM logic_edges_v WHERE edge_type='complement'")
+            or 0
         )
         exclusion_count = int(
             db.scalar(
@@ -604,7 +863,10 @@ def _build_workspace(
             or 0
         )
         cross_market_count = int(
-            db.scalar("SELECT count(*) FROM logic_edges_v WHERE market_id_src != market_id_dst") or 0
+            db.scalar(
+                "SELECT count(*) FROM logic_edges_v WHERE market_id_src != market_id_dst"
+            )
+            or 0
         )
         cross_event_count = int(
             db.scalar(
@@ -612,7 +874,9 @@ def _build_workspace(
             )
             or 0
         )
-        conditional_count = int(db.scalar("SELECT count(*) FROM conditional_edges_v") or 0)
+        conditional_count = int(
+            db.scalar("SELECT count(*) FROM conditional_edges_v") or 0
+        )
         stats: dict[str, object] = {
             "graph_content_fingerprint": graph_content_fingerprint,
             "candidate_edges": candidate_count,
@@ -642,7 +906,10 @@ def _build_workspace(
             },
             "solver": {
                 "components": int(
-                    db.scalar("SELECT count(DISTINCT solver_component_id) FROM logic_edges_v") or 0
+                    db.scalar(
+                        "SELECT count(DISTINCT solver_component_id) FROM logic_edges_v"
+                    )
+                    or 0
                 ),
                 "accepted": edge_count,
                 "rejected": 0,
@@ -670,13 +937,28 @@ def _build_workspace(
         shutil.rmtree(staging / ".duckdb-spill", ignore_errors=True)
 
 
-def _insert_extracted_propositions(db: DuckDB, markets: list[SourceMarket]) -> int:
+def _insert_extracted_propositions(
+    db: DuckDB,
+    markets: Iterable[SourceMarket],
+) -> tuple[int, int, int]:
     batch: list[dict[str, Any]] = []
     count = 0
+    active_market_count = 0
+    closed_market_count = 0
     for market in markets:
+        active_market_count += int(market.is_active)
+        closed_market_count += int(market.is_closed)
         for outcome in market.outcomes:
             extracted = extract_proposition(market, outcome)
-            batch.append(_fast_proposition_row(market, outcome.outcome_index, outcome.outcome, outcome.clob_token_id, extracted))
+            batch.append(
+                _fast_proposition_row(
+                    market,
+                    outcome.outcome_index,
+                    outcome.outcome,
+                    outcome.clob_token_id,
+                    extracted,
+                )
+            )
             count += 1
             if len(batch) >= 16_384:
                 insert_rows(
@@ -695,7 +977,7 @@ def _insert_extracted_propositions(db: DuckDB, markets: list[SourceMarket]) -> i
             batch,
             chunk_size=16_384,
         )
-    return count
+    return count, active_market_count, closed_market_count
 
 
 def _fast_proposition_row(
@@ -968,7 +1250,10 @@ def _create_fast_candidates(db: DuckDB, max_candidates: int) -> None:
         """
     )
     pair_count = int(
-        db.scalar("SELECT count(*) FROM (SELECT DISTINCT a_id,b_id FROM fast_candidate_reason_rows)") or 0
+        db.scalar(
+            "SELECT count(*) FROM (SELECT DISTINCT a_id,b_id FROM fast_candidate_reason_rows)"
+        )
+        or 0
     )
     if pair_count > max_candidates:
         raise RuntimeError(
@@ -1142,8 +1427,12 @@ def _create_fast_candidates(db: DuckDB, max_candidates: int) -> None:
         """
     )
     candidate_projection = _candidate_projection_sql()
-    db.execute(f"CREATE TABLE relation_candidates_work AS SELECT {candidate_projection} FROM fast_relations")
-    db.execute("CREATE VIEW relation_candidates_v AS SELECT * FROM relation_candidates_work")
+    db.execute(
+        f"CREATE TABLE relation_candidates_work AS SELECT {candidate_projection} FROM fast_relations"
+    )
+    db.execute(
+        "CREATE VIEW relation_candidates_v AS SELECT * FROM relation_candidates_work"
+    )
 
 
 def _same_event_sql(left: str, right: str) -> str:
@@ -1251,7 +1540,9 @@ def _create_fast_logic_edges(db: DuckDB) -> None:
     projection = ", ".join(
         f"{columns.get(name, 'NULL::VARCHAR')} AS {name}" for name in LOGIC_EDGE_COLUMNS
     )
-    db.execute(f"CREATE TABLE logic_edges_v AS SELECT {projection} FROM fast_relations ORDER BY 1,2,3")
+    db.execute(
+        f"CREATE TABLE logic_edges_v AS SELECT {projection} FROM fast_relations ORDER BY 1,2,3"
+    )
 
 
 def _validate_deterministic_invariants(db: DuckDB) -> None:
@@ -1342,7 +1633,9 @@ def _validate_deterministic_invariants(db: DuckDB) -> None:
 def _create_empty_diagnostics(db: DuckDB) -> None:
     create_and_fill(db, "rejected_edges_v", REJECTED_EDGE_COLUMNS, [])
     create_and_fill(db, "parse_errors_v", PARSE_ERROR_COLUMNS, [], temporary=True)
-    create_and_fill(db, "model_assessments_v", MODEL_ASSESSMENT_COLUMNS, [], temporary=True)
+    create_and_fill(
+        db, "model_assessments_v", MODEL_ASSESSMENT_COLUMNS, [], temporary=True
+    )
     create_and_fill(db, "quarantined_pairs_v", QUARANTINE_COLUMNS, [])
     db.execute(
         """
@@ -1392,8 +1685,12 @@ def _create_incremental_state(db: DuckDB) -> None:
         FROM propositions_v
         """
     )
-    create_and_fill(db, "proposition_embeddings_v", EMBEDDING_STATE_COLUMNS, [], temporary=True)
-    create_and_fill(db, "semantic_neighbors_v", SEMANTIC_NEIGHBOR_STATE_COLUMNS, [], temporary=True)
+    create_and_fill(
+        db, "proposition_embeddings_v", EMBEDDING_STATE_COLUMNS, [], temporary=True
+    )
+    create_and_fill(
+        db, "semantic_neighbors_v", SEMANTIC_NEIGHBOR_STATE_COLUMNS, [], temporary=True
+    )
     db.execute(
         f"""
         CREATE TEMP TABLE candidate_components_v AS
@@ -1456,35 +1753,136 @@ def _export_artifacts(db: DuckDB, staging: Path) -> None:
     exports: tuple[tuple[str, str, dict[str, str], str], ...] = (
         ("nodes_table", "nodes.parquet", NODE_COLUMNS, "node_id"),
         ("market_groups_v", "market_groups.parquet", MARKET_GROUP_COLUMNS, "market_id"),
-        ("propositions_v", "propositions.parquet", PROPOSITION_COLUMNS, "proposition_id"),
-        ("relation_candidates_v", "relation_candidates.parquet", CANDIDATE_COLUMNS, "proposition_a_id,proposition_b_id"),
-        ("logic_edges_v", "logic_edges.parquet", LOGIC_EDGE_COLUMNS, "src_node_id,dst_node_id,edge_type"),
-        ("parse_assessments_v", "parse_assessments.parquet", PARSE_ASSESSMENT_COLUMNS, "assessment_id"),
-        ("model_assessments_v", "model_assessments.parquet", MODEL_ASSESSMENT_COLUMNS, "assessment_id"),
-        ("quarantined_pairs_v", "quarantined_pairs.parquet", QUARANTINE_COLUMNS, "quarantine_id"),
-        ("rejected_edges_v", "rejected_edges.parquet", REJECTED_EDGE_COLUMNS, "proposal_id"),
+        (
+            "propositions_v",
+            "propositions.parquet",
+            PROPOSITION_COLUMNS,
+            "proposition_id",
+        ),
+        (
+            "relation_candidates_v",
+            "relation_candidates.parquet",
+            CANDIDATE_COLUMNS,
+            "proposition_a_id,proposition_b_id",
+        ),
+        (
+            "logic_edges_v",
+            "logic_edges.parquet",
+            LOGIC_EDGE_COLUMNS,
+            "src_node_id,dst_node_id,edge_type",
+        ),
+        (
+            "parse_assessments_v",
+            "parse_assessments.parquet",
+            PARSE_ASSESSMENT_COLUMNS,
+            "assessment_id",
+        ),
+        (
+            "model_assessments_v",
+            "model_assessments.parquet",
+            MODEL_ASSESSMENT_COLUMNS,
+            "assessment_id",
+        ),
+        (
+            "quarantined_pairs_v",
+            "quarantined_pairs.parquet",
+            QUARANTINE_COLUMNS,
+            "quarantine_id",
+        ),
+        (
+            "rejected_edges_v",
+            "rejected_edges.parquet",
+            REJECTED_EDGE_COLUMNS,
+            "proposal_id",
+        ),
         ("parse_errors_v", "parse_errors.parquet", PARSE_ERROR_COLUMNS, "error_id"),
-        ("event_summary_v", "event_summary.parquet", EVENT_SUMMARY_COLUMNS, "event_key"),
-        ("event_relation_summary_v", "event_relation_summary.parquet", EVENT_RELATION_SUMMARY_COLUMNS, "src_event_key,dst_event_key,edge_type"),
-        ("component_summary_v", "component_summary.parquet", COMPONENT_SUMMARY_COLUMNS, "component_id"),
+        (
+            "event_summary_v",
+            "event_summary.parquet",
+            EVENT_SUMMARY_COLUMNS,
+            "event_key",
+        ),
+        (
+            "event_relation_summary_v",
+            "event_relation_summary.parquet",
+            EVENT_RELATION_SUMMARY_COLUMNS,
+            "src_event_key,dst_event_key,edge_type",
+        ),
+        (
+            "component_summary_v",
+            "component_summary.parquet",
+            COMPONENT_SUMMARY_COLUMNS,
+            "component_id",
+        ),
         ("node_metrics_v", "node_metrics.parquet", NODE_METRIC_COLUMNS, "node_id"),
-        ("visualization_layout_v", "visualization_layout.parquet", VISUALIZATION_LAYOUT_COLUMNS, "layout_level,object_id"),
+        (
+            "visualization_layout_v",
+            "visualization_layout.parquet",
+            VISUALIZATION_LAYOUT_COLUMNS,
+            "layout_level,object_id",
+        ),
     )
     for table, name, columns, order in exports:
         copy_sorted_parquet(db, table, staging / name, list(columns), order)
-    copy_sorted_parquet(db, "qualification_cases_v", staging / "qualification_cases.parquet", list(QUALIFICATION_CASE_COLUMNS), "case_id")
+    copy_sorted_parquet(
+        db,
+        "qualification_cases_v",
+        staging / "qualification_cases.parquet",
+        list(QUALIFICATION_CASE_COLUMNS),
+        "case_id",
+    )
     state_dir = staging / "state"
     state_dir.mkdir(parents=True, exist_ok=True)
     state_exports = (
         ("market_state_v", "market_state.parquet", MARKET_STATE_COLUMNS, "market_id"),
-        ("proposition_fingerprints_v", "proposition_fingerprints.parquet", PROPOSITION_FINGERPRINT_COLUMNS, "proposition_id"),
-        ("proposition_embeddings_v", "proposition_embeddings.parquet", EMBEDDING_STATE_COLUMNS, "proposition_id"),
-        ("semantic_neighbors_v", "semantic_neighbors.parquet", SEMANTIC_NEIGHBOR_STATE_COLUMNS, "proposition_id,neighbor_rank"),
-        ("candidate_components_v", "candidate_components.parquet", CANDIDATE_COMPONENT_STATE_COLUMNS, "component_id"),
-        ("candidate_blocks_v", "candidate_blocks.parquet", CANDIDATE_BLOCK_COLUMNS, "block_id"),
-        ("candidate_reason_rows_v", "candidate_reason_rows.parquet", CANDIDATE_REASON_COLUMNS, "block_id,proposition_a_id,proposition_b_id"),
-        ("solver_components_v", "solver_components.parquet", SOLVER_COMPONENT_STATE_COLUMNS, "solver_component_id"),
-        ("execution_plan_v", "execution_plan.parquet", EXECUTION_PLAN_COLUMNS, "stage,unit_type,unit_id"),
+        (
+            "proposition_fingerprints_v",
+            "proposition_fingerprints.parquet",
+            PROPOSITION_FINGERPRINT_COLUMNS,
+            "proposition_id",
+        ),
+        (
+            "proposition_embeddings_v",
+            "proposition_embeddings.parquet",
+            EMBEDDING_STATE_COLUMNS,
+            "proposition_id",
+        ),
+        (
+            "semantic_neighbors_v",
+            "semantic_neighbors.parquet",
+            SEMANTIC_NEIGHBOR_STATE_COLUMNS,
+            "proposition_id,neighbor_rank",
+        ),
+        (
+            "candidate_components_v",
+            "candidate_components.parquet",
+            CANDIDATE_COMPONENT_STATE_COLUMNS,
+            "component_id",
+        ),
+        (
+            "candidate_blocks_v",
+            "candidate_blocks.parquet",
+            CANDIDATE_BLOCK_COLUMNS,
+            "block_id",
+        ),
+        (
+            "candidate_reason_rows_v",
+            "candidate_reason_rows.parquet",
+            CANDIDATE_REASON_COLUMNS,
+            "block_id,proposition_a_id,proposition_b_id",
+        ),
+        (
+            "solver_components_v",
+            "solver_components.parquet",
+            SOLVER_COMPONENT_STATE_COLUMNS,
+            "solver_component_id",
+        ),
+        (
+            "execution_plan_v",
+            "execution_plan.parquet",
+            EXECUTION_PLAN_COLUMNS,
+            "stage,unit_type,unit_id",
+        ),
     )
     for table, name, columns, order in state_exports:
         copy_sorted_parquet(db, table, state_dir / name, list(columns), order)
@@ -1495,25 +1893,30 @@ def _write_viewer_manifest(
     staging: Path,
     coverage: dict[str, object],
     *,
-    input_path: Path,
+    input_hash: str,
     source_schema: str,
     selection: dict[str, object],
+    finalized_hashes: FinalizedFileHashRegistry,
 ) -> str:
     content_names = (
-        "nodes.parquet", "propositions.parquet", "relation_candidates.parquet",
-        "logic_edges.parquet", "event_summary.parquet", "component_summary.parquet",
-        "node_metrics.parquet", "visualization_layout.parquet",
+        "nodes.parquet",
+        "propositions.parquet",
+        "relation_candidates.parquet",
+        "logic_edges.parquet",
+        "event_summary.parquet",
+        "component_summary.parquet",
+        "node_metrics.parquet",
+        "visualization_layout.parquet",
     )
     graph_content_fingerprint = canonical_json_sha256(
         {
             "coverage": coverage,
-            "artifacts": {
-                name: sha256_file(staging / name) for name in content_names
-            },
+            "artifacts": finalized_hashes.hashes(list(content_names)),
         }
     )
-    atomic_write_json(
-        staging / "viewer_manifest.json",
+    source_watermark = db.scalar("SELECT max(last_seen_ts) FROM nodes_table")
+    write_viewer_manifest(
+        staging,
         {
             "schema_version": VIEWER_ARTIFACT_VERSION,
             "api_version": VIEWER_API_VERSION,
@@ -1522,7 +1925,7 @@ def _write_viewer_manifest(
             "validation_status": "DETERMINISTIC_VALIDATED",
             "input_profile": source_schema,
             "input": {
-                "sha256": sha256_file(input_path),
+                "sha256": input_hash,
                 "normalized_semantic_fingerprint": selection.get(
                     "normalized_semantic_fingerprint"
                 ),
@@ -1537,7 +1940,7 @@ def _write_viewer_manifest(
             "source_tree_fingerprint": source_tree_fingerprint(),
             "discovery_semantics_fingerprint": discovery_semantics_fingerprint(),
             "evidence_tiers": ["source_contract", "deterministic_rule"],
-            "source_watermark": db.scalar("SELECT max(last_seen_ts) FROM nodes_table"),
+            "source_watermark": json_text(source_watermark),
             "graph_content_fingerprint": graph_content_fingerprint,
             "response_limits": {"nodes": 5_000, "edges": 10_000},
         },

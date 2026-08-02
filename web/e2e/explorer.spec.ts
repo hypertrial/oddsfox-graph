@@ -266,7 +266,7 @@ test.beforeEach(async ({ page }) => {
     let body: unknown;
     if (url.pathname.endsWith("/meta")) {
       body = {
-        package_version: "0.12.0",
+        package_version: "0.13.0",
         viewer: { build_mode: "fast", validation_status: "DETERMINISTIC_VALIDATED", graph_content_fingerprint: "fixture" },
         coverage: { classification_status: "not_applicable", classification_coverage: null },
         build: { build_mode: "fast", validation_status: "DETERMINISTIC_VALIDATED" },
@@ -557,7 +557,7 @@ test("hides live-only tools when metadata declares a static snapshot", async ({ 
     status: 200,
     contentType: "application/json",
     body: JSON.stringify({
-      package_version: "0.12.0",
+      package_version: "0.13.0",
       viewer: { static: true, build_mode: "fast", validation_status: "DETERMINISTIC_VALIDATED", graph_content_fingerprint: "fixture" },
       coverage: { classification_status: "not_applicable", classification_coverage: null },
       build: { static: true, build_mode: "fast", validation_status: "DETERMINISTIC_VALIDATED" },

@@ -3,13 +3,19 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from oddsfox_graph._discovery.bulk import create_and_fill
 from oddsfox_graph._discovery.workspace import (
     CANDIDATE_COLUMNS,
     EMBEDDING_STATE_COLUMNS,
     CandidateStore,
 )
-from oddsfox_graph._discovery.publication import publish_directory_atomically
+from oddsfox_graph._discovery.publication import (
+    FinalizedFileHashRegistry,
+    publish_directory_atomically,
+)
+from oddsfox_graph.queries import DuckDB
 
 
 def _candidate(
@@ -47,6 +53,51 @@ def _component_rows(
         return store.component_rows(["a", "b", "c"], "candidate-state-v5")
     finally:
         store.close()
+
+
+def test_bulk_insert_accepts_single_pass_iterables() -> None:
+    db = DuckDB()
+    try:
+        create_and_fill(
+            db,
+            "streamed_rows",
+            {"row_id": "INTEGER", "value": "VARCHAR"},
+            ({"row_id": index, "value": str(index)} for index in range(1_025)),
+            chunk_size=256,
+        )
+
+        assert db.scalar("SELECT count(*) FROM streamed_rows") == 1_025
+    finally:
+        db.close()
+
+
+def test_finalized_file_hash_registry_reuses_and_invalidates_hashes(
+    tmp_path: Path,
+) -> None:
+    staging = tmp_path / "staging"
+    published = tmp_path / "published"
+    staging.mkdir()
+    (staging / "artifact").write_bytes(b"first")
+    registry = FinalizedFileHashRegistry(staging)
+
+    first = registry.hash("artifact")
+    assert registry.hash("artifact") == first
+    assert registry.instrumentation() == {
+        "files_read": 1,
+        "bytes_read": 5,
+        "cache_hits": 1,
+        "files_verified": 0,
+        "bytes_verified": 0,
+    }
+
+    staging.rename(published)
+    registry.rebase(published)
+    assert registry.hash("artifact") == first
+    (published / "artifact").write_bytes(b"second")
+    registry.invalidate("artifact")
+    assert registry.hash("artifact") != first
+    with pytest.raises(ValueError, match="relative"):
+        registry.hash("../escape")
 
 
 def test_component_fingerprints_are_stable_across_databases_and_row_order() -> None:
@@ -87,9 +138,7 @@ def test_component_fingerprint_tracks_pair_membership() -> None:
 
 
 def test_component_fingerprint_ignores_scheduling_reason_changes() -> None:
-    before = _component_rows(
-        [_candidate("a", "b", ["embedding:1"], 0.875, 1)]
-    )
+    before = _component_rows([_candidate("a", "b", ["embedding:1"], 0.875, 1)])
     after = _component_rows(
         [
             _candidate(
@@ -241,6 +290,59 @@ def test_atomic_publication_restores_previous_output_on_swap_failure(
         assert "simulated directory swap failure" in str(exc)
     else:
         raise AssertionError("publication unexpectedly succeeded")
+    assert (out / "old").read_text(encoding="utf-8") == "old"
+    assert (staging / "new").read_text(encoding="utf-8") == "new"
+
+
+def test_atomic_publication_restores_previous_output_on_keyboard_interrupt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    staging = tmp_path / "staging"
+    out = tmp_path / "out"
+    staging.mkdir()
+    out.mkdir()
+    (staging / "new").write_text("new", encoding="utf-8")
+    (out / "old").write_text("old", encoding="utf-8")
+
+    import oddsfox_graph._discovery.publication as publication
+
+    replace = publication.os.replace
+    calls = 0
+
+    def interrupt_new_swap(source: Any, destination: Any) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise KeyboardInterrupt
+        replace(source, destination)
+
+    monkeypatch.setattr(publication.os, "replace", interrupt_new_swap)
+
+    with pytest.raises(KeyboardInterrupt):
+        publish_directory_atomically(staging, out)
+
+    assert (out / "old").read_text(encoding="utf-8") == "old"
+    assert (staging / "new").read_text(encoding="utf-8") == "new"
+
+
+def test_atomic_publication_requires_completion_marker_before_swap(
+    tmp_path: Path,
+) -> None:
+    staging = tmp_path / "staging"
+    out = tmp_path / "out"
+    staging.mkdir()
+    out.mkdir()
+    (staging / "new").write_text("new", encoding="utf-8")
+    (out / "old").write_text("old", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="staging is incomplete"):
+        publish_directory_atomically(
+            staging,
+            out,
+            completion_marker="build_manifest.json",
+        )
+
     assert (out / "old").read_text(encoding="utf-8") == "old"
     assert (staging / "new").read_text(encoding="utf-8") == "new"
 

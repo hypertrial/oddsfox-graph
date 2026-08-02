@@ -62,7 +62,10 @@ Parquet state under `state/`, and reports `summary.md`,
 `coverage.md`, and `conditional_examples.md`. Full outputs add exact primary and
 verifier manifests, automation/qualification files, and a compute profile.
 
-`build_manifest.json` is the completion marker and is written last. It binds the
+`build_manifest.json` is the completion marker and is written last. Version
+0.13 uses the strict `graph-build-manifest-v1` contract for both fast and full
+outputs; both modes use the same nested input, scope, version, inventory, and
+hash fields. It binds the
 input, mode, validation status, public/state hashes, versions, evidence, rules,
 solver, deadline, cutoff, resource use, cache, and incremental execution plan.
 WC2026 manifests additionally bind the pipeline input profile, raw source hash,
@@ -70,7 +73,7 @@ normalized semantic fingerprint, source/universe/selection identifiers, hourly
 rows, markets, tokens, teams, stages, and observation range. The semantic
 fingerprint is the compatibility gate; the complete source-tree fingerprint is
 audit provenance.
-Fast manifests also bind every published database, snapshot, report, public
+Both modes also bind every published database, snapshot, report, public
 artifact, and state file in `published_file_hashes`; incremental reuse rejects
 missing files or any content-hash mismatch before copying the baseline.
 

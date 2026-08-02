@@ -3,11 +3,14 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
+import sys
 from pathlib import Path
+from types import SimpleNamespace
 import numpy as np
 import pytest
 
 from oddsfox_graph._discovery import pipeline as pipeline_module
+from oddsfox_graph._discovery import input as input_module
 from oddsfox_graph._discovery.contracts import (
     AtomicPairAssessment,
     DiscoveryConfig,
@@ -15,6 +18,13 @@ from oddsfox_graph._discovery.contracts import (
     ParsedOutcome,
 )
 from oddsfox_graph._discovery.input import load_source_markets
+from oddsfox_graph._discovery.manifest_contracts import (
+    CoverageSummary,
+    load_build_manifest,
+    load_viewer_manifest,
+    validate_manifest_pair,
+)
+from oddsfox_graph._discovery.provenance import sha256_file
 from oddsfox_graph._discovery.versions import SOURCE_SCHEMA
 from oddsfox_graph.discovery import DISCOVERY_PARQUET_ARTIFACTS, discover
 from oddsfox_graph.graph import Graph
@@ -149,9 +159,7 @@ class _AuthoritativeConflictClient(_FakeClient):
         first = parsed.propositions[0]
         replacement = first.model_copy(
             update={
-                "polarity": (
-                    "negative" if first.polarity == "positive" else "positive"
-                )
+                "polarity": ("negative" if first.polarity == "positive" else "positive")
             }
         )
         return _Response(
@@ -174,7 +182,10 @@ def _embeddings(texts: list[str], _: DiscoveryConfig) -> np.ndarray:
     for text in texts:
         digest = hashlib.sha256(text.encode()).digest()
         vector = np.asarray(
-            [int.from_bytes(digest[index : index + 4], "big") for index in (0, 4, 8, 12)],
+            [
+                int.from_bytes(digest[index : index + 4], "big")
+                for index in (0, 4, 8, 12)
+            ],
             dtype=np.float32,
         )
         vector /= np.linalg.norm(vector)
@@ -204,24 +215,35 @@ def test_canonical_catalog_binding() -> None:
     assert hashlib.sha256(REAL_INPUT.read_bytes()).hexdigest() == REAL_INPUT_SHA256
     db = DuckDB()
     try:
-        assert db.scalar(f"SELECT count(*) FROM read_parquet('{q(REAL_INPUT)}')") == 94_781
-        assert db.scalar(
-            f"SELECT sum(len(clob_token_ids)) FROM read_parquet('{q(REAL_INPUT)}')"
-        ) == 189_570
-        assert db.scalar(
-            f"SELECT sum(len(outcomes)) FROM read_parquet('{q(REAL_INPUT)}')"
-        ) == 189_578
-        assert db.scalar(
-            f"SELECT count(*) FROM read_parquet('{q(REAL_INPUT)}') "
-            "WHERE market_id IS NULL OR question IS NULL OR outcomes IS NULL "
-            "OR clob_token_ids IS NULL OR len(outcomes) = 0 "
-            "OR len(outcomes) != len(clob_token_ids)"
-        ) == 4
+        assert (
+            db.scalar(f"SELECT count(*) FROM read_parquet('{q(REAL_INPUT)}')") == 94_781
+        )
+        assert (
+            db.scalar(
+                f"SELECT sum(len(clob_token_ids)) FROM read_parquet('{q(REAL_INPUT)}')"
+            )
+            == 189_570
+        )
+        assert (
+            db.scalar(f"SELECT sum(len(outcomes)) FROM read_parquet('{q(REAL_INPUT)}')")
+            == 189_578
+        )
+        assert (
+            db.scalar(
+                f"SELECT count(*) FROM read_parquet('{q(REAL_INPUT)}') "
+                "WHERE market_id IS NULL OR question IS NULL OR outcomes IS NULL "
+                "OR clob_token_ids IS NULL OR len(outcomes) = 0 "
+                "OR len(outcomes) != len(clob_token_ids)"
+            )
+            == 4
+        )
     finally:
         db.close()
 
 
-def test_compact_loader_is_deterministic_and_rejects_old_exports(tmp_path: Path) -> None:
+def test_compact_loader_is_deterministic_and_rejects_old_exports(
+    tmp_path: Path,
+) -> None:
     catalog = tmp_path / "catalog.parquet"
     _write_catalog(catalog)
     schema, rows, markets, selection = load_source_markets(catalog, max_propositions=5)
@@ -239,11 +261,84 @@ def test_compact_loader_is_deterministic_and_rejects_old_exports(tmp_path: Path)
     old = tmp_path / "old.parquet"
     db = DuckDB()
     try:
-        db.execute(f"COPY (SELECT 'm' market_id, 'q' question, 'Yes' outcome_label, 't' clob_token_id) TO '{q(old)}' (FORMAT PARQUET)")
+        db.execute(
+            f"COPY (SELECT 'm' market_id, 'q' question, 'Yes' outcome_label, 't' clob_token_id) TO '{q(old)}' (FORMAT PARQUET)"
+        )
     finally:
         db.close()
     with pytest.raises(ValueError, match=SOURCE_SCHEMA):
         load_source_markets(old)
+
+
+def test_compact_loader_streams_unbounded_selection_without_id_filter(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    catalog = tmp_path / "catalog.parquet"
+    _write_catalog(catalog)
+    observed_params: list[object] = []
+    original = input_module.DuckDB.iter_rows
+
+    def iter_rows(
+        self: DuckDB,
+        sql: str,
+        params: object = None,
+        *,
+        batch_size: int = 1_024,
+    ) -> object:
+        observed_params.append(params)
+        return original(self, sql, params, batch_size=batch_size)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(input_module.DuckDB, "iter_rows", iter_rows)
+
+    _, _, markets, selection = load_source_markets(catalog)
+
+    assert [market.market_id for market in markets] == ["m1", "m2", "m3"]
+    assert selection["truncated"] is False
+    assert observed_params == [None]
+
+
+def test_run_scoped_embedding_encoder_constructs_model_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    constructor_calls: list[tuple[str, str, bool]] = []
+    encode_calls: list[list[str]] = []
+
+    class FakeSentenceTransformer:
+        def __init__(
+            self,
+            model: str,
+            *,
+            revision: str,
+            local_files_only: bool,
+        ) -> None:
+            constructor_calls.append((model, revision, local_files_only))
+
+        def encode(self, texts: list[str], **_: object) -> np.ndarray:
+            encode_calls.append(texts)
+            return np.ones((len(texts), 2), dtype=np.float32)
+
+    monkeypatch.setitem(
+        sys.modules,
+        "sentence_transformers",
+        SimpleNamespace(SentenceTransformer=FakeSentenceTransformer),
+    )
+    config = DiscoveryConfig()
+    encoder = pipeline_module._RunScopedEmbeddingEncoder()
+
+    assert encoder.instrumentation()["model_initializations"] == 0
+    encoder(["first"], config)
+    encoder(["second", "third"], config)
+
+    assert constructor_calls == [
+        (config.embedding_model, config.embedding_revision, True)
+    ]
+    assert encode_calls == [["first"], ["second", "third"]]
+    assert encoder.instrumentation() == {
+        "model_initializations": 1,
+        "encode_calls": 2,
+        "texts_encoded": 3,
+    }
 
 
 def test_any_model_authoritative_conflict_quarantines_only_affected_outcome(
@@ -286,6 +381,46 @@ def test_any_model_authoritative_conflict_quarantines_only_affected_outcome(
     assert assessments[0]["authoritative_conflicts"]
     assert assessments[1]["status"] == "valid"
     assert assessments[1]["authoritative_conflicts"] == []
+
+
+def test_full_publication_is_strict_and_hash_complete(tmp_path: Path) -> None:
+    catalog = tmp_path / "catalog.parquet"
+    out = tmp_path / "out"
+    _write_catalog(catalog)
+    config = DiscoveryConfig(
+        cache_dir=tmp_path / "cache",
+        max_propositions=2,
+        max_candidates=100,
+        max_llm_pairs=2,
+        top_k=1,
+        progress_format="quiet",
+    )
+
+    stats = discover(
+        catalog,
+        out,
+        config=config,
+        _primary_client=_FakeClient(config.primary_model),
+        _verifier_client=_FakeClient(config.verifier_model),
+        _embedder=_embeddings,
+    )
+    build = load_build_manifest(out / "build_manifest.json")
+    viewer = load_viewer_manifest(out / "viewer_manifest.json")
+    coverage = CoverageSummary.model_validate_json(
+        (out / "coverage_summary.json").read_bytes()
+    )
+
+    validate_manifest_pair(build, viewer)
+    assert build.schema_version == "graph-build-manifest-v1"
+    assert build.build_mode == "full"
+    assert build.input.path == str(catalog.resolve())
+    assert set(build.published_file_hashes) == set(build.artifacts)
+    assert all(
+        sha256_file(out / name) == digest
+        for name, digest in build.published_file_hashes.items()
+    )
+    assert coverage.input_selection == build.input.selection
+    assert stats["hash_io"]["files_read"] == len(build.artifacts)
 
 
 def test_parse_quarantine_blocks_model_and_parse_derived_relations(
@@ -386,9 +521,7 @@ def test_full_deadline_includes_manifest_publication(
     catalog = tmp_path / "catalog.parquet"
     _write_catalog(catalog)
     manifest_written = False
-    original_write_manifest = (
-        pipeline_module.discovery_publication.write_manifest_last
-    )
+    original_write_manifest = pipeline_module.discovery_publication.write_manifest_last
 
     def write_manifest(*args: object, **kwargs: object) -> None:
         nonlocal manifest_written
@@ -423,9 +556,7 @@ def test_full_deadline_includes_manifest_publication(
         _verifier_client=_FakeClient(config.verifier_model),
         _embedder=_embeddings,
     )
-    manifest = json.loads(
-        (out / "build_manifest.json").read_text(encoding="utf-8")
-    )
+    manifest = json.loads((out / "build_manifest.json").read_text(encoding="utf-8"))
     assert stats["deadline"]["met"] is False
     assert manifest["deadline"]["met"] is False
     assert manifest["deadline"]["elapsed_seconds"] == 361.0
@@ -492,7 +623,9 @@ def test_classification_coverage_gate_blocks_incomplete_publication(
 
 
 @requires_real_catalog
-def test_dual_model_online_offline_incremental_and_graph_queries(tmp_path: Path) -> None:
+def test_dual_model_online_offline_incremental_and_graph_queries(
+    tmp_path: Path,
+) -> None:
     out = tmp_path / "out"
     cache = tmp_path / "cache"
     config = DiscoveryConfig(
@@ -515,13 +648,15 @@ def test_dual_model_online_offline_incremental_and_graph_queries(tmp_path: Path)
     )
     manifest = json.loads((out / "build_manifest.json").read_text(encoding="utf-8"))
     first_hashes = manifest["artifact_hashes"]
-    assert manifest["version"] == "0.12.0"
+    assert manifest["version"] == "0.13.0"
     assert manifest["build_mode"] == "full"
     assert manifest["validation_status"] == "EXPERIMENTAL_FULL"
     assert manifest["stats"]["qualification_status"] == "AUTOMATION_VALIDATED"
     assert manifest["inference"]["primary"]["manifest_id"]
     assert manifest["inference"]["verifier"]["manifest_id"]
-    assert set(DISCOVERY_PARQUET_ARTIFACTS) <= {path.name for path in out.glob("*.parquet")}
+    assert set(DISCOVERY_PARQUET_ARTIFACTS) <= {
+        path.name for path in out.glob("*.parquet")
+    }
     assert (out / "coverage_summary.json").is_file()
     assert (out / "viewer_manifest.json").is_file()
     assert not (out / "review_queue.parquet").exists()
@@ -529,17 +664,23 @@ def test_dual_model_online_offline_incremental_and_graph_queries(tmp_path: Path)
     assert first["tokens"] == 6
     db = DuckDB(out / "oddsfox_graph.duckdb", read_only=True)
     try:
-        assert db.scalar(
-            "SELECT count(*) FROM relation_candidates_v "
-            "WHERE deterministic_relation IS NOT NULL AND ("
-            "evidence_tier IS NULL OR extractor_id IS NULL "
-            "OR source_spans_json IS NULL OR proof_scope_key IS NULL)"
-        ) == 0
-        assert db.scalar(
-            "SELECT count(*) FROM logic_edges_v "
-            "WHERE rule_id LIKE 'same_market.%' "
-            "AND evidence_tier != 'source_contract'"
-        ) == 0
+        assert (
+            db.scalar(
+                "SELECT count(*) FROM relation_candidates_v "
+                "WHERE deterministic_relation IS NOT NULL AND ("
+                "evidence_tier IS NULL OR extractor_id IS NULL "
+                "OR source_spans_json IS NULL OR proof_scope_key IS NULL)"
+            )
+            == 0
+        )
+        assert (
+            db.scalar(
+                "SELECT count(*) FROM logic_edges_v "
+                "WHERE rule_id LIKE 'same_market.%' "
+                "AND evidence_tier != 'source_contract'"
+            )
+            == 0
+        )
     finally:
         db.close()
 
@@ -549,7 +690,9 @@ def test_dual_model_online_offline_incremental_and_graph_queries(tmp_path: Path)
         config=DiscoveryConfig(**{**config.__dict__, "offline": True}),
         _embedder=_embeddings,
     )
-    replay_manifest = json.loads((out / "build_manifest.json").read_text(encoding="utf-8"))
+    replay_manifest = json.loads(
+        (out / "build_manifest.json").read_text(encoding="utf-8")
+    )
     assert replay_manifest["artifact_hashes"] == first_hashes
     assert offline["incremental"]["offline_state_replay"] is True
 
@@ -579,7 +722,7 @@ def test_dual_model_online_offline_incremental_and_graph_queries(tmp_path: Path)
     assert graph.edges("complement")
     methods = {edge.discovery_method for edge in graph.edges(top=100)}
     assert methods <= {"deterministic", "generative_consensus"}
-    assert graph.metadata().package_version == "0.12.0"
+    assert graph.metadata().package_version == "0.13.0"
     assert graph.events(limit=10).rows
     assert graph.components(limit=10).rows
     assert graph.overview("event").nodes
@@ -591,7 +734,13 @@ def test_incompatible_v08_incremental_baseline_is_rejected(tmp_path: Path) -> No
     baseline = tmp_path / "baseline"
     baseline.mkdir()
     (baseline / "build_manifest.json").write_text(
-        json.dumps({"command": "discover", "version": "0.8.0", "versions": {"candidate_state": "candidate-components-v5"}}),
+        json.dumps(
+            {
+                "command": "discover",
+                "version": "0.8.0",
+                "versions": {"candidate_state": "candidate-components-v5"},
+            }
+        ),
         encoding="utf-8",
     )
     with pytest.raises(ValueError, match="incompatible"):
@@ -627,7 +776,10 @@ def test_incremental_baseline_hash_mismatch_is_rejected(tmp_path: Path) -> None:
     )
 
     for index, relative_path in enumerate(
-        (Path("state/proposition_embeddings.parquet"), Path("relation_candidates.parquet"))
+        (
+            Path("state/proposition_embeddings.parquet"),
+            Path("relation_candidates.parquet"),
+        )
     ):
         tampered = tmp_path / f"tampered-{index}"
         shutil.copytree(baseline, tampered)
@@ -646,3 +798,54 @@ def test_incremental_baseline_hash_mismatch_is_rejected(tmp_path: Path) -> None:
                 _verifier_client=_FakeClient(config.verifier_model),
                 _embedder=_embeddings,
             )
+
+
+@pytest.mark.parametrize(
+    "contract_drift",
+    ("discovery_semantics_fingerprint", "extractor_version"),
+)
+def test_full_incremental_rejects_stale_semantic_contracts(
+    tmp_path: Path,
+    contract_drift: str,
+) -> None:
+    catalog = tmp_path / "catalog.parquet"
+    _write_catalog(catalog)
+    baseline = tmp_path / "baseline"
+    config = DiscoveryConfig(
+        cache_dir=tmp_path / "cache",
+        max_propositions=4,
+        max_candidates=100,
+        max_llm_pairs=10,
+        top_k=2,
+        progress_format="quiet",
+    )
+    discover(
+        catalog,
+        baseline,
+        config=config,
+        _primary_client=_FakeClient(config.primary_model),
+        _verifier_client=_FakeClient(config.verifier_model),
+        _embedder=_embeddings,
+    )
+    manifest_path = baseline / "build_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if contract_drift == "discovery_semantics_fingerprint":
+        manifest["discovery_semantics_fingerprint"] = "0" * 64
+    else:
+        manifest["versions"]["extractor"] = "stale-extractor"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="incompatible"):
+        discover(
+            catalog,
+            tmp_path / "incremental",
+            config=DiscoveryConfig(
+                **{
+                    **config.__dict__,
+                    "incremental_from": baseline,
+                }
+            ),
+            _primary_client=_FakeClient(config.primary_model),
+            _verifier_client=_FakeClient(config.verifier_model),
+            _embedder=_embeddings,
+        )

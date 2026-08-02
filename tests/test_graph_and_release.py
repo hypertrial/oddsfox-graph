@@ -2,26 +2,41 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 
 from oddsfox_graph import __version__
+from oddsfox_graph import explorer as explorer_module
 from oddsfox_graph._discovery.contracts import (
     DEFAULT_PRIMARY_MODEL,
     DEFAULT_VERIFIER_MODEL,
 )
 from oddsfox_graph._discovery.provenance import canonical_json_sha256, sha256_file
+from oddsfox_graph._discovery.performance_contracts import (
+    PerformanceBudget,
+    current_performance_versions,
+)
+from oddsfox_graph._discovery.manifest_contracts import (
+    WC2026InputSelection,
+    current_version_bindings,
+)
+from oddsfox_graph._discovery.publication import (
+    write_coverage_summary,
+    write_manifest_last,
+    write_viewer_manifest,
+)
 from oddsfox_graph._discovery import versions as discovery_versions
 from oddsfox_graph._discovery.versions import (
-    EXTRACTOR_VERSION,
-    PUBLICATION_VERSION,
+    FAST_READY_BENCHMARK_VERSION,
     RELEASE_FIXTURE_SCHEMA_VERSION,
-    RULE_VERSION,
     VIEWER_API_VERSION,
     VIEWER_ARTIFACT_VERSION,
+    SOURCE_SCHEMA,
     WC2026_SOURCE_SCHEMA,
     discovery_semantics_fingerprint,
+    source_tree_fingerprint,
 )
 from oddsfox_graph._explorer.human import (
     _classification_coverage,
@@ -40,6 +55,7 @@ from oddsfox_graph import release_validation
 from oddsfox_graph import operability
 from oddsfox_graph.operability import doctor
 from oddsfox_graph.release_validation import validate_release_fixture
+from scripts import assemble_release_fixture as release_fixture_assembly
 
 
 def test_graph_proofs_use_only_implication_and_equivalence(tmp_path: Path) -> None:
@@ -210,7 +226,7 @@ def test_explorer_api_is_loopback_bounded_and_cacheable(tmp_path: Path) -> None:
 
     manifest_path = out / "build_manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    manifest["review_marker"] = "changed"
+    manifest["stats"]["review_marker"] = "changed"
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
     changed_client = TestClient(
         create_explorer_app(out, max_response_nodes=4, max_response_edges=5)
@@ -221,13 +237,15 @@ def test_explorer_api_is_loopback_bounded_and_cacheable(tmp_path: Path) -> None:
 def test_recording_plan_is_deterministic_auditable_and_bounded(
     tmp_path: Path,
 ) -> None:
-    graph = Graph.open(_write_graph(tmp_path))
+    out = _write_graph(tmp_path)
+    graph = Graph.open(out)
     first = graph.recording_plan(limit=6, min_confidence=0.95)
     second = graph.recording_plan(limit=6, min_confidence=0.95)
     assert first == second
     assert first.schema_version == "oddsfox-recording-plan-v2"
     assert first.ranking_version == "human-wc2026-story-edge-v2"
-    assert first.graph_fingerprint == "fixture"
+    manifest = json.loads((out / "build_manifest.json").read_text(encoding="utf-8"))
+    assert first.graph_fingerprint == manifest["graph_content_fingerprint"]
     assert first.mode == "full"
     assert first.requested_limit == 6
     assert first.eligible_edge_count == 2
@@ -418,9 +436,20 @@ def test_graph_open_rejects_stale_semantics_fingerprint(tmp_path: Path) -> None:
     out = _write_graph(tmp_path)
     manifest_path = out / "build_manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    manifest["discovery_semantics_fingerprint"] = "stale"
+    manifest["discovery_semantics_fingerprint"] = "0" * 64
     manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
     with pytest.raises(ValueError, match="semantics fingerprint"):
+        Graph.open(out)
+
+
+def test_graph_open_rejects_tampered_coverage_summary(tmp_path: Path) -> None:
+    out = _write_graph(tmp_path)
+    coverage_path = out / "coverage_summary.json"
+    coverage = json.loads(coverage_path.read_text(encoding="utf-8"))
+    coverage["markets"] = 999
+    coverage_path.write_text(json.dumps(coverage), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="coverage summary hash"):
         Graph.open(out)
 
 
@@ -453,12 +482,51 @@ def test_recording_rejects_non_wc2026_graph_before_runtime_preflight(
     out = _write_graph(tmp_path)
     build_path = out / "build_manifest.json"
     viewer_path = out / "viewer_manifest.json"
+    coverage_path = out / "coverage_summary.json"
     build = json.loads(build_path.read_text(encoding="utf-8"))
     viewer = json.loads(viewer_path.read_text(encoding="utf-8"))
-    build["input_schema"] = "canonical-propositions-v1"
-    viewer["input_profile"] = "canonical-propositions-v1"
-    build_path.write_text(json.dumps(build), encoding="utf-8")
-    viewer_path.write_text(json.dumps(viewer), encoding="utf-8")
+    coverage = json.loads(coverage_path.read_text(encoding="utf-8"))
+    catalog_selection = {
+        "strategy": "all_eligible_markets",
+        "input_market_rows": 4,
+        "input_rows": 4,
+        "input_propositions": 4,
+        "invalid_market_rows": 0,
+        "eligible_markets": 4,
+        "eligible_propositions": 4,
+        "selected_markets": 4,
+        "selected_propositions": 4,
+        "truncated": False,
+    }
+    catalog_scope = {
+        "source": "input-parquet",
+        "scope": "catalog",
+        "universe": "all-markets",
+        "selection": "all_eligible_markets",
+        "truncated": False,
+    }
+    build["input"] = {
+        "path": build["input"]["path"],
+        "sha256": build["input"]["sha256"],
+        "schema": SOURCE_SCHEMA,
+        "profile": SOURCE_SCHEMA,
+        "normalized_semantic_fingerprint": None,
+        "selection": catalog_selection,
+    }
+    build["scope"] = catalog_scope
+    viewer["input_profile"] = SOURCE_SCHEMA
+    viewer["input"]["normalized_semantic_fingerprint"] = None
+    viewer["scope"] = catalog_scope
+    coverage["input_selection"] = catalog_selection
+    coverage_path.write_text(json.dumps(coverage), encoding="utf-8")
+    write_viewer_manifest(out, viewer)
+    viewer_hash = sha256_file(viewer_path)
+    coverage_hash = sha256_file(coverage_path)
+    build["artifact_hashes"]["viewer_manifest.json"] = viewer_hash
+    build["published_file_hashes"]["viewer_manifest.json"] = viewer_hash
+    build["artifact_hashes"]["coverage_summary.json"] = coverage_hash
+    build["published_file_hashes"]["coverage_summary.json"] = coverage_hash
+    write_manifest_last(out, build)
 
     graph = Graph.open(out)
     with pytest.raises(ValueError, match="polymarket-wc2026-graph-hourly-v1"):
@@ -535,8 +603,11 @@ def test_neighborhood_enforces_seed_ceiling_without_false_truncation(
         )
 
 
-def test_static_explorer_export_contains_bounded_parquet_snapshot(tmp_path: Path) -> None:
+def test_static_explorer_export_contains_bounded_json_snapshot(tmp_path: Path) -> None:
     out = _write_graph(tmp_path / "source")
+    source_manifest = json.loads(
+        (out / "build_manifest.json").read_text(encoding="utf-8")
+    )
     destination = tmp_path / "export"
     manifest = export_explorer(
         out,
@@ -546,22 +617,28 @@ def test_static_explorer_export_contains_bounded_parquet_snapshot(tmp_path: Path
         max_nodes=4,
         max_edges=5,
     )
-    assert manifest["data_format"] == "duckdb-wasm-parquet"
-    assert manifest["schema_version"] == "static-explorer-v4"
-    assert manifest["graph_content_fingerprint"] == "fixture"
+    assert manifest["data_format"] == "canonical-json-v1"
+    assert manifest["schema_version"] == "static-explorer-v5"
+    assert (
+        manifest["graph_content_fingerprint"]
+        == source_manifest["graph_content_fingerprint"]
+    )
     assert manifest["build_mode"] == "full"
     assert manifest["validation_status"] == "EXPERIMENTAL_FULL"
     assert manifest["input_profile"] == WC2026_SOURCE_SCHEMA
-    assert manifest["source_file_sha256"] == "fixture-source"
+    assert manifest["source_file_sha256"] == source_manifest["input"]["sha256"]
     assert (
         manifest["normalized_semantic_fingerprint"]
-        == "fixture-input-semantics"
+        == source_manifest["input"]["normalized_semantic_fingerprint"]
     )
     assert (
         manifest["discovery_semantics_fingerprint"]
         == discovery_semantics_fingerprint()
     )
-    assert manifest["source_tree_fingerprint"] == "fixture-source-tree"
+    assert (
+        manifest["source_tree_fingerprint"]
+        == source_manifest["source_tree_fingerprint"]
+    )
     assert manifest["display_stats"] == {
         "input_node_count": 4,
         "input_edge_count": 5,
@@ -573,67 +650,55 @@ def test_static_explorer_export_contains_bounded_parquet_snapshot(tmp_path: Path
         "max_degree": 2,
         "recommended_representation": "grouped",
     }
-    assert set(manifest["snapshot_files"]) == {
-        "snapshot_nodes.parquet",
-        "snapshot_edges.parquet",
-        "snapshot_stages.parquet",
-        "snapshot_teams.parquet",
-        "snapshot_markets.parquet",
-        "snapshot_claims.parquet",
-        "snapshot_relationships.parquet",
-        "snapshot_relationship_groups.parquet",
+    assert set(manifest["files"]) == {
+        "explore_snapshot.json",
+        "graph_snapshot.json",
     }
+    assert manifest["snapshot_bytes"] <= 5 * 1024 * 1024 // 4
+    assert manifest["snapshot_gzip_bytes"] <= 200 * 1024
     for relative in (
         "index.html",
         "static_manifest.json",
-        "snapshot_nodes.parquet",
-        "snapshot_edges.parquet",
+        "explore_snapshot.json",
+        "graph_snapshot.json",
     ):
         assert (destination / relative).is_file()
-    db = DuckDB()
-    try:
-        assert db.rows(
-            f"SELECT count(*) AS count FROM read_parquet('{q(destination / 'snapshot_nodes.parquet')}')"
-        )[0]["count"] == 4
-        assert db.rows(
-            f"SELECT DISTINCT evidence_tier FROM read_parquet('{q(destination / 'snapshot_edges.parquet')}') ORDER BY evidence_tier"
+    core = json.loads((destination / "explore_snapshot.json").read_text())
+    graph_snapshot = json.loads((destination / "graph_snapshot.json").read_text())
+    assert core["schema_version"] == "static-explorer-core-v1"
+    assert graph_snapshot["schema_version"] == "static-explorer-graph-v1"
+    assert graph_snapshot["layout_version"] == "visualization-layout-v2"
+    assert len(graph_snapshot["view"]["nodes"]) == 4
+    assert {row["id"] for row in graph_snapshot["view"]["edges"]} == {
+        "p1", "p2", "p3", "p4", "p5"
+    }
+    assert {row["proposal_id"] for row in core["relationships"]} == {
+        "p1", "p2", "p3", "p4", "p5"
+    }
+    stage_coverage = {row["stage_key"]: row for row in core["stages"]}
+    assert {
+        key: stage_coverage["winner"][key]
+        for key in (
+            "stage_key",
+            "classification_eligible_count",
+            "classification_assessed_count",
+            "classification_status",
+            "classification_coverage",
         )
-        assert {
-            row["id"]
-            for row in db.rows(
-                f"SELECT id FROM read_parquet('{q(destination / 'snapshot_edges.parquet')}')"
-            )
-        } == {"p1", "p2", "p3", "p4", "p5"}
-        assert {
-            row["proposal_id"]
-            for row in db.rows(
-                f"SELECT proposal_id FROM read_parquet('{q(destination / 'snapshot_relationships.parquet')}')"
-            )
-        } == {"p1", "p2", "p3", "p4", "p5"}
-        stage_coverage = {
-            row["stage_key"]: row
-            for row in db.rows(
-                f"SELECT stage_key, classification_eligible_count, "
-                "classification_assessed_count, classification_status, "
-                f"classification_coverage FROM read_parquet('{q(destination / 'snapshot_stages.parquet')}')"
-            )
-        }
-        assert stage_coverage["winner"] == {
-            "stage_key": "winner",
-            "classification_eligible_count": 1,
-            "classification_assessed_count": 1,
-            "classification_status": "complete",
-            "classification_coverage": 1.0,
-        }
-        assert stage_coverage["final"]["classification_status"] == "not_applicable"
-        assert stage_coverage["final"]["classification_coverage"] is None
-        assert db.rows(
-            f"SELECT count(DISTINCT canonical_team_name) AS teams, "
-            f"count(*) FILTER (WHERE market_close_epoch IS NULL) AS missing_close "
-            f"FROM read_parquet('{q(destination / 'snapshot_claims.parquet')}')"
-        ) == [{"teams": 4, "missing_close": 0}]
-    finally:
-        db.close()
+    } == {
+        "stage_key": "winner",
+        "classification_eligible_count": 1,
+        "classification_assessed_count": 1,
+        "classification_status": "complete",
+        "classification_coverage": 1.0,
+    }
+    assert stage_coverage["final"]["classification_status"] == "not_applicable"
+    assert stage_coverage["final"]["classification_coverage"] is None
+    assert len({row["canonical_team_name"] for row in core["claims"]}) == 4
+    assert all(row["market_close_epoch"] is not None for row in core["claims"])
+    for name, entry in manifest["files"].items():
+        assert entry["sha256"] == sha256_file(destination / name)
+        assert entry["bytes"] == (destination / name).stat().st_size
 
     component_destination = tmp_path / "component-export"
     export_explorer(
@@ -675,123 +740,41 @@ def test_static_explorer_export_contains_bounded_parquet_snapshot(tmp_path: Path
         )
 
 
+def test_static_explorer_export_enforces_delivery_budget(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    out = _write_graph(tmp_path / "source")
+    destination = tmp_path / "oversized-export"
+    monkeypatch.setattr(explorer_module, "MAX_STATIC_SNAPSHOT_BYTES", 1)
+
+    with pytest.raises(ValueError, match="delivery budget"):
+        export_explorer(
+            out,
+            destination,
+            scope="event",
+            identifier="e",
+            max_nodes=4,
+            max_edges=5,
+        )
+
+    assert not destination.exists()
+
+
 def test_release_fixture_validates_fast_hashes_counts_and_performance(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     root = tmp_path / "fixture"
-    root.mkdir()
-    (root / "input.parquet").write_bytes(b"canonical-test-catalog")
+    performance_budget = _current_test_performance_budget()
+    fixture, _ = _write_release_fixture(root, performance_budget)
     source_hash = sha256_file(root / "input.parquet")
     monkeypatch.setattr(release_validation, "CANONICAL_CATALOG_SHA256", source_hash)
-
-    baseline = root / "baselines" / "fast"
-    baseline.mkdir(parents=True)
-    hashes = {"nodes.parquet": "logical-nodes-hash"}
-    (baseline / "build_manifest.json").write_text(
-        json.dumps(
-            {
-                "version": __version__,
-                "build_mode": "fast",
-                "validation_status": "DETERMINISTIC_VALIDATED",
-                "input": {"sha256": source_hash},
-                "stats": {
-                    "same_market_complement_edges": 94_771,
-                    "same_market_categorical_exclusion_edges": 54,
-                    "cross_market_deterministic_edges": 10,
-                    "cross_event_deterministic_edges": 2,
-                },
-                "deadline": {"met": True},
-                "artifact_hashes": hashes,
-            }
-        ),
-        encoding="utf-8",
+    monkeypatch.setattr(
+        release_validation,
+        "load_performance_budget",
+        lambda: performance_budget,
     )
-    (baseline / "coverage_summary.json").write_text(
-        json.dumps(
-            {
-                "all_market_selection": True,
-                "markets": 94_777,
-                "propositions": 189_570,
-                "input_selection": {
-                    "input_market_rows": 94_781,
-                    "invalid_market_rows": 4,
-                },
-            }
-        ),
-        encoding="utf-8",
-    )
-    (baseline / "viewer_manifest.json").write_text(
-        json.dumps(
-            {
-                "build_mode": "fast",
-                "validation_status": "DETERMINISTIC_VALIDATED",
-                "graph_content_fingerprint": "fixture",
-            }
-        ),
-        encoding="utf-8",
-    )
-    (root / "expected_artifact_hashes.json").write_text(
-        json.dumps({"fast": hashes}), encoding="utf-8"
-    )
-    (root / "performance_report.json").write_text(
-        json.dumps(
-            {
-                "schema_version": "performance-budget-v3",
-                "input_sha256": source_hash,
-                "hardware": {
-                    "system": "Darwin",
-                    "machine": "arm64",
-                    "processor": "Apple M4",
-                },
-                "budget": {
-                    "schema_version": "performance-budget-v3",
-                    "input_sha256": source_hash,
-                    "system": "Darwin",
-                    "machine": "arm64",
-                    "processor_contains": "Apple M4",
-                    "repetitions": 3,
-                    "selection": "complete-valid-catalog",
-                    "extractor_version": EXTRACTOR_VERSION,
-                    "rule_version": RULE_VERSION,
-                },
-                "acceptance": {
-                    "every_run_ready_within_budget": True,
-                    "every_discovery_deadline_met": True,
-                    "logical_hashes_identical": True,
-                    "inference_resources_absent": True,
-                },
-                "passed": True,
-                "runs": [
-                    {
-                        "time_to_ready_seconds": 90.0 + index,
-                        "deadline_met": True,
-                        "logical_artifact_hashes": hashes,
-                    }
-                    for index in range(3)
-                ],
-            }
-        ),
-        encoding="utf-8",
-    )
-    bound = [
-        "input.parquet",
-        "performance_report.json",
-        "expected_artifact_hashes.json",
-        "baselines/fast/build_manifest.json",
-        "baselines/fast/viewer_manifest.json",
-        "baselines/fast/coverage_summary.json",
-    ]
-    fixture = {
-        "schema_version": RELEASE_FIXTURE_SCHEMA_VERSION,
-        "package_version": __version__,
-        "source_sha256": source_hash,
-        "files": {name: sha256_file(root / name) for name in bound},
-        "trees": {
-            "baselines/fast": _tree_binding(root / "baselines" / "fast")
-        },
-    }
-    (root / "release-fixture.json").write_text(json.dumps(fixture), encoding="utf-8")
     result = validate_release_fixture(root, tmp_path / "work")
     assert result["passed"] is True
     assert result["decision"] == "DETERMINISTIC_VALIDATED"
@@ -808,6 +791,237 @@ def test_release_fixture_validates_fast_hashes_counts_and_performance(
     )
     with pytest.raises(ValueError, match="does not match the release baseline"):
         validate_release_fixture(root, tmp_path / "work-mismatch")
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("benchmark_harness_sha256", "0" * 64),
+        ("python_version", "3.12"),
+        ("processor", "Apple M4 Pro"),
+    ),
+)
+def test_release_fixture_rejects_performance_environment_drift(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    field: str,
+    value: str,
+) -> None:
+    root = tmp_path / "fixture"
+    performance_budget = _current_test_performance_budget()
+    fixture, _ = _write_release_fixture(root, performance_budget)
+    source_hash = sha256_file(root / "input.parquet")
+    monkeypatch.setattr(release_validation, "CANONICAL_CATALOG_SHA256", source_hash)
+    monkeypatch.setattr(
+        release_validation,
+        "load_performance_budget",
+        lambda: performance_budget,
+    )
+    performance_path = root / "performance_report.json"
+    performance = json.loads(performance_path.read_text(encoding="utf-8"))
+    if field == "processor":
+        performance["hardware"][field] = value
+    else:
+        performance[field] = value
+    performance_path.write_text(json.dumps(performance), encoding="utf-8")
+    fixture["files"]["performance_report.json"] = sha256_file(performance_path)
+    (root / "release-fixture.json").write_text(
+        json.dumps(fixture), encoding="utf-8"
+    )
+
+    with pytest.raises(ValueError, match="not bound to the packaged M4 budget"):
+        validate_release_fixture(root, tmp_path / "work")
+
+
+@pytest.mark.parametrize("evidence", (None, ["torch"]))
+def test_release_fixture_requires_per_run_no_inference_evidence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    evidence: list[str] | None,
+) -> None:
+    root = tmp_path / "fixture"
+    performance_budget = _current_test_performance_budget()
+    fixture, _ = _write_release_fixture(root, performance_budget)
+    source_hash = sha256_file(root / "input.parquet")
+    monkeypatch.setattr(release_validation, "CANONICAL_CATALOG_SHA256", source_hash)
+    monkeypatch.setattr(
+        release_validation,
+        "load_performance_budget",
+        lambda: performance_budget,
+    )
+    performance_path = root / "performance_report.json"
+    performance = json.loads(performance_path.read_text(encoding="utf-8"))
+    if evidence is None:
+        performance["runs"][0].pop("inference_resources_loaded")
+    else:
+        performance["runs"][0]["inference_resources_loaded"] = evidence
+    performance_path.write_text(json.dumps(performance), encoding="utf-8")
+    _refresh_release_fixture_bindings(root, fixture)
+
+    with pytest.raises(ValueError, match="loaded inference resources"):
+        validate_release_fixture(root, tmp_path / "work")
+
+
+@pytest.mark.parametrize("ready_time", (-1.0, float("nan")))
+def test_release_fixture_rejects_invalid_ready_times(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    ready_time: float,
+) -> None:
+    root = tmp_path / "fixture"
+    performance_budget = _current_test_performance_budget()
+    fixture, _ = _write_release_fixture(root, performance_budget)
+    source_hash = sha256_file(root / "input.parquet")
+    monkeypatch.setattr(release_validation, "CANONICAL_CATALOG_SHA256", source_hash)
+    monkeypatch.setattr(
+        release_validation,
+        "load_performance_budget",
+        lambda: performance_budget,
+    )
+    performance_path = root / "performance_report.json"
+    performance = json.loads(performance_path.read_text(encoding="utf-8"))
+    performance["runs"][0]["manifest_query_ready_seconds"] = ready_time
+    performance_path.write_text(json.dumps(performance), encoding="utf-8")
+    _refresh_release_fixture_bindings(root, fixture)
+
+    with pytest.raises(ValueError, match="missed the ready-time budget"):
+        validate_release_fixture(root, tmp_path / "work")
+
+
+@pytest.mark.parametrize(
+    ("relative", "expected_group"),
+    (
+        ("nodes.parquet", "artifact"),
+        ("state/market_state.parquet", "state"),
+        ("oddsfox_graph.duckdb", "published file"),
+    ),
+)
+def test_release_fixture_recomputes_every_manifest_digest_group(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    relative: str,
+    expected_group: str,
+) -> None:
+    root = tmp_path / "fixture"
+    performance_budget = _current_test_performance_budget()
+    fixture, _ = _write_release_fixture(root, performance_budget)
+    source_hash = sha256_file(root / "input.parquet")
+    monkeypatch.setattr(release_validation, "CANONICAL_CATALOG_SHA256", source_hash)
+    monkeypatch.setattr(
+        release_validation,
+        "load_performance_budget",
+        lambda: performance_budget,
+    )
+
+    baseline = root / "baselines" / "fast"
+    (baseline / relative).write_bytes(b"tampered baseline bytes")
+    fixture["trees"]["baselines/fast"] = _tree_binding(baseline)
+    (root / "release-fixture.json").write_text(json.dumps(fixture), encoding="utf-8")
+
+    with pytest.raises(ValueError, match=rf"{expected_group} hash mismatch: {relative}"):
+        validate_release_fixture(root, tmp_path / "work")
+
+
+@pytest.mark.parametrize(
+    "relative",
+    (
+        "build_manifest.json",
+        "viewer_manifest.json",
+        "coverage_summary.json",
+    ),
+)
+def test_release_fixture_rejects_non_strict_baseline_contracts(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    relative: str,
+) -> None:
+    root = tmp_path / "fixture"
+    performance_budget = _current_test_performance_budget()
+    fixture, _ = _write_release_fixture(root, performance_budget)
+    source_hash = sha256_file(root / "input.parquet")
+    monkeypatch.setattr(release_validation, "CANONICAL_CATALOG_SHA256", source_hash)
+    monkeypatch.setattr(
+        release_validation,
+        "load_performance_budget",
+        lambda: performance_budget,
+    )
+
+    baseline = root / "baselines" / "fast"
+    contract_path = baseline / relative
+    contract = json.loads(contract_path.read_text(encoding="utf-8"))
+    contract["unexpected_legacy_field"] = True
+    contract_path.write_text(json.dumps(contract), encoding="utf-8")
+    _refresh_release_fixture_bindings(root, fixture)
+    with pytest.raises(ValueError, match="contracts are incompatible"):
+        validate_release_fixture(root, tmp_path / "strict-work")
+
+
+def test_release_fixture_rejects_cross_manifest_drift(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "fixture"
+    performance_budget = _current_test_performance_budget()
+    fixture, _ = _write_release_fixture(root, performance_budget)
+    source_hash = sha256_file(root / "input.parquet")
+    monkeypatch.setattr(release_validation, "CANONICAL_CATALOG_SHA256", source_hash)
+    monkeypatch.setattr(
+        release_validation,
+        "load_performance_budget",
+        lambda: performance_budget,
+    )
+
+    baseline = root / "baselines" / "fast"
+    viewer_path = baseline / "viewer_manifest.json"
+    viewer = json.loads(viewer_path.read_text(encoding="utf-8"))
+    viewer["graph_content_fingerprint"] = "f" * 64
+    viewer_path.write_text(json.dumps(viewer), encoding="utf-8")
+    _refresh_release_fixture_bindings(root, fixture)
+    with pytest.raises(ValueError, match="contracts are incompatible"):
+        validate_release_fixture(root, tmp_path / "pair-work")
+
+
+def test_release_fixture_rejects_stale_current_discovery_semantics(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "fixture"
+    performance_budget = _current_test_performance_budget()
+    fixture, _ = _write_release_fixture(root, performance_budget)
+    source_hash = sha256_file(root / "input.parquet")
+    monkeypatch.setattr(release_validation, "CANONICAL_CATALOG_SHA256", source_hash)
+    monkeypatch.setattr(
+        release_validation,
+        "load_performance_budget",
+        lambda: performance_budget,
+    )
+
+    baseline = root / "baselines" / "fast"
+    build_path = baseline / "build_manifest.json"
+    viewer_path = baseline / "viewer_manifest.json"
+    build = json.loads(build_path.read_text(encoding="utf-8"))
+    viewer = json.loads(viewer_path.read_text(encoding="utf-8"))
+    stale_semantics = "f" * 64
+    build["discovery_semantics_fingerprint"] = stale_semantics
+    viewer["discovery_semantics_fingerprint"] = stale_semantics
+    viewer_path.write_text(json.dumps(viewer), encoding="utf-8")
+    viewer_hash = sha256_file(viewer_path)
+    build["artifact_hashes"]["viewer_manifest.json"] = viewer_hash
+    build["published_file_hashes"]["viewer_manifest.json"] = viewer_hash
+    build_path.write_text(json.dumps(build), encoding="utf-8")
+    (root / "expected_artifact_hashes.json").write_text(
+        json.dumps({"fast": build["artifact_hashes"]}),
+        encoding="utf-8",
+    )
+    performance_path = root / "performance_report.json"
+    performance = json.loads(performance_path.read_text(encoding="utf-8"))
+    for run in performance["runs"]:
+        run["logical_artifact_hashes"] = build["artifact_hashes"]
+    performance_path.write_text(json.dumps(performance), encoding="utf-8")
+    _refresh_release_fixture_bindings(root, fixture)
+
+    with pytest.raises(ValueError, match="discovery semantics"):
+        validate_release_fixture(root, tmp_path / "work")
 
 
 def test_release_fixture_rejects_path_traversal_and_wrong_status(tmp_path: Path) -> None:
@@ -827,6 +1041,127 @@ def test_release_fixture_rejects_path_traversal_and_wrong_status(tmp_path: Path)
     )
     with pytest.raises(ValueError, match="Unsafe"):
         validate_release_fixture(root, tmp_path / "work")
+
+
+def test_release_fixture_rejects_unsupported_cross_event_edges(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "fixture"
+    performance_budget = _current_test_performance_budget()
+    fixture, _ = _write_release_fixture(root, performance_budget)
+    source_hash = sha256_file(root / "input.parquet")
+    monkeypatch.setattr(release_validation, "CANONICAL_CATALOG_SHA256", source_hash)
+    monkeypatch.setattr(
+        release_validation,
+        "load_performance_budget",
+        lambda: performance_budget,
+    )
+    build_path = root / "baselines" / "fast" / "build_manifest.json"
+    build = json.loads(build_path.read_text(encoding="utf-8"))
+    build["stats"]["cross_event_deterministic_edges"] = 1
+    build_path.write_text(json.dumps(build), encoding="utf-8")
+    _refresh_release_fixture_bindings(root, fixture)
+
+    with pytest.raises(ValueError, match="unsupported cross-event"):
+        validate_release_fixture(root, tmp_path / "work")
+
+
+def test_release_fixture_assembler_publishes_only_after_validation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source, baseline, performance = _release_assembly_inputs(tmp_path, monkeypatch)
+    destination = tmp_path / "assembled-fixture"
+
+    result = release_fixture_assembly.assemble_release_fixture(
+        input_path=source,
+        fast_baseline=baseline,
+        performance_report=performance,
+        destination=destination,
+    )
+
+    manifest = json.loads(
+        (destination / "release-fixture.json").read_text(encoding="utf-8")
+    )
+    expected_hashes = json.loads(
+        (destination / "expected_artifact_hashes.json").read_text(encoding="utf-8")
+    )
+    build = json.loads(
+        (destination / "baselines" / "fast" / "build_manifest.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert result["validation"]["passed"] is True
+    assert manifest["schema_version"] == RELEASE_FIXTURE_SCHEMA_VERSION
+    assert set(manifest["files"]) == set(release_validation.REQUIRED_FILES)
+    assert expected_hashes == {"fast": build["artifact_hashes"]}
+    assert (destination / "input.parquet").read_bytes() == source.read_bytes()
+    assert not list(tmp_path.glob(".assembled-fixture.fixture-*-*"))
+
+
+def test_release_fixture_assembler_cleans_staging_on_interrupt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source, baseline, performance = _release_assembly_inputs(tmp_path, monkeypatch)
+    destination = tmp_path / "interrupted-fixture"
+
+    def interrupt(_fixture: Path, _work: Path) -> dict[str, Any]:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(
+        release_fixture_assembly,
+        "validate_release_fixture",
+        interrupt,
+    )
+
+    with pytest.raises(KeyboardInterrupt):
+        release_fixture_assembly.assemble_release_fixture(
+            input_path=source,
+            fast_baseline=baseline,
+            performance_report=performance,
+            destination=destination,
+        )
+
+    assert not destination.exists()
+    assert not list(tmp_path.glob(".interrupted-fixture.fixture-*-*"))
+
+
+def test_release_fixture_assembler_rejects_existing_or_overlapping_destination(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source, baseline, performance = _release_assembly_inputs(tmp_path, monkeypatch)
+    existing = tmp_path / "existing-fixture"
+    existing.mkdir()
+    marker = existing / "operator-data"
+    marker.write_text("preserve", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="already exists"):
+        release_fixture_assembly.assemble_release_fixture(
+            input_path=source,
+            fast_baseline=baseline,
+            performance_report=performance,
+            destination=existing,
+        )
+    with pytest.raises(ValueError, match="must not overlap"):
+        release_fixture_assembly.assemble_release_fixture(
+            input_path=source,
+            fast_baseline=baseline,
+            performance_report=performance,
+            destination=baseline / "nested-fixture",
+        )
+    (baseline / "unexpected-link").symlink_to(source)
+    with pytest.raises(ValueError, match="contains a symbolic link"):
+        release_fixture_assembly.assemble_release_fixture(
+            input_path=source,
+            fast_baseline=baseline,
+            performance_report=performance,
+            destination=tmp_path / "symlink-fixture",
+        )
+
+    assert marker.read_text(encoding="utf-8") == "preserve"
 
 
 def test_doctor_reports_nonfatal_warnings_and_required_failures(
@@ -875,7 +1210,8 @@ def test_doctor_reports_nonfatal_warnings_and_required_failures(
     )
     assert fast_report.passed is True
     assert any(
-        check.name == "fast_performance_budget" and check.status == "pass"
+        check.name == "fast_performance_budget"
+        and check.status == "not_applicable"
         for check in fast_report.checks
     )
     report = doctor(
@@ -923,6 +1259,8 @@ def _write_graph(
 ) -> Path:
     out = tmp_path / "out"
     out.mkdir(parents=True)
+    input_path = tmp_path / "wc2026-hourly.parquet"
+    input_path.write_bytes(b"strict-wc2026-graph-fixture")
     db = DuckDB(out / "oddsfox_graph.duckdb")
     try:
         db.execute(
@@ -938,11 +1276,11 @@ def _write_graph(
         db.execute(
             """
             CREATE TABLE edges AS SELECT * FROM (VALUES
-                ('a','b','implies','model',0.9,'m1','m2','e','e','a implies b','generative_consensus',NULL,'p','a implies b',[]::VARCHAR[],NULL,'p1','s','c','sc','pm','vm','pf','vf','cf','ap','generative_consensus',NULL,NULL,NULL,NULL,NULL),
-                ('b','c','equivalent','model',0.8,'m2','m3','e','e','b equals c','generative_consensus',NULL,'p','b equals c',[]::VARCHAR[],NULL,'p2','s','c','sc','pm','vm','pf','vf','cf','ap','generative_consensus',NULL,NULL,NULL,NULL,NULL),
-                ('c','d','implies','model',0.95,'m3','m4','e','e','c implies d','generative_consensus',NULL,'p','c implies d',[]::VARCHAR[],NULL,'p3','s','c','sc','pm','vm','pf','vf','cf','ap','generative_consensus',NULL,NULL,NULL,NULL,NULL),
-                ('b','d','implies','model',0.8,'m2','m4','e','e','b implies d','generative_consensus',NULL,'p','b implies d',[]::VARCHAR[],NULL,'p5','s','c','sc','pm','vm','pf','vf','cf','ap','generative_consensus',NULL,NULL,NULL,NULL,NULL),
-                ('a','d','mutually_exclusive','same_market',1.0,'m1','m4','e','e','exclusive','deterministic','v',NULL,'exclusive',[]::VARCHAR[],'rule','p4','s','c','sc',NULL,NULL,NULL,NULL,NULL,NULL,'source_contract','strict','v1','[]','rule-fingerprint','scope')
+                ('a','b','implies','model',0.9::DOUBLE,'m1','m2','e','e','a implies b','generative_consensus',NULL,'p','a implies b',[]::VARCHAR[],NULL,'p1','s','c','sc','pm','vm','pf','vf','cf','ap','generative_consensus',NULL,NULL,NULL,NULL,NULL),
+                ('b','c','equivalent','model',0.8::DOUBLE,'m2','m3','e','e','b equals c','generative_consensus',NULL,'p','b equals c',[]::VARCHAR[],NULL,'p2','s','c','sc','pm','vm','pf','vf','cf','ap','generative_consensus',NULL,NULL,NULL,NULL,NULL),
+                ('c','d','implies','model',0.95::DOUBLE,'m3','m4','e','e','c implies d','generative_consensus',NULL,'p','c implies d',[]::VARCHAR[],NULL,'p3','s','c','sc','pm','vm','pf','vf','cf','ap','generative_consensus',NULL,NULL,NULL,NULL,NULL),
+                ('b','d','implies','model',0.8::DOUBLE,'m2','m4','e','e','b implies d','generative_consensus',NULL,'p','b implies d',[]::VARCHAR[],NULL,'p5','s','c','sc','pm','vm','pf','vf','cf','ap','generative_consensus',NULL,NULL,NULL,NULL,NULL),
+                ('a','d','mutually_exclusive','same_market',1.0::DOUBLE,'m1','m4','e','e','exclusive','deterministic','v',NULL,'exclusive',[]::VARCHAR[],'rule','p4','s','c','sc',NULL,NULL,NULL,NULL,NULL,NULL,'source_contract','strict','v1','[]','rule-fingerprint','scope')
             ) t(src_node_id,dst_node_id,edge_type,edge_basis,confidence,market_id_src,market_id_dst,event_slug_src,event_slug_dst,evidence,discovery_method,rule_version,prompt_version,explanation,assumptions,rule_id,proposal_id,solver_version,constraint_version,solver_component_id,primary_model_version,verifier_model_version,primary_inference_fingerprint,verifier_inference_fingerprint,consensus_fingerprint,automation_profile_id,evidence_tier,extractor_id,extractor_version,source_spans_json,rule_applicability_fingerprint,proof_scope_key)
             """
         )
@@ -1099,27 +1437,79 @@ def _write_graph(
             db.execute(f"COPY {table} TO '{q(out / filename)}' (FORMAT PARQUET)")
     finally:
         db.close()
-    coverage = {
-        "schema_version": "coverage-summary-v2",
-        "classification_status": "complete",
-        "classification_coverage": 1.0,
-        "classification_gap": 0.0,
-        "all_market_selection": True,
-        "markets": 4,
-        "propositions": 4,
+    input_semantics = canonical_json_sha256(
+        {"fixture": "wc2026-hourly-semantic-input-v1"}
+    )
+    input_selection = WC2026InputSelection(
+        strategy="all_valid_pipeline_wc2026_markets",
+        source="oddsfox-pipeline",
+        scope="wc2026",
+        universe="knockout_progression",
+        selection="all_valid_pipeline_wc2026_markets",
+        adapter_version=current_version_bindings().input_adapter,
+        input_hourly_rows=4,
+        input_rows=4,
+        input_market_rows=4,
+        input_propositions=4,
+        invalid_market_rows=0,
+        eligible_markets=4,
+        eligible_propositions=4,
+        selected_markets=4,
+        selected_propositions=4,
+        teams=4,
+        stages=4,
+        stage_keys=("quarterfinal", "semifinal", "final", "winner"),
+        first_hour_epoch=1_782_864_000,
+        last_hour_epoch=1_783_123_200,
+        normalized_semantic_fingerprint=input_semantics,
+        truncated=False,
+    ).model_dump(mode="json")
+    coverage = write_coverage_summary(
+        out,
+        {
+            "schema_version": "coverage-summary-v2",
+            "all_market_selection": True,
+            "input_selection": input_selection,
+            "markets": 4,
+            "propositions": 4,
+            "events": 1,
+            "components": 1,
+            "parsed": 4,
+            "parse_quarantined": 0,
+            "candidates": 5,
+            "classification_eligible": 4,
+            "classification_assessed": 4,
+            "classification_unclassified": 0,
+            "classification_status": "complete",
+            "classification_coverage": 1.0,
+            "classification_gap": 0.0,
+            "accepted_edges": 5,
+            "rejected_edges": 2,
+            "quarantined_pairs": 1,
+        },
+    )
+    graph_inputs = {
+        path.name: sha256_file(path)
+        for path in sorted(out.glob("*.parquet"))
     }
-    (out / "coverage_summary.json").write_text(json.dumps(coverage), encoding="utf-8")
-    (out / "viewer_manifest.json").write_text(
-        json.dumps({
+    graph_content_fingerprint = canonical_json_sha256(
+        {"coverage": coverage, "artifacts": graph_inputs}
+    )
+    source_hash = sha256_file(input_path)
+    audit_fingerprint = source_tree_fingerprint()
+    semantics_fingerprint = discovery_semantics_fingerprint()
+    write_viewer_manifest(
+        out,
+        {
             "schema_version": VIEWER_ARTIFACT_VERSION,
             "api_version": VIEWER_API_VERSION,
-            "graph_content_fingerprint": "fixture",
+            "layout_version": current_version_bindings().visualization_layout,
             "build_mode": "full",
             "validation_status": "EXPERIMENTAL_FULL",
             "input_profile": WC2026_SOURCE_SCHEMA,
             "input": {
-                "sha256": "fixture-source",
-                "normalized_semantic_fingerprint": "fixture-input-semantics",
+                "sha256": source_hash,
+                "normalized_semantic_fingerprint": input_semantics,
             },
             "scope": {
                 "source": "oddsfox-pipeline",
@@ -1128,57 +1518,91 @@ def _write_graph(
                 "selection": "all_valid_pipeline_wc2026_markets",
                 "truncated": False,
             },
-            "discovery_semantics_fingerprint": (
-                discovery_semantics_fingerprint()
-            ),
-            "versions": {},
-        }),
-        encoding="utf-8",
+            "source_tree_fingerprint": audit_fingerprint,
+            "discovery_semantics_fingerprint": semantics_fingerprint,
+            "source_watermark": "2026-07-04T00:00:00+00:00",
+            "graph_content_fingerprint": graph_content_fingerprint,
+            "response_limits": {"nodes": 5_000, "edges": 10_000},
+            "evidence_tiers": [
+                "source_contract",
+                "deterministic_rule",
+                "generative_consensus",
+            ],
+        },
     )
-    artifacts = [path.name for path in out.glob("*.parquet")]
-    artifacts.extend(
-        (
-            "oddsfox_graph.duckdb",
-            "coverage_summary.json",
-            "viewer_manifest.json",
-        )
+    artifacts = sorted(
+        path.name for path in out.iterdir() if path.is_file()
     )
-    (out / "build_manifest.json").write_text(
-        json.dumps(
-            {
-                "command": "discover",
-                "version": __version__,
+    artifact_hashes = {
+        name: sha256_file(out / name)
+        for name in artifacts
+        if name.endswith((".json", ".parquet"))
+    }
+    published_file_hashes = {
+        name: sha256_file(out / name) for name in artifacts
+    }
+    write_manifest_last(
+        out,
+        {
+            "schema_version": "graph-build-manifest-v1",
+            "command": "discover",
+            "version": __version__,
+            "build_mode": "full",
+            "validation_status": "EXPERIMENTAL_FULL",
+            "deadline": {
+                "seconds": 120.0,
+                "elapsed_seconds": 1.0,
+                "met": True,
+                "cutoff_triggered": False,
+                "assessed_pairs": 4,
+                "unassessed_pairs": 0,
+            },
+            "input": {
+                "path": str(input_path),
+                "sha256": source_hash,
+                "schema": WC2026_SOURCE_SCHEMA,
+                "profile": WC2026_SOURCE_SCHEMA,
+                "normalized_semantic_fingerprint": input_semantics,
+                "selection": input_selection,
+            },
+            "scope": {
+                "source": "oddsfox-pipeline",
+                "scope": "wc2026",
+                "universe": "knockout_progression",
+                "selection": "all_valid_pipeline_wc2026_markets",
+                "truncated": False,
+            },
+            "source_tree_fingerprint": audit_fingerprint,
+            "discovery_semantics_fingerprint": semantics_fingerprint,
+            "graph_content_fingerprint": graph_content_fingerprint,
+            "versions": current_version_bindings().model_dump(mode="json"),
+            "artifacts": artifacts,
+            "artifact_hashes": artifact_hashes,
+            "state_hashes": {},
+            "published_file_hashes": published_file_hashes,
+            "stats": {
                 "build_mode": "full",
                 "validation_status": "EXPERIMENTAL_FULL",
-                "input_hash": "fixture-source",
-                "input_schema": WC2026_SOURCE_SCHEMA,
-                "input_semantic_fingerprint": "fixture-input-semantics",
-                "graph_content_fingerprint": "fixture",
-                "scope": {
-                    "source": "oddsfox-pipeline",
-                    "scope": "wc2026",
-                    "universe": "knockout_progression",
-                    "selection": "all_valid_pipeline_wc2026_markets",
-                    "truncated": False,
-                },
-                "discovery_semantics_fingerprint": (
-                    discovery_semantics_fingerprint()
-                ),
-                "source_tree_fingerprint": "fixture-source-tree",
-                "versions": {
-                    "rules": RULE_VERSION,
-                    "publication": PUBLICATION_VERSION,
-                    "viewer_api": VIEWER_API_VERSION,
-                    "viewer_artifacts": VIEWER_ARTIFACT_VERSION,
-                },
-                "stats": {
-                    "build_mode": "full",
-                    "validation_status": "EXPERIMENTAL_FULL",
-                },
-                "artifacts": artifacts,
-            }
-        ),
-        encoding="utf-8",
+                "markets": 4,
+                "tokens": 4,
+                "logic_edges": 5,
+                "coverage": coverage,
+            },
+            "models": {},
+            "prompts": {},
+            "inference": {},
+            "limits": {},
+            "incremental": {},
+            "qualification": {},
+            "compute": {},
+            "solver": {},
+            "rules": {},
+            "cache": {},
+            "usage": {},
+            "reports": [],
+            "stage_timings": {},
+            "stage_metrics": {},
+        },
     )
     return out
 
@@ -1193,6 +1617,279 @@ def _tree_binding(directory: Path) -> dict[str, object]:
         if path.is_file()
     ]
     return {"sha256": canonical_json_sha256(rows), "file_count": len(rows)}
+
+
+_RELEASE_FIXTURE_BOUND_FILES = (
+    "input.parquet",
+    "performance_report.json",
+    "expected_artifact_hashes.json",
+    "baselines/fast/build_manifest.json",
+    "baselines/fast/viewer_manifest.json",
+    "baselines/fast/coverage_summary.json",
+)
+
+
+def _write_release_fixture(
+    root: Path,
+    performance_budget: PerformanceBudget,
+) -> tuple[dict[str, Any], dict[str, str]]:
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "input.parquet").write_bytes(b"canonical-test-catalog")
+    source_hash = sha256_file(root / "input.parquet")
+    baseline = root / "baselines" / "fast"
+    (baseline / "state").mkdir(parents=True, exist_ok=True)
+    (baseline / "nodes.parquet").write_bytes(b"deterministic nodes")
+    (baseline / "state" / "market_state.parquet").write_bytes(
+        b"deterministic state"
+    )
+    (baseline / "oddsfox_graph.duckdb").write_bytes(b"deterministic database")
+
+    selection = {
+        "strategy": "all_eligible_markets",
+        "input_market_rows": 94_781,
+        "input_rows": 94_781,
+        "input_propositions": 189_570,
+        "invalid_market_rows": 4,
+        "eligible_markets": 94_777,
+        "eligible_propositions": 189_570,
+        "selected_markets": 94_777,
+        "selected_propositions": 189_570,
+        "truncated": False,
+    }
+    coverage = {
+        "schema_version": "coverage-summary-v2",
+        "all_market_selection": True,
+        "input_selection": selection,
+        "markets": 94_777,
+        "propositions": 189_570,
+        "events": 10,
+        "components": 10,
+        "parsed": 189_570,
+        "parse_quarantined": 0,
+        "candidates": 0,
+        "classification_eligible": 0,
+        "classification_assessed": 0,
+        "classification_unclassified": 0,
+        "classification_status": "not_applicable",
+        "classification_coverage": None,
+        "classification_gap": None,
+        "accepted_edges": 94_825,
+        "rejected_edges": 0,
+        "quarantined_pairs": 0,
+    }
+    (baseline / "coverage_summary.json").write_text(
+        json.dumps(coverage), encoding="utf-8"
+    )
+
+    audit_fingerprint = source_tree_fingerprint()
+    semantics_fingerprint = discovery_semantics_fingerprint()
+    graph_fingerprint = "3" * 64
+    scope = {
+        "source": "input-parquet",
+        "scope": "catalog",
+        "universe": "all-markets",
+        "selection": "all_eligible_markets",
+        "truncated": False,
+    }
+    viewer = {
+        "schema_version": VIEWER_ARTIFACT_VERSION,
+        "api_version": VIEWER_API_VERSION,
+        "layout_version": current_version_bindings().visualization_layout,
+        "build_mode": "fast",
+        "validation_status": "DETERMINISTIC_VALIDATED",
+        "input_profile": SOURCE_SCHEMA,
+        "input": {
+            "sha256": source_hash,
+            "normalized_semantic_fingerprint": None,
+        },
+        "scope": scope,
+        "source_tree_fingerprint": audit_fingerprint,
+        "discovery_semantics_fingerprint": semantics_fingerprint,
+        "source_watermark": None,
+        "graph_content_fingerprint": graph_fingerprint,
+        "response_limits": {"nodes": 5_000, "edges": 10_000},
+        "evidence_tiers": ["source_contract", "deterministic_rule"],
+    }
+    (baseline / "viewer_manifest.json").write_text(
+        json.dumps(viewer), encoding="utf-8"
+    )
+
+    artifact_hashes = {
+        relative: sha256_file(baseline / relative)
+        for relative in (
+            "coverage_summary.json",
+            "nodes.parquet",
+            "viewer_manifest.json",
+        )
+    }
+    state_hashes = {
+        "state/market_state.parquet": sha256_file(
+            baseline / "state" / "market_state.parquet"
+        )
+    }
+    published_hashes = {
+        **artifact_hashes,
+        **state_hashes,
+        "oddsfox_graph.duckdb": sha256_file(baseline / "oddsfox_graph.duckdb"),
+    }
+    deadline = {
+        "seconds": 120.0,
+        "elapsed_seconds": 90.0,
+        "met": True,
+        "cutoff_triggered": False,
+        "assessed_pairs": 0,
+        "unassessed_pairs": 0,
+    }
+    build = {
+        "schema_version": "graph-build-manifest-v1",
+        "command": "discover",
+        "version": __version__,
+        "build_mode": "fast",
+        "validation_status": "DETERMINISTIC_VALIDATED",
+        "deadline": deadline,
+        "input": {
+            "path": str(root / "input.parquet"),
+            "sha256": source_hash,
+            "schema": SOURCE_SCHEMA,
+            "profile": SOURCE_SCHEMA,
+            "normalized_semantic_fingerprint": None,
+            "selection": selection,
+        },
+        "scope": scope,
+        "source_tree_fingerprint": audit_fingerprint,
+        "discovery_semantics_fingerprint": semantics_fingerprint,
+        "graph_content_fingerprint": graph_fingerprint,
+        "versions": current_version_bindings().model_dump(mode="json"),
+        "artifacts": sorted(published_hashes),
+        "artifact_hashes": artifact_hashes,
+        "state_hashes": state_hashes,
+        "published_file_hashes": published_hashes,
+        "stats": {
+            "same_market_complement_edges": 94_771,
+            "same_market_categorical_exclusion_edges": 54,
+            "cross_market_deterministic_edges": 10,
+            "cross_event_deterministic_edges": 0,
+        },
+    }
+    (baseline / "build_manifest.json").write_text(
+        json.dumps(build), encoding="utf-8"
+    )
+    (root / "expected_artifact_hashes.json").write_text(
+        json.dumps({"fast": artifact_hashes}), encoding="utf-8"
+    )
+
+    performance = {
+        "schema_version": performance_budget.schema_version,
+        "benchmark_contract": FAST_READY_BENCHMARK_VERSION,
+        "benchmark_harness_sha256": (
+            performance_budget.versions.benchmark_harness_sha256
+        ),
+        "input_sha256": source_hash,
+        "python_version": performance_budget.python_version,
+        "hardware": {
+            "system": "Darwin",
+            "machine": "arm64",
+            "processor": "Apple M4",
+        },
+        "budget": performance_budget.model_dump(mode="json"),
+        "acceptance": {
+            "every_run_ready_within_budget": True,
+            "every_discovery_deadline_met": True,
+            "logical_hashes_identical": True,
+            "inference_resources_absent": True,
+        },
+        "passed": True,
+        "runs": [
+            {
+                "repetition": index + 1,
+                "manifest_query_ready_seconds": 90.0 + index,
+                "deadline_met": True,
+                "logical_artifact_hashes": artifact_hashes,
+                "inference_resources_loaded": [],
+            }
+            for index in range(3)
+        ],
+    }
+    (root / "performance_report.json").write_text(
+        json.dumps(performance), encoding="utf-8"
+    )
+    fixture: dict[str, Any] = {
+        "schema_version": RELEASE_FIXTURE_SCHEMA_VERSION,
+        "package_version": __version__,
+        "source_sha256": source_hash,
+        "files": {},
+        "trees": {},
+    }
+    _refresh_release_fixture_bindings(root, fixture)
+    return fixture, artifact_hashes
+
+
+def _current_test_performance_budget() -> PerformanceBudget:
+    return PerformanceBudget.model_validate(
+        {
+            "schema_version": "performance-budget-v4",
+            "input_profile": SOURCE_SCHEMA,
+            "input_sha256": release_validation.CANONICAL_CATALOG_SHA256,
+            "system": "Darwin",
+            "machine": "arm64",
+            "processor_exact": "Apple M4",
+            "python_version": "3.11",
+            "repetitions": 3,
+            "selection": "complete-valid-catalog",
+            "versions": current_performance_versions().model_dump(mode="json"),
+            "gates": {
+                "max_manifest_query_ready_seconds": 120.0,
+                "require_logical_hash_equality": True,
+                "require_no_inference_resources": True,
+            },
+            "diagnostics": {
+                "record_peak_rss": True,
+                "peak_rss_is_blocking": False,
+            },
+        }
+    )
+
+
+def _release_assembly_inputs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[Path, Path, Path]:
+    root = tmp_path / "fixture-inputs"
+    performance_budget = _current_test_performance_budget()
+    _write_release_fixture(root, performance_budget)
+    source = root / "input.parquet"
+    source_hash = sha256_file(source)
+    monkeypatch.setattr(release_validation, "CANONICAL_CATALOG_SHA256", source_hash)
+    monkeypatch.setattr(
+        release_fixture_assembly,
+        "CANONICAL_CATALOG_SHA256",
+        source_hash,
+    )
+    monkeypatch.setattr(
+        release_validation,
+        "load_performance_budget",
+        lambda: performance_budget,
+    )
+    return (
+        source,
+        root / "baselines" / "fast",
+        root / "performance_report.json",
+    )
+
+
+def _refresh_release_fixture_bindings(
+    root: Path,
+    fixture: dict[str, Any],
+) -> None:
+    fixture["files"] = {
+        name: sha256_file(root / name) for name in _RELEASE_FIXTURE_BOUND_FILES
+    }
+    fixture["trees"] = {
+        "baselines/fast": _tree_binding(root / "baselines" / "fast")
+    }
+    (root / "release-fixture.json").write_text(
+        json.dumps(fixture), encoding="utf-8"
+    )
 
 
 def _write_model_manifest(path: Path, model_id: str, port: int) -> Path:

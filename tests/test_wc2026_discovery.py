@@ -227,13 +227,18 @@ def test_wc2026_profile_collapses_hours_and_has_price_independent_semantics(
     assert first[0] == second[0] == WC2026_SOURCE_SCHEMA
     assert first[1] == second[1] == 20
     assert len(first[2]) == len(second[2]) == 5
-    assert first[3]["normalized_semantic_fingerprint"] == second[3][
-        "normalized_semantic_fingerprint"
-    ]
-    survive = next(market for market in first[2] if market.market_id == "br-survive-r32")
+    assert (
+        first[3]["normalized_semantic_fingerprint"]
+        == second[3]["normalized_semantic_fingerprint"]
+    )
+    survive = next(
+        market for market in first[2] if market.market_id == "br-survive-r32"
+    )
     assert survive.stage_rank == 0
     assert survive.progression_level == 1
-    assert next(outcome for outcome in survive.outcomes if outcome.outcome == "No").is_progression
+    assert next(
+        outcome for outcome in survive.outcomes if outcome.outcome == "No"
+    ).is_progression
     assert survive.time_start is None
     assert survive.time_end is None
     assert survive.market_close_time == datetime.fromtimestamp(
@@ -296,8 +301,7 @@ def test_wc2026_profile_accepts_current_pipeline_contract_without_close_time(
     assert all(node.progression_level is not None for node in proposition_view.nodes)
     assert all(
         node.x
-        == node.progression_level * 260
-        + (-42 if node.progression_outcome else 42)
+        == node.progression_level * 260 + (-42 if node.progression_outcome else 42)
         for node in proposition_view.nodes
         if node.progression_level is not None
     )
@@ -309,16 +313,29 @@ def test_wc2026_profile_accepts_current_pipeline_contract_without_close_time(
     assert graph.market("br-r16").market_close_epoch is None
     static = tmp_path / "static"
     manifest = export_explorer(out, static, scope="graph")
-    assert manifest["schema_version"] == "static-explorer-v4"
-    db = DuckDB()
-    try:
-        assert db.scalar(
-            f"SELECT count(*) FROM read_parquet("
-            f"'{q(static / 'snapshot_claims.parquet')}') "
-            "WHERE market_close_epoch IS NULL"
-        ) == 10
-    finally:
-        db.close()
+    assert manifest["schema_version"] == "static-explorer-v5"
+    core = json.loads((static / "explore_snapshot.json").read_text())
+    assert sum(row["market_close_epoch"] is None for row in core["claims"]) == 10
+
+
+def test_fast_wc2026_viewer_watermark_is_json_text(tmp_path: Path) -> None:
+    source = tmp_path / "wc.parquet"
+    out = tmp_path / "graph"
+    _write_wc2026(source)
+
+    discover(
+        source,
+        out,
+        config=DiscoveryConfig(
+            mode="fast",
+            input_profile=WC2026_SOURCE_SCHEMA,
+            progress_format="quiet",
+        ),
+    )
+    viewer = json.loads((out / "viewer_manifest.json").read_text(encoding="utf-8"))
+
+    assert isinstance(viewer["source_watermark"], str)
+    assert "T" in viewer["source_watermark"]
 
 
 def test_wc2026_qualification_contract_is_profile_specific_and_disjoint(
@@ -354,9 +371,7 @@ def test_wc2026_qualification_contract_is_profile_specific_and_disjoint(
     }
     assert partition_markets["selection"]
     assert partition_markets["validation"]
-    assert partition_markets["selection"].isdisjoint(
-        partition_markets["validation"]
-    )
+    assert partition_markets["selection"].isdisjoint(partition_markets["validation"])
     unrelated_payloads = [
         json.loads(str(row["payload_json"]))
         for row in first
@@ -366,8 +381,7 @@ def test_wc2026_qualification_contract_is_profile_specific_and_disjoint(
     assert all(
         payload["proposition_A"]["event_scope"]
         != payload["proposition_B"]["event_scope"]
-        and payload["proposition_A"]["subject"]
-        != payload["proposition_B"]["subject"]
+        and payload["proposition_A"]["subject"] != payload["proposition_B"]["subject"]
         for payload in unrelated_payloads
     )
 
@@ -401,15 +415,11 @@ def test_qualify_threads_wc2026_profile_and_publishes_contract(
         _primary_client=_QualificationFixtureClient(config.primary_model),
         _verifier_client=_QualificationFixtureClient(config.verifier_model),
     )
-    profile = json.loads(
-        (out / "automation_profile.json").read_text(encoding="utf-8")
-    )
+    profile = json.loads((out / "automation_profile.json").read_text(encoding="utf-8"))
 
     assert report["status"] == "AUTOMATION_VALIDATED"
     assert report["input_profile"] == WC2026_SOURCE_SCHEMA
-    assert report["case_schema_version"] == (
-        WC2026_QUALIFICATION_CASE_SCHEMA_VERSION
-    )
+    assert report["case_schema_version"] == (WC2026_QUALIFICATION_CASE_SCHEMA_VERSION)
     assert profile["qualification_generator_version"] == (
         WC2026_QUALIFICATION_GENERATOR_VERSION
     )
@@ -464,6 +474,15 @@ def test_non_injected_qualify_publishes_wc2026_case_set(
         "_prepare_inference_context",
         lambda *_args, **_kwargs: inference,
     )
+    load_calls = 0
+    original_load = pipeline_module._load_source_markets
+
+    def load_once(*args: object, **kwargs: object) -> object:
+        nonlocal load_calls
+        load_calls += 1
+        return original_load(*args, **kwargs)
+
+    monkeypatch.setattr(pipeline_module, "_load_source_markets", load_once)
     monkeypatch.setattr(pipeline_module, "_run_qualification_cases", run_cases)
     monkeypatch.setattr(pipeline_module, "evaluate_qualification", evaluate)
 
@@ -474,6 +493,7 @@ def test_non_injected_qualify_publishes_wc2026_case_set(
         "case_count": 5_005,
         "schemas": {WC2026_QUALIFICATION_CASE_SCHEMA_VERSION},
     }
+    assert load_calls == 1
     db = DuckDB()
     try:
         rows = db.rows(
@@ -663,7 +683,9 @@ def test_wc2026_validation_matrix_is_strict_and_actionable(
     assert "export_polymarket_wc2026_graph_hourly_odds.py" in str(raised.value)
 
 
-def test_generic_exact_score_token_export_is_not_a_known_profile(tmp_path: Path) -> None:
+def test_generic_exact_score_token_export_is_not_a_known_profile(
+    tmp_path: Path,
+) -> None:
     source = tmp_path / "exact-score.parquet"
     db = DuckDB()
     try:
@@ -715,9 +737,10 @@ def test_fast_wc2026_discovery_publishes_structured_rules(tmp_path: Path) -> Non
     viewer_manifest = json.loads(
         (out / "viewer_manifest.json").read_text(encoding="utf-8")
     )
-    assert manifest["graph_content_fingerprint"] == viewer_manifest[
-        "graph_content_fingerprint"
-    ]
+    assert (
+        manifest["graph_content_fingerprint"]
+        == viewer_manifest["graph_content_fingerprint"]
+    )
 
     db = DuckDB(out / "oddsfox_graph.duckdb", read_only=True)
     try:
@@ -748,15 +771,14 @@ def test_fast_wc2026_discovery_publishes_structured_rules(tmp_path: Path) -> Non
     assert rules["wc2026.winner_exclusion.v1"] == 1
     assert not any(rule_id.startswith("time.") for rule_id in rules)
     implications = {
-        (str(row["src_node_id"]), str(row["dst_node_id"]))
-        for row in implication_rows
+        (str(row["src_node_id"]), str(row["dst_node_id"])) for row in implication_rows
     }
     assert ("br-final-yes", "br-r16-yes") in implications
     assert ("br-r16-no", "br-final-no") in implications
     graph = Graph.open(out)
     assert graph.build_mode == "fast"
-    assert graph.coverage()["classification_status"] == "not_applicable"
-    assert graph.coverage()["classification_coverage"] is None
+    assert graph.coverage().classification_status == "not_applicable"
+    assert graph.coverage().classification_coverage is None
     assert graph.market("br-r16").market_close_epoch == 1783382400
     proposition_view = graph.overview("proposition", edge_mode="essential")
     assert all("NOT(" not in node.label for node in proposition_view.nodes)
@@ -782,7 +804,7 @@ def test_fast_wc2026_discovery_publishes_structured_rules(tmp_path: Path) -> Non
     (out / "viewer_manifest.json").write_text(
         json.dumps(viewer_manifest), encoding="utf-8"
     )
-    with pytest.raises(ValueError, match="viewer artifacts are incompatible"):
+    with pytest.raises(ValueError, match="graph content fingerprint"):
         Graph.open(out)
 
 
@@ -809,11 +831,7 @@ def test_recording_plan_ignores_winner_clique_for_story_diversity(
     assert {node.domain for node in proposition_view.nodes} == expected_teams
     assert len(proposition_view.nodes) == 144
     close_columns = [
-        [
-            node.x
-            for node in proposition_view.nodes
-            if node.market_close_epoch == epoch
-        ]
+        [node.x for node in proposition_view.nodes if node.market_close_epoch == epoch]
         for epoch in sorted(
             {
                 node.market_close_epoch

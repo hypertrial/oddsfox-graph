@@ -4,14 +4,9 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
-import platform
-import socket
 import subprocess
 import sys
 import time
-import urllib.error
-import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -20,12 +15,29 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from oddsfox_graph._discovery.provenance import atomic_write_json, sha256_file
+from oddsfox_graph._discovery.performance_contracts import (
+    current_hardware,
+    current_python_version,
+    load_performance_budget,
+)
 from oddsfox_graph._discovery.versions import (
     CANONICAL_CATALOG_SHA256,
-    EXTRACTOR_VERSION,
+    FAST_READY_BENCHMARK_HARNESS_SHA256,
+    FAST_READY_BENCHMARK_VERSION,
     PERFORMANCE_BUDGET_VERSION,
-    RULE_VERSION,
+    SOURCE_SCHEMA,
 )
+
+
+_READY_PROBE = """
+import sys
+from pathlib import Path
+
+from oddsfox_graph.graph import Graph
+
+graph = Graph.open(Path(sys.argv[1]))
+print(graph.metadata().model_dump_json())
+"""
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -35,109 +47,54 @@ def _read_json(path: Path) -> dict[str, Any]:
     return value
 
 
-def _hardware() -> dict[str, str]:
-    processor = platform.processor()
-    if platform.system() == "Darwin":
-        observed = subprocess.run(
-            ["sysctl", "-n", "machdep.cpu.brand_string"],
-            capture_output=True,
-            check=False,
-            text=True,
-        ).stdout.strip()
-        processor = observed or processor
-        if "Apple" not in processor:
-            profile = subprocess.run(
-                ["system_profiler", "SPHardwareDataType"],
-                capture_output=True,
-                check=False,
-                text=True,
-            ).stdout
-            processor = next(
-                (
-                    line.partition(":")[2].strip()
-                    for line in profile.splitlines()
-                    if line.strip().startswith("Chip:")
-                ),
-                "",
-            )
-    return {
-        "system": platform.system(),
-        "machine": platform.machine(),
-        "processor": processor,
-    }
-
-
 def _load_budget(path: Path, repetitions: int) -> dict[str, Any]:
-    budget = _read_json(path)
-    hardware = _hardware()
-    bindings = {
-        "schema_version": PERFORMANCE_BUDGET_VERSION,
-        "input_sha256": CANONICAL_CATALOG_SHA256,
-        "system": hardware["system"],
-        "machine": hardware["machine"],
-        "repetitions": repetitions,
-        "extractor_version": EXTRACTOR_VERSION,
-        "rule_version": RULE_VERSION,
-    }
-    for key, expected in bindings.items():
-        if budget.get(key) != expected:
-            raise ValueError(
-                f"Performance budget {key} mismatch: expected {expected!r}, "
-                f"got {budget.get(key)!r}"
-            )
-    processor_contains = str(budget.get("processor_contains") or "")
-    if processor_contains and processor_contains not in hardware["processor"]:
+    budget = load_performance_budget(path)
+    hardware = current_hardware()
+    if repetitions != budget.repetitions:
+        raise ValueError(
+            f"Performance budget repetitions mismatch: expected "
+            f"{budget.repetitions}, got {repetitions}"
+        )
+    if hardware.system != budget.system or hardware.machine != budget.machine:
+        raise ValueError("Performance budget hardware binding does not match")
+    if hardware.processor != budget.processor_exact:
         raise ValueError("Performance budget processor binding does not match")
-    return budget
+    if current_python_version() != budget.python_version:
+        raise ValueError("Performance budget Python binding does not match")
+    harness_digest = sha256_file(Path(__file__).resolve())
+    if harness_digest != budget.versions.benchmark_harness_sha256:
+        raise ValueError("Performance budget benchmark harness binding does not match")
+    return budget.model_dump(mode="json")
 
 
-def _free_port() -> int:
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        return int(sock.getsockname()[1])
+def _open_ready_graph(
+    out_dir: Path,
+    *,
+    started: float,
+) -> tuple[float, dict[str, Any]]:
+    """Probe readiness in a fresh isolated interpreter included in timing."""
 
-
-def _wait_for_meta(out_dir: Path, *, started: float) -> tuple[float, dict[str, Any]]:
-    port = _free_port()
-    process = subprocess.Popen(
-        [
-            sys.executable,
-            "-m",
-            "oddsfox_graph.cli",
-            "serve",
-            "--out",
-            str(out_dir),
-            "--host",
-            "127.0.0.1",
-            "--port",
-            str(port),
-        ],
+    completed = subprocess.run(
+        [sys.executable, "-I", "-c", _READY_PROBE, str(out_dir)],
         cwd=REPO_ROOT,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        env={**os.environ, "PYTHONUNBUFFERED": "1"},
+        capture_output=True,
+        text=True,
+        check=False,
     )
+    ready_seconds = time.monotonic() - started
+    if completed.returncode != 0:
+        raise RuntimeError(
+            "Fresh manifest/query readiness probe failed:\n" + completed.stderr[-4000:]
+        )
     try:
-        url = f"http://127.0.0.1:{port}/api/v1/meta"
-        deadline = time.monotonic() + 15.0
-        while time.monotonic() < deadline:
-            if process.poll() is not None:
-                raise RuntimeError("Explorer server exited before metadata was ready")
-            try:
-                with urllib.request.urlopen(url, timeout=0.5) as response:
-                    payload = json.loads(response.read())
-                    if response.status == 200 and isinstance(payload, dict):
-                        return time.monotonic() - started, payload
-            except (OSError, urllib.error.URLError, json.JSONDecodeError):
-                time.sleep(0.05)
-        raise RuntimeError("Explorer metadata endpoint was not ready within 15 seconds")
-    finally:
-        process.terminate()
-        try:
-            process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait(timeout=5)
+        payload = json.loads(completed.stdout)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(
+            "Fresh manifest/query readiness probe returned invalid JSON"
+        ) from exc
+    if not isinstance(payload, dict):
+        raise RuntimeError("Fresh manifest/query readiness probe returned a non-object")
+    return ready_seconds, payload
 
 
 def _run_once(
@@ -158,6 +115,8 @@ def _run_once(
             "fast",
             "--input",
             str(input_path),
+            "--input-profile",
+            SOURCE_SCHEMA,
             "--out",
             str(out_dir),
             "--deadline-seconds",
@@ -176,7 +135,7 @@ def _run_once(
         raise RuntimeError(
             f"Fast repetition {repetition} failed:\n{completed.stderr[-4000:]}"
         )
-    time_to_ready, metadata = _wait_for_meta(out_dir, started=started)
+    manifest_query_ready, metadata = _open_ready_graph(out_dir, started=started)
     manifest = _read_json(out_dir / "build_manifest.json")
     stats = manifest.get("stats")
     if not isinstance(stats, dict):
@@ -198,7 +157,7 @@ def _run_once(
         )
     return {
         "repetition": repetition,
-        "time_to_ready_seconds": round(time_to_ready, 6),
+        "manifest_query_ready_seconds": round(manifest_query_ready, 6),
         "deadline_met": bool(manifest.get("deadline", {}).get("met")),
         "logical_artifact_hashes": manifest.get("artifact_hashes"),
         "peak_rss_mb": stats.get("peak_rss_mb"),
@@ -230,8 +189,11 @@ def main() -> int:
     if sha256_file(input_path) != CANONICAL_CATALOG_SHA256:
         raise ValueError("Fast performance validation requires the canonical catalog")
     if args.repetitions != 3:
-        raise ValueError("The v0.11 release budget requires exactly three repetitions")
+        raise ValueError("The v0.13 release budget requires exactly three repetitions")
     budget = _load_budget(args.performance_budget.resolve(), args.repetitions)
+    harness_digest = sha256_file(Path(__file__).resolve())
+    if harness_digest != FAST_READY_BENCHMARK_HARNESS_SHA256:
+        raise ValueError("Benchmark harness source does not match its version binding")
     work_dir = args.work_dir.resolve()
     work_dir.mkdir(parents=True, exist_ok=True)
     runs: list[dict[str, Any]] = []
@@ -247,7 +209,7 @@ def main() -> int:
             json.dumps(
                 {
                     "repetition": repetition,
-                    "time_to_ready_seconds": run["time_to_ready_seconds"],
+                    "manifest_query_ready_seconds": run["manifest_query_ready_seconds"],
                     "peak_rss_mb": run["peak_rss_mb"],
                 },
                 sort_keys=True,
@@ -255,11 +217,13 @@ def main() -> int:
             file=sys.stderr,
             flush=True,
         )
-    max_ready = float(budget["gates"]["max_time_to_ready_seconds"])
-    hashes = [json.dumps(run["logical_artifact_hashes"], sort_keys=True) for run in runs]
+    max_ready = float(budget["gates"]["max_manifest_query_ready_seconds"])
+    hashes = [
+        json.dumps(run["logical_artifact_hashes"], sort_keys=True) for run in runs
+    ]
     acceptance = {
         "every_run_ready_within_budget": all(
-            float(run["time_to_ready_seconds"]) <= max_ready for run in runs
+            float(run["manifest_query_ready_seconds"]) <= max_ready for run in runs
         ),
         "every_discovery_deadline_met": all(run["deadline_met"] for run in runs),
         "logical_hashes_identical": len(set(hashes)) == 1,
@@ -269,8 +233,11 @@ def main() -> int:
     }
     result = {
         "schema_version": PERFORMANCE_BUDGET_VERSION,
+        "benchmark_contract": FAST_READY_BENCHMARK_VERSION,
+        "benchmark_harness_sha256": harness_digest,
         "input_sha256": CANONICAL_CATALOG_SHA256,
-        "hardware": _hardware(),
+        "python_version": current_python_version(),
+        "hardware": current_hardware().model_dump(mode="json"),
         "budget": budget,
         "runs": runs,
         "acceptance": acceptance,

@@ -8,6 +8,7 @@ vi.mock("@sigma/edge-curve", () => ({
 }));
 
 import { buildGraph, persistentLabels } from "./GraphCanvas";
+import { emptyCoverage } from "./testFixtures";
 import type { ExplorerNode, GraphView } from "./types";
 
 function node(
@@ -72,7 +73,7 @@ const view: GraphView = {
   layout_mode: "close_time",
   truncated_nodes: false,
   truncated_edges: false,
-  coverage: {},
+  coverage: emptyCoverage,
   edge_mode: "essential",
   display_stats: null,
 };

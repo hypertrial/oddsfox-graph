@@ -8,21 +8,6 @@ MIT:
 - Graphology Layout 0.6.1 — Copyright Guillaume Plique
 - Graphology ForceAtlas2 0.10.1 — Copyright Guillaume Plique
 - Sigma Edge Curve 3.1.0 — Copyright Alexis Jacomy, Guillaume Plique and contributors
-- DuckDB-Wasm 1.32.0 — DuckDB Foundation
-
-Apache License 2.0:
-
-- Apache Arrow 17.0.0 — Copyright 2016-2024 The Apache Software Foundation
-- FlatBuffers 24.12.23 — Copyright the FlatBuffers authors
-- @swc/helpers — Copyright the SWC contributors
-
-0BSD:
-
-- tslib 2.8.1 — Copyright Microsoft Corporation
-
-The Apache License 2.0 terms are available at
-https://www.apache.org/licenses/LICENSE-2.0. Apache Arrow's required NOTICE is
-available at https://github.com/apache/arrow/blob/main/NOTICE.txt.
 
 MIT License
 

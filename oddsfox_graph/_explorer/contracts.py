@@ -2,9 +2,16 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from datetime import datetime
+from typing import Generic, Literal, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from .._discovery.manifest_contracts import (
+    BuildManifest,
+    CoverageSummary,
+    ViewerManifest,
+)
 
 
 ExplorerLevel = Literal["component", "event", "proposition"]
@@ -21,6 +28,7 @@ EvidenceTier = Literal[
 ]
 CoverageStatus = Literal["not_applicable", "not_started", "partial", "complete"]
 EdgeMode = Literal["essential", "all"]
+PageRow = TypeVar("PageRow", bound=BaseModel)
 
 
 class GraphFilter(BaseModel):
@@ -75,10 +83,10 @@ class ExplorerEdge(BaseModel):
     aggregation_only: bool = False
 
 
-class GraphPage(BaseModel):
+class GraphPage(BaseModel, Generic[PageRow]):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    rows: tuple[dict[str, object], ...]
+    rows: tuple[PageRow, ...]
     next_cursor: str | None = None
     truncated: bool = False
 
@@ -91,7 +99,7 @@ class GraphView(BaseModel):
     edges: tuple[ExplorerEdge, ...]
     truncated_nodes: bool = False
     truncated_edges: bool = False
-    coverage: dict[str, object]
+    coverage: CoverageSummary
     edge_mode: EdgeMode = "all"
     layout_mode: LayoutMode = "hierarchical"
     display_stats: GraphDisplayStats | None = None
@@ -297,16 +305,123 @@ class ExploreHome(BaseModel):
     relationship_groups: tuple[RelationshipGroupSummary, ...]
     capabilities: ExplorerCapabilities
     display_stats: GraphDisplayStats
-    coverage: dict[str, object]
+    coverage: CoverageSummary
 
 
 class ExplorerMetadata(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     package_version: str
-    viewer: dict[str, object]
-    coverage: dict[str, object]
-    build: dict[str, object]
+    viewer: ViewerManifest
+    coverage: CoverageSummary
+    build: BuildManifest
+    client_fingerprint: str | None = None
+
+
+class EventSummary(BaseModel):
+    """Stable public projection of one event aggregation row."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    event_key: str
+    event_id: str | None = None
+    event_slug: str
+    label: str
+    primary_domain: str | None = None
+    category: str | None = None
+    market_count: int = Field(ge=0)
+    proposition_count: int = Field(ge=0)
+    active_market_count: int = Field(ge=0)
+    closed_market_count: int = Field(ge=0)
+    accepted_edge_count: int = Field(ge=0)
+    rejected_edge_count: int = Field(ge=0)
+    quarantined_pair_count: int = Field(ge=0)
+    unclassified_pair_count: int = Field(ge=0)
+    classification_eligible_count: int = Field(ge=0)
+    classification_assessed_count: int = Field(ge=0)
+    classification_status: CoverageStatus
+    classification_coverage: float | None = Field(default=None, ge=0.0, le=1.0)
+    deterministic_edge_count: int = Field(ge=0)
+    consensus_edge_count: int = Field(ge=0)
+    complement_count: int = Field(ge=0)
+    equivalent_count: int = Field(ge=0)
+    mutually_exclusive_count: int = Field(ge=0)
+    implies_count: int = Field(ge=0)
+    compatible_count: int = Field(ge=0)
+    component_count: int = Field(ge=0)
+    first_seen_ts: datetime | None = None
+    last_seen_ts: datetime | None = None
+
+
+class ComponentSummary(BaseModel):
+    """Stable public projection of one connected-component summary."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    component_id: str
+    component_fingerprint: str
+    proposition_count: int = Field(ge=0)
+    market_count: int = Field(ge=0)
+    event_count: int = Field(ge=0)
+    edge_count: int = Field(ge=0)
+    deterministic_edge_count: int = Field(ge=0)
+    consensus_edge_count: int = Field(ge=0)
+    quarantined_pair_count: int = Field(ge=0)
+    unclassified_pair_count: int = Field(ge=0)
+    classification_status: CoverageStatus
+    classification_coverage: float | None = Field(default=None, ge=0.0, le=1.0)
+    representative_node_ids: tuple[str, ...]
+    layout_min_x: float
+    layout_min_y: float
+    layout_max_x: float
+    layout_max_y: float
+
+
+class EventMarketSummary(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    market_id: str
+    question: str
+    category: str | None = None
+    primary_domain: str | None = None
+
+
+class EventDetail(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    summary: EventSummary
+    markets: tuple[EventMarketSummary, ...]
+    markets_truncated: bool
+
+
+class ComponentDetail(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    summary: ComponentSummary
+    event_keys: tuple[str, ...]
+    events_truncated: bool
+
+
+class QuarantineSummary(BaseModel):
+    """Bounded diagnostic row exposed by the analyst API."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    quarantine_id: str
+    proposition_a_id: str | None = None
+    proposition_b_id: str | None = None
+    stage: str
+    reason_code: str
+    proposed_relation: str | None = None
+    confidence: float | None = None
+    primary_relation: str | None = None
+    verifier_relation: str | None = None
+    explanation: str
+    primary_model_version: str | None = None
+    verifier_model_version: str | None = None
+    primary_inference_fingerprint: str | None = None
+    verifier_inference_fingerprint: str | None = None
+    automation_profile_id: str | None = None
 
 
 class RecordingScoreBreakdown(BaseModel):

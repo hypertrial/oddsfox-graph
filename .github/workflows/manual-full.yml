@@ -1,10 +1,10 @@
-name: Manual v0.11 Fast Validation
+name: Manual v0.13 Release Validation
 
 on:
   workflow_dispatch:
     inputs:
       fixture_run_id:
-        description: Run containing the v0.11 fast release fixture
+        description: Run containing the v0.13 fast release fixture
         required: true
         type: string
       input_sha256:
@@ -21,7 +21,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  release-validation:
+  manual-release-validation:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -55,6 +55,7 @@ jobs:
       - run: python -m mypy oddsfox_graph
       - run: PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest -q
       - run: python -m build
+      - run: python scripts/check_wheel_size.py --wheel dist/oddsfox_graph-0.13.0-py3-none-any.whl
       - run: python -m pip install -c constraints-dev.txt --force-reinstall dist/*.whl
       - run: python -I -c "from oddsfox_graph.discovery import DiscoveryConfig"
       - run: python -I -m oddsfox_graph.cli --help
@@ -71,13 +72,16 @@ jobs:
           path: output/release-validation
 
   m4-fast-validation:
-    needs: release-validation
+    needs: manual-release-validation
     runs-on: [self-hosted, macOS, ARM64, oddsfox-m4]
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v6
+        with:
+          python-version: "3.11"
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: discovery-release-fixture
@@ -85,11 +89,16 @@ jobs:
           github-token: ${{ github.token }}
           run-id: ${{ inputs.fixture_run_id }}
       - run: python -m pip install -c constraints-dev.txt -e ".[dev]"
+      - name: Bind the benchmark host and interpreter
+        run: |
+          python -c "import sys; assert sys.version_info[:2] == (3, 11), sys.version"
+          python -c "from oddsfox_graph._discovery.performance_contracts import current_hardware; h=current_hardware(); assert (h.system, h.machine, h.processor) == ('Darwin', 'arm64', 'Apple M4'), h"
       - name: Check fast-mode prerequisites
         run: |
           python -m oddsfox_graph.cli doctor \
             --mode fast \
             --input fixture/input.parquet \
+            --input-profile polymarket-market-snapshot-v1 \
             --out output/fast \
             --output-format json
       - name: Enforce three process-isolated complete-catalog gates
@@ -98,7 +107,7 @@ jobs:
             --input fixture/input.parquet \
             --output output/performance_report.json \
             --work-dir output/performance-runs \
-            --performance-budget benchmarks/m4-v0.11-fast-performance-budget.json \
+            --performance-budget oddsfox_graph/benchmarks/m4-v0.13-fast-performance-budget.json \
             --require-gates
       - name: Validate completed explorer and deterministic provenance
         run: |

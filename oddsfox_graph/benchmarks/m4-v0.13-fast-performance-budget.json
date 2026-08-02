@@ -1,0 +1,34 @@
+{
+  "schema_version": "performance-budget-v4",
+  "input_profile": "polymarket-market-snapshot-v1",
+  "input_sha256": "790bd1595b379472ad65ba0073105b4eb630974d04e7b44d58c8a4929f274aa2",
+  "system": "Darwin",
+  "machine": "arm64",
+  "processor_exact": "Apple M4",
+  "python_version": "3.11",
+  "repetitions": 3,
+  "selection": "complete-valid-catalog",
+  "versions": {
+    "benchmark_contract": "fast-ready-benchmark-v2",
+    "benchmark_harness_sha256": "bab11484d6ee2501af4bea226982b0dd45b8b39273a7c6dee1c67d3adf912921",
+    "input_adapter": "input-adapters-v2",
+    "normalization": "normalization-v6",
+    "extractor": "strict-catalog-extractor-v2",
+    "rules": "discovery-rules-v7",
+    "publication": "discovery-publication-v10",
+    "aggregation": "explorer-aggregation-v3",
+    "viewer_api": "viewer-api-v4",
+    "viewer_artifacts": "viewer-artifacts-v4",
+    "discovery_semantics_fingerprint": "1acd8ef2a6df4134f77c2a06ad0cef4ff765e903615be99bc43448b4459afdff",
+    "source_tree_fingerprint": "eae73d3feeed986fcf37e0f37b9871d741b37b4a5a959b41f270f280fea64b09"
+  },
+  "gates": {
+    "max_manifest_query_ready_seconds": 120.0,
+    "require_logical_hash_equality": true,
+    "require_no_inference_resources": true
+  },
+  "diagnostics": {
+    "record_peak_rss": true,
+    "peak_rss_is_blocking": false
+  }
+}

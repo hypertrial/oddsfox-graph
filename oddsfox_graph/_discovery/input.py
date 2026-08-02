@@ -11,6 +11,16 @@ from .versions import INPUT_ADAPTER_VERSION, SOURCE_SCHEMA, WC2026_SOURCE_SCHEMA
 from ..queries import DuckDB, q
 
 
+_COMPACT_ELIGIBLE_PREDICATE = """
+    market_id IS NOT NULL
+    AND question IS NOT NULL
+    AND outcomes IS NOT NULL
+    AND clob_token_ids IS NOT NULL
+    AND len(outcomes) > 0
+    AND len(outcomes) = len(clob_token_ids)
+"""
+
+
 def load_source_markets(
     input_path: Path,
     *,
@@ -96,16 +106,26 @@ def load_source_markets(
             or 0
         )
         _validate_compact_catalog(db, input_path)
-        eligible_summaries = _compact_market_summaries(
-            db,
-            input_path,
-            columns,
-        )
-        selected_ids = (
-            _select_market_summaries(eligible_summaries, max_propositions)
-            if max_propositions is not None
-            else [str(row["market_id"]) for row in eligible_summaries]
-        )
+        if max_propositions is None:
+            eligible_markets, eligible_propositions = _compact_catalog_counts(
+                db,
+                input_path,
+            )
+            selected_ids = None
+        else:
+            eligible_summaries = _compact_market_summaries(
+                db,
+                input_path,
+                columns,
+            )
+            eligible_markets = len(eligible_summaries)
+            eligible_propositions = sum(
+                int(cast(int, row["outcome_count"])) for row in eligible_summaries
+            )
+            selected_ids = _select_market_summaries(
+                eligible_summaries,
+                max_propositions,
+            )
         markets = _load_compact_markets(
             db,
             input_path,
@@ -116,10 +136,6 @@ def load_source_markets(
         db.close()
 
     _validate_source_markets(markets)
-    eligible_markets = len(eligible_summaries)
-    eligible_propositions = sum(
-        int(cast(int, row["outcome_count"])) for row in eligible_summaries
-    )
     selection: dict[str, object] = {
         "strategy": (
             "volume_desc_then_market_id"
@@ -428,8 +444,7 @@ def _validate_wc2026_column_types(schema: dict[str, str]) -> None:
     for name, accepted in allowed.items():
         actual = schema[name]
         if not any(
-            actual == value or actual.startswith(value + "(")
-            for value in accepted
+            actual == value or actual.startswith(value + "(") for value in accepted
         ):
             wrong[name] = actual
     if wrong:
@@ -464,9 +479,7 @@ def _wc2026_invalid_required_rows(db: DuckDB, input_path: Path) -> list[str]:
         "market_status",
     )
     empty = " OR ".join(f"trim({name}::VARCHAR) = ''" for name in text_columns)
-    nulls = " OR ".join(
-        f"{name} IS NULL" for name in sorted(_WC2026_REQUIRED_COLUMNS)
-    )
+    nulls = " OR ".join(f"{name} IS NULL" for name in sorted(_WC2026_REQUIRED_COLUMNS))
     return _bounded_values(
         db,
         f"""
@@ -480,7 +493,9 @@ def _wc2026_invalid_required_rows(db: DuckDB, input_path: Path) -> list[str]:
 
 
 def _bounded_values(db: DuckDB, sql: str, *, limit: int = 10) -> list[str]:
-    return [str(row["value"]) for row in db.rows(f"SELECT * FROM ({sql}) LIMIT {limit}")]
+    return [
+        str(row["value"]) for row in db.rows(f"SELECT * FROM ({sql}) LIMIT {limit}")
+    ]
 
 
 def _required_int(value: object, field: str) -> int:
@@ -512,11 +527,11 @@ def _wc2026_source_markets(
     errors: list[str] = []
     for market_id, rows in sorted(by_market.items()):
         if len(rows) != 2:
-            errors.append(f"{market_id}: expected 2 invariant token rows, found {len(rows)}")
+            errors.append(
+                f"{market_id}: expected 2 invariant token rows, found {len(rows)}"
+            )
             continue
-        indexes = {
-            _required_int(row["outcome_index"], "outcome_index") for row in rows
-        }
+        indexes = {_required_int(row["outcome_index"], "outcome_index") for row in rows}
         labels = {str(row["outcome_label"]) for row in rows}
         tokens = {str(row["clob_token_id"]) for row in rows}
         progression_rows = [row for row in rows if bool(row["is_progression_token"])]
@@ -541,7 +556,9 @@ def _wc2026_source_markets(
             if len({row[field] for row in rows}) != 1
         ]
         if indexes != {0, 1} or labels != {"Yes", "No"} or len(tokens) != 2:
-            errors.append(f"{market_id}: tokens must be unique literal Yes/No indexes 0/1")
+            errors.append(
+                f"{market_id}: tokens must be unique literal Yes/No indexes 0/1"
+            )
             continue
         if len(progression_rows) != 1:
             errors.append(f"{market_id}: expected exactly one progression token")
@@ -573,10 +590,14 @@ def _wc2026_source_markets(
         expected_status = (
             "closed"
             if bool(rows[0]["is_closed"])
-            else "live" if bool(rows[0]["is_active"]) else "inactive"
+            else "live"
+            if bool(rows[0]["is_active"])
+            else "inactive"
         )
         if market_status != "resolved" and market_status != expected_status:
-            errors.append(f"{market_id}: market_status conflicts with active/closed flags")
+            errors.append(
+                f"{market_id}: market_status conflicts with active/closed flags"
+            )
             continue
         expected_outcome = _WC2026_PROGRESSION_OUTCOMES.get((stage_key, direction))
         if expected_outcome != progression_outcome:
@@ -598,9 +619,7 @@ def _wc2026_source_markets(
             )
             for row in sorted(
                 rows,
-                key=lambda item: _required_int(
-                    item["outcome_index"], "outcome_index"
-                ),
+                key=lambda item: _required_int(item["outcome_index"], "outcome_index"),
             )
         )
         market_fields = {
@@ -675,17 +694,13 @@ def _load_compact_markets(
     *,
     selected_market_ids: Sequence[str] | None = None,
 ) -> list[SourceMarket]:
-    selection_sql = (
-        "WHERE market_id::VARCHAR IN (SELECT unnest(?))"
-        if selected_market_ids is not None
-        else ""
-    )
+    selection_sql = f"WHERE {_COMPACT_ELIGIBLE_PREDICATE}"
+    if selected_market_ids is not None:
+        selection_sql += " AND market_id::VARCHAR IN (SELECT unnest(?))"
     params: Sequence[object] | None = (
-        [list(selected_market_ids)]
-        if selected_market_ids is not None
-        else None
+        [list(selected_market_ids)] if selected_market_ids is not None else None
     )
-    rows = db.rows(
+    rows = db.iter_rows(
         f"""
         SELECT
             market_id::VARCHAR AS market_id,
@@ -729,9 +744,7 @@ def _load_compact_markets(
         description = str(row.get("description") or "")
         source_outcomes = tuple(
             SourceOutcome(index, str(outcome), str(token))
-            for index, (outcome, token) in enumerate(
-                zip(outcomes, tokens, strict=True)
-            )
+            for index, (outcome, token) in enumerate(zip(outcomes, tokens, strict=True))
         )
         source_fields = {
             "market_id": market_id,
@@ -740,10 +753,7 @@ def _load_compact_markets(
             "event_id": str_or_none(row.get("event_id")),
             "event_slug": str_or_none(row.get("event_slug")),
             "category": str_or_none(row.get("category")),
-            "tags": [
-                str(tag)
-                for tag in cast(Sequence[object], row.get("tags") or [])
-            ],
+            "tags": [str(tag) for tag in cast(Sequence[object], row.get("tags") or [])],
             "time_start": datetime_or_none(row.get("time_start")),
             "time_end": datetime_or_none(row.get("time_end")),
             "outcomes": [
@@ -765,8 +775,7 @@ def _load_compact_markets(
                 event_slug=str_or_none(row.get("event_slug")),
                 category=str_or_none(row.get("category")),
                 tags=tuple(
-                    str(tag)
-                    for tag in cast(Sequence[object], row.get("tags") or [])
+                    str(tag) for tag in cast(Sequence[object], row.get("tags") or [])
                 ),
                 time_start=datetime_or_none(row.get("time_start")),
                 time_end=datetime_or_none(row.get("time_end")),
@@ -781,16 +790,28 @@ def _load_compact_markets(
     return markets
 
 
+def _compact_catalog_counts(
+    db: DuckDB,
+    input_path: Path,
+) -> tuple[int, int]:
+    row = db.rows(
+        f"""
+        SELECT
+            count(*)::BIGINT AS market_count,
+            coalesce(sum(len(outcomes)), 0)::BIGINT AS proposition_count
+        FROM read_parquet('{q(input_path)}')
+        WHERE {_COMPACT_ELIGIBLE_PREDICATE}
+        """
+    )[0]
+    return int(cast(int, row["market_count"])), int(cast(int, row["proposition_count"]))
+
+
 def _compact_market_summaries(
     db: DuckDB,
     input_path: Path,
     columns: set[str],
 ) -> list[dict[str, object]]:
-    volume_sql = (
-        "try_cast(volume AS DOUBLE)"
-        if "volume" in columns
-        else "NULL::DOUBLE"
-    )
+    volume_sql = "try_cast(volume AS DOUBLE)" if "volume" in columns else "NULL::DOUBLE"
     return db.rows(
         f"""
         SELECT
@@ -798,12 +819,7 @@ def _compact_market_summaries(
             {volume_sql} AS volume,
             len(outcomes)::INTEGER AS outcome_count
         FROM read_parquet('{q(input_path)}')
-        WHERE market_id IS NOT NULL
-          AND question IS NOT NULL
-          AND outcomes IS NOT NULL
-          AND clob_token_ids IS NOT NULL
-          AND len(outcomes) > 0
-          AND len(outcomes) = len(clob_token_ids)
+        WHERE {_COMPACT_ELIGIBLE_PREDICATE}
         ORDER BY market_id
         """
     )
@@ -827,9 +843,7 @@ def _select_market_summaries(
         ),
     )
     for row in ordered:
-        next_count = selected_propositions + int(
-            cast(int, row["outcome_count"])
-        )
+        next_count = selected_propositions + int(cast(int, row["outcome_count"]))
         if next_count > max_propositions:
             continue
         selected.append(str(row["market_id"]))
@@ -838,8 +852,7 @@ def _select_market_summaries(
             break
     if not selected:
         raise ValueError(
-            "No complete market fits within max_propositions="
-            f"{max_propositions}"
+            f"No complete market fits within max_propositions={max_propositions}"
         )
     return sorted(selected)
 
@@ -848,12 +861,7 @@ def _validate_compact_catalog(db: DuckDB, input_path: Path) -> None:
     valid = f"""
         SELECT *
         FROM read_parquet('{q(input_path)}')
-        WHERE market_id IS NOT NULL
-          AND question IS NOT NULL
-          AND outcomes IS NOT NULL
-          AND clob_token_ids IS NOT NULL
-          AND len(outcomes) > 0
-          AND len(outcomes) = len(clob_token_ids)
+        WHERE {_COMPACT_ELIGIBLE_PREDICATE}
     """
     duplicate_markets = int(
         db.scalar(

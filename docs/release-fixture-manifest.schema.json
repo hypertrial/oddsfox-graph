@@ -1,12 +1,12 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "OddsFox v0.12 deterministic fast-mode release fixture",
+  "title": "OddsFox v0.13 deterministic fast-mode release fixture",
   "type": "object",
   "additionalProperties": false,
   "required": ["schema_version", "package_version", "source_sha256", "files", "trees"],
   "properties": {
-    "schema_version": {"const": "discovery-release-fixture-v7"},
-    "package_version": {"const": "0.12.0"},
+    "schema_version": {"const": "discovery-release-fixture-v8"},
+    "package_version": {"const": "0.13.0"},
     "source_sha256": {
       "const": "790bd1595b379472ad65ba0073105b4eb630974d04e7b44d58c8a4929f274aa2"
     },
