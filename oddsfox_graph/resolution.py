@@ -263,7 +263,7 @@ def resolve_fragments(
             continue
 
         # Tier 5: conservative rapidfuzz match
-        best_canonical_id, best_score = fuzzy_index.best_match(
+        best_canonical_id, _ = fuzzy_index.best_match(
             node.type,
             node.label,
             settings.fuzzy_threshold,

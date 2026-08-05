@@ -38,6 +38,11 @@ def test_run_build_and_export_writes_artifacts(tmp_path: Path) -> None:
     assert len(result.graph.nodes) > 0
 
 
+def test_load_semantic_markets_empty_event_filter_returns_no_rows() -> None:
+    filtered = load_semantic_markets(GOLDEN_MARKETS_PATH, event_ids=[])
+    assert filtered == []
+
+
 def test_load_semantic_markets_event_filter_matches_full_load() -> None:
     markets = load_golden_markets()
     event_ids = select_event_ids(

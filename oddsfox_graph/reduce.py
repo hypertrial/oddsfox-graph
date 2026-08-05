@@ -111,7 +111,9 @@ def load_semantic_markets(
     path: Path,
     event_ids: list[str] | None = None,
 ) -> list[SemanticMarket]:
-    if event_ids:
+    if event_ids is not None:
+        if not event_ids:
+            return []
         con = duckdb.connect()
         placeholders = ", ".join(f"'{event_id}'" for event_id in event_ids)
         query = f"""

@@ -130,13 +130,17 @@ def infer_event_fragments(
 
 
 def load_markets_for_infer(settings: Settings) -> list[SemanticMarket]:
-    available_event_ids = list_semantic_market_event_ids(settings.semantic_markets_path)
+    path = settings.semantic_markets_path
+    if not settings.event_ids and settings.limit_events is None:
+        return load_semantic_markets(path)
+
+    available_event_ids = list_semantic_market_event_ids(path)
     target_event_ids = select_event_ids(
         available_event_ids,
         settings.event_ids,
         settings.limit_events,
     )
-    return load_semantic_markets(settings.semantic_markets_path, event_ids=target_event_ids)
+    return load_semantic_markets(path, event_ids=target_event_ids)
 
 
 def load_all_fragments(settings: Settings) -> dict[str, GraphFragment]:
