@@ -23,7 +23,6 @@ class Settings:
     nodes_path: Path = build_dir / "nodes.parquet"
     edges_path: Path = build_dir / "edges.parquet"
     rejected_edges_path: Path = build_dir / "rejected_edges.parquet"
-    unresolved_entities_path: Path = build_dir / "unresolved_entities.parquet"
     ontology_path: Path = build_dir / "ontology.json"
     inference_report_path: Path = build_dir / "inference_report.json"
 
@@ -42,6 +41,17 @@ class Settings:
     resume: bool = True
     limit_events: int | None = None
     event_ids: list[str] = field(default_factory=list)
+
+    def configure_build_dir(self, build_dir: Path) -> None:
+        self.build_dir = build_dir
+        self.fragments_dir = build_dir / "fragments"
+        self.failed_fragments_dir = build_dir / "fragments" / "_failed"
+        self.semantic_markets_path = build_dir / "semantic_markets.parquet"
+        self.nodes_path = build_dir / "nodes.parquet"
+        self.edges_path = build_dir / "edges.parquet"
+        self.rejected_edges_path = build_dir / "rejected_edges.parquet"
+        self.ontology_path = build_dir / "ontology.json"
+        self.inference_report_path = build_dir / "inference_report.json"
 
     def ensure_dirs(self) -> None:
         self.build_dir.mkdir(parents=True, exist_ok=True)

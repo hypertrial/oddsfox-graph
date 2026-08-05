@@ -62,17 +62,6 @@ class RejectedEdge(CanonicalEdge):
     rejection_reason: str
 
 
-class UnresolvedEntity(BaseModel):
-    local_id: str
-    type: NodeType
-    label: str
-    aliases: list[str] = Field(default_factory=list)
-    confidence: float
-    evidence_market_ids: list[str] = Field(default_factory=list)
-    inference_method: str = "unknown"
-    reason: str = "no_match"
-
-
 class SemanticMarket(BaseModel):
     market_id: str
     event_id: str
@@ -100,5 +89,4 @@ class InferenceReport(BaseModel):
     edge_counts: dict[str, int] = Field(default_factory=dict)
     resolution_tiers: dict[str, int] = Field(default_factory=dict)
     rejected_edge_reasons: dict[str, int] = Field(default_factory=dict)
-    unresolved_count: int = 0
     per_event_status: dict[str, str] = Field(default_factory=dict)

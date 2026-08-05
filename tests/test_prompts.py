@@ -1,4 +1,5 @@
 from oddsfox_graph.prompts import (
+    _chunk_exceeds_budget,
     _serialize_market,
     chunk_markets_for_prompt,
     estimate_output_tokens,
@@ -50,3 +51,22 @@ def test_serialize_market_truncates_long_description() -> None:
     assert serialized["description"] is not None
     assert len(serialized["description"]) == 100
     assert serialized["description"].endswith("...")
+
+
+def test_incremental_chunking_matches_full_prompt_budget() -> None:
+    markets = [_market(str(i)) for i in range(20)]
+    incremental = chunk_markets_for_prompt(
+        markets,
+        "100",
+        token_budget=100000,
+        output_token_budget=100000,
+        max_markets_per_chunk=8,
+    )
+    for chunk in incremental:
+        assert not _chunk_exceeds_budget(
+            "100",
+            chunk,
+            token_budget=100000,
+            output_token_budget=100000,
+            max_text_field_chars=500,
+        )

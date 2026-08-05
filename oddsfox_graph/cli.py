@@ -2,27 +2,17 @@
 
 from __future__ import annotations
 
-import json
+import logging
 from pathlib import Path
 from typing import Annotated, Optional
 
-import pyarrow.parquet as pq
 import typer
 
 from oddsfox_graph.config import Settings
-from oddsfox_graph.deterministic import build_deterministic_fragments_by_event
-from oddsfox_graph.export import export_graph_artifacts
-from oddsfox_graph.graphbuild import (
-    build_graph_from_fragments,
-    validate_exported_graph,
-)
-from oddsfox_graph.infer import infer_event_fragments, load_all_fragments
+from oddsfox_graph.infer import infer_event_fragments, load_markets_for_infer
 from oddsfox_graph.llm import LocalGraphLLM
-from oddsfox_graph.reduce import load_semantic_markets, reduce_semantic_markets
-from oddsfox_graph.reporting import build_inference_report
-from oddsfox_graph.resolution import resolve_fragments
-from oddsfox_graph.ontology import EdgeType
-from oddsfox_graph.schema import CanonicalEdge, CanonicalNode
+from oddsfox_graph.pipeline import run_build_and_export, validate_exported_artifacts
+from oddsfox_graph.reduce import reduce_semantic_markets
 
 app = typer.Typer(
     name="oddsfox-graph",
@@ -31,14 +21,17 @@ app = typer.Typer(
 )
 
 
-def _settings_from_options(
+def _base_settings(ctx: typer.Context) -> Settings:
+    return ctx.obj if isinstance(ctx.obj, Settings) else Settings()
+
+
+def _apply_infer_options(
+    settings: Settings,
     model_path: Optional[Path] = None,
     limit_events: Optional[int] = None,
     event_id: list[str] = [],
     resume: bool = True,
-    minimum_confidence: float = 0.0,
 ) -> Settings:
-    settings = Settings()
     if model_path is not None:
         settings.model_path = model_path
     if limit_events is not None:
@@ -46,20 +39,50 @@ def _settings_from_options(
     if event_id:
         settings.event_ids = list(event_id)
     settings.resume = resume
-    settings.minimum_confidence = minimum_confidence
     return settings
 
 
-@app.command()
-def reduce() -> None:
-    """Reduce hourly odds parquet to semantic market records."""
+@app.callback()
+def main(
+    ctx: typer.Context,
+    build_dir: Annotated[
+        Optional[Path],
+        typer.Option(help="Directory for build artifacts"),
+    ] = None,
+    data_dir: Annotated[
+        Optional[Path],
+        typer.Option(help="Directory containing source parquet files"),
+    ] = None,
+    verbose: Annotated[
+        bool,
+        typer.Option("--verbose", "-v", help="Enable INFO logging"),
+    ] = False,
+) -> None:
+    """Shared options for all pipeline commands."""
     settings = Settings()
+    if build_dir is not None:
+        settings.configure_build_dir(build_dir)
+    if data_dir is not None:
+        settings.data_dir = data_dir
+    if verbose:
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(levelname)s %(name)s: %(message)s",
+        )
+    ctx.obj = settings
+
+
+@app.command()
+def reduce(ctx: typer.Context) -> None:
+    """Reduce hourly odds parquet to semantic market records."""
+    settings = _base_settings(ctx)
     path = reduce_semantic_markets(settings)
     typer.echo(f"Wrote semantic markets to {path}")
 
 
 @app.command()
 def infer(
+    ctx: typer.Context,
     model_path: Annotated[
         Optional[Path], typer.Option(help="Path to GGUF model file")
     ] = None,
@@ -72,13 +95,14 @@ def infer(
     resume: Annotated[bool, typer.Option(help="Skip events with existing fragments")] = True,
 ) -> None:
     """Infer graph fragments per event using local LLM."""
-    settings = _settings_from_options(
+    settings = _apply_infer_options(
+        _base_settings(ctx),
         model_path=model_path,
         limit_events=limit_events,
         event_id=event_id,
         resume=resume,
     )
-    markets = load_semantic_markets(settings.semantic_markets_path)
+    markets = load_markets_for_infer(settings)
     llm = LocalGraphLLM(settings)
     results = infer_event_fragments(settings, markets, llm=llm)
     typer.echo(f"Inferred fragments for {len(results)} events")
@@ -86,111 +110,25 @@ def infer(
 
 @app.command()
 def build(
+    ctx: typer.Context,
     minimum_confidence: Annotated[
         float, typer.Option(help="Minimum edge confidence threshold")
     ] = 0.0,
 ) -> None:
     """Resolve entities, build graph, validate, and export artifacts."""
-    settings = Settings()
+    settings = _base_settings(ctx)
     settings.minimum_confidence = minimum_confidence
-    settings.ensure_dirs()
-
-    markets = load_semantic_markets(settings.semantic_markets_path)
-    deterministic = build_deterministic_fragments_by_event(markets)
-    inferred = load_all_fragments(settings)
-
-    det_fragments = list(deterministic.values())
-    inf_fragments = list(inferred.values())
-
-    resolution_det = resolve_fragments(det_fragments, settings, inference_method="deterministic")
-    resolution_inf = resolve_fragments(inf_fragments, settings, inference_method="llm")
-
-    # Merge resolution states
-    merged_resolution = resolution_det
-    for cid, node in resolution_inf.canonical_nodes.items():
-        if cid in merged_resolution.canonical_nodes:
-            existing = merged_resolution.canonical_nodes[cid]
-            merged_resolution.canonical_nodes[cid] = existing.model_copy(
-                update={
-                    "confidence": max(existing.confidence, node.confidence),
-                    "evidence_market_ids": sorted(
-                        set(existing.evidence_market_ids) | set(node.evidence_market_ids)
-                    ),
-                    "aliases": sorted(set(existing.aliases) | set(node.aliases)),
-                }
-            )
-        else:
-            merged_resolution.canonical_nodes[cid] = node
-    merged_resolution.local_to_canonical.update(resolution_inf.local_to_canonical)
-    merged_resolution.unresolved.extend(resolution_inf.unresolved)
-    for tier, count in resolution_inf.tier_counts.items():
-        merged_resolution.tier_counts[tier] = (
-            merged_resolution.tier_counts.get(tier, 0) + count
-        )
-
-    graph_result = build_graph_from_fragments(
-        det_fragments + inf_fragments,
-        merged_resolution,
-        settings,
-        fragment_methods=["deterministic"] * len(det_fragments)
-        + ["llm"] * len(inf_fragments),
-    )
-
-    per_event_status: dict[str, str] = {}
-    if settings.inference_report_path.exists():
-        try:
-            data = json.loads(settings.inference_report_path.read_text(encoding="utf-8"))
-            per_event_status = data.get("per_event_status", {})
-        except json.JSONDecodeError:
-            per_event_status = {}
-
-    report = build_inference_report(
-        merged_resolution,
-        graph_result,
-        model_path=str(settings.model_path) if settings.model_path.exists() else None,
-        per_event_status=per_event_status,
-    )
-
-    export_graph_artifacts(
-        nodes=graph_result.nodes,
-        edges=graph_result.edges,
-        rejected_edges=graph_result.rejected_edges,
-        unresolved=merged_resolution.unresolved,
-        report=report,
-        nodes_path=settings.nodes_path,
-        edges_path=settings.edges_path,
-        rejected_edges_path=settings.rejected_edges_path,
-        unresolved_entities_path=settings.unresolved_entities_path,
-        ontology_path=settings.ontology_path,
-        inference_report_path=settings.inference_report_path,
-    )
+    result = run_build_and_export(settings)
     typer.echo(
-        f"Exported {len(graph_result.nodes)} nodes and {len(graph_result.edges)} edges"
+        f"Exported {len(result.graph.nodes)} nodes and {len(result.graph.edges)} edges"
     )
 
 
 @app.command()
-def validate() -> None:
+def validate(ctx: typer.Context) -> None:
     """Validate exported graph artifacts."""
-    settings = Settings()
-    nodes_table = pq.read_table(settings.nodes_path)
-    edges_table = pq.read_table(settings.edges_path)
-
-    nodes = [CanonicalNode(**row) for row in nodes_table.to_pylist()]
-    edges = [
-        CanonicalEdge(
-            source_id=row["source_id"],
-            target_id=row["target_id"],
-            edge_type=EdgeType(row["edge_type"]),
-            confidence=row["confidence"],
-            evidence_market_ids=row["evidence_market_ids"],
-            evidence_text=row.get("evidence_text", ""),
-            inference_method=row.get("inference_method", "unknown"),
-        )
-        for row in edges_table.to_pylist()
-    ]
-
-    errors = validate_exported_graph(nodes, edges)
+    settings = _base_settings(ctx)
+    errors = validate_exported_artifacts(settings)
     if errors:
         typer.echo("Validation FAILED:")
         for error in errors:
@@ -202,6 +140,7 @@ def validate() -> None:
 
 @app.command()
 def run(
+    ctx: typer.Context,
     model_path: Annotated[
         Optional[Path], typer.Option(help="Path to GGUF model file")
     ] = None,
@@ -217,15 +156,25 @@ def run(
     ] = 0.0,
 ) -> None:
     """Run the full pipeline: reduce → infer → build → validate."""
-    reduce()
-    infer(
+    settings = _apply_infer_options(
+        _base_settings(ctx),
         model_path=model_path,
         limit_events=limit_events,
         event_id=event_id,
         resume=resume,
     )
-    build(minimum_confidence=minimum_confidence)
-    validate()
+    settings.minimum_confidence = minimum_confidence
+    reduce_semantic_markets(settings)
+    markets = load_markets_for_infer(settings)
+    infer_event_fragments(settings, markets, llm=LocalGraphLLM(settings))
+    run_build_and_export(settings)
+    errors = validate_exported_artifacts(settings)
+    if errors:
+        typer.echo("Validation FAILED:")
+        for error in errors:
+            typer.echo(f"  - {error}")
+        raise typer.Exit(code=1)
+    typer.echo("Pipeline completed successfully")
 
 
 if __name__ == "__main__":

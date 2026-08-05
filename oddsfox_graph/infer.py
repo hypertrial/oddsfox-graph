@@ -10,6 +10,8 @@ from pathlib import Path
 from oddsfox_graph.config import Settings
 from oddsfox_graph.llm import LLMInferenceError, LocalGraphLLM
 from oddsfox_graph.prompts import build_event_prompt, chunk_markets_for_prompt
+from oddsfox_graph.reduce import list_semantic_market_event_ids, load_semantic_markets, select_event_ids
+from oddsfox_graph.reporting import merge_per_event_status
 from oddsfox_graph.schema import Edge, GraphFragment, Node, SemanticMarket
 
 logger = logging.getLogger(__name__)
@@ -123,20 +125,18 @@ def infer_event_fragments(
             status[event_id] = "failed"
             logger.error("Inference failed for event %s", event_id)
 
-    existing_status: dict[str, str] = {}
-    if settings.inference_report_path.exists():
-        try:
-            data = json.loads(settings.inference_report_path.read_text(encoding="utf-8"))
-            existing_status = data.get("per_event_status", {})
-        except json.JSONDecodeError:
-            existing_status = {}
-
-    merged_status = {**existing_status, **status}
-    settings.inference_report_path.write_text(
-        json.dumps({"per_event_status": merged_status}, indent=2),
-        encoding="utf-8",
-    )
+    merge_per_event_status(settings.inference_report_path, status)
     return results
+
+
+def load_markets_for_infer(settings: Settings) -> list[SemanticMarket]:
+    available_event_ids = list_semantic_market_event_ids(settings.semantic_markets_path)
+    target_event_ids = select_event_ids(
+        available_event_ids,
+        settings.event_ids,
+        settings.limit_events,
+    )
+    return load_semantic_markets(settings.semantic_markets_path, event_ids=target_event_ids)
 
 
 def load_all_fragments(settings: Settings) -> dict[str, GraphFragment]:

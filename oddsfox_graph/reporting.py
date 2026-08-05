@@ -2,11 +2,33 @@
 
 from __future__ import annotations
 
+import json
 from collections import Counter
+from pathlib import Path
+
+from pydantic import ValidationError
 
 from oddsfox_graph.graphbuild import GraphBuildResult
 from oddsfox_graph.resolution import ResolutionState
 from oddsfox_graph.schema import InferenceReport
+
+
+def load_inference_report(path: Path) -> InferenceReport:
+    if not path.exists():
+        return InferenceReport()
+    try:
+        return InferenceReport.model_validate_json(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, ValidationError, ValueError):
+        return InferenceReport()
+
+
+def merge_per_event_status(path: Path, updates: dict[str, str]) -> InferenceReport:
+    report = load_inference_report(path)
+    merged_status = {**report.per_event_status, **updates}
+    report = report.model_copy(update={"per_event_status": merged_status})
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(report.model_dump_json(indent=2), encoding="utf-8")
+    return report
 
 
 def build_inference_report(
@@ -19,11 +41,10 @@ def build_inference_report(
     edge_counts = Counter(e.edge_type.value for e in graph_result.edges)
     rejected_reasons = Counter(e.rejection_reason for e in graph_result.rejected_edges)
 
-    events_processed = sum(
-        1 for s in (per_event_status or {}).values() if s == "success"
-    )
-    events_failed = sum(1 for s in (per_event_status or {}).values() if s == "failed")
-    events_skipped = sum(1 for s in (per_event_status or {}).values() if s == "skipped")
+    status = per_event_status or {}
+    events_processed = sum(1 for s in status.values() if s == "success")
+    events_failed = sum(1 for s in status.values() if s == "failed")
+    events_skipped = sum(1 for s in status.values() if s == "skipped")
 
     return InferenceReport(
         model_path=model_path,
@@ -34,6 +55,5 @@ def build_inference_report(
         edge_counts=dict(edge_counts),
         resolution_tiers=dict(resolution_state.tier_counts),
         rejected_edge_reasons=dict(rejected_reasons),
-        unresolved_count=len(resolution_state.unresolved),
-        per_event_status=per_event_status or {},
+        per_event_status=status,
     )

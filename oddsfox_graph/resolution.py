@@ -2,22 +2,66 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
 from dataclasses import dataclass, field
 
-from rapidfuzz import fuzz
+from rapidfuzz import fuzz, process
 
 from oddsfox_graph import ids
 from oddsfox_graph.config import Settings
 from oddsfox_graph.ontology import NodeType
-from oddsfox_graph.schema import CanonicalNode, GraphFragment, Node, UnresolvedEntity
+from oddsfox_graph.schema import CanonicalNode, GraphFragment, Node
+
+DEFAULT_COMPETITION_SLUG = "world-cup-2026"
 
 
 @dataclass
 class ResolutionState:
     canonical_nodes: dict[str, CanonicalNode] = field(default_factory=dict)
-    unresolved: list[UnresolvedEntity] = field(default_factory=list)
     local_to_canonical: dict[str, str] = field(default_factory=dict)
     tier_counts: dict[str, int] = field(default_factory=dict)
+
+
+@dataclass
+class _FuzzyIndex:
+    labels_by_type: dict[NodeType, list[str]] = field(
+        default_factory=lambda: defaultdict(list)
+    )
+    ids_by_type: dict[NodeType, list[str]] = field(
+        default_factory=lambda: defaultdict(list)
+    )
+
+    def add(self, node_type: NodeType, label: str, canonical_id: str) -> None:
+        self.labels_by_type[node_type].append(label)
+        self.ids_by_type[node_type].append(canonical_id)
+
+    def best_match(
+        self,
+        node_type: NodeType,
+        label: str,
+        threshold: int,
+    ) -> tuple[str | None, int]:
+        labels = self.labels_by_type.get(node_type)
+        if not labels:
+            return None, 0
+        result = process.extractOne(
+            label,
+            labels,
+            scorer=fuzz.token_sort_ratio,
+            score_cutoff=threshold,
+        )
+        if result is None:
+            return None, 0
+        _, score, index = result
+        return self.ids_by_type[node_type][index], score
+
+
+def _competition_slug_from_fragments(fragments: list[GraphFragment]) -> str:
+    for fragment in fragments:
+        for node in fragment.nodes:
+            if node.type == NodeType.COMPETITION:
+                return ids.slugify(node.label)
+    return DEFAULT_COMPETITION_SLUG
 
 
 def _polymarket_canonical_id(node: Node) -> str | None:
@@ -41,18 +85,18 @@ def _polymarket_canonical_id(node: Node) -> str | None:
     return None
 
 
-def _suggested_canonical_id(node: Node) -> str:
+def _suggested_canonical_id(node: Node, competition_slug: str) -> str:
     """Deterministic canonical ID for inferred entity types."""
     if node.type == NodeType.TEAM:
         return ids.team_id(node.label)
     if node.type == NodeType.COMPETITION:
         return ids.competition_id(node.label)
     if node.type == NodeType.STAGE:
-        return ids.stage_id("world-cup-2026", node.label)
+        return ids.stage_id(competition_slug, node.label)
     if node.type == NodeType.GROUP:
-        return ids.group_id("world-cup-2026", node.label)
+        return ids.group_id(competition_slug, node.label)
     if node.type == NodeType.ROUND:
-        return ids.round_id("world-cup-2026", node.label)
+        return ids.round_id(competition_slug, node.label)
     if node.type == NodeType.MATCH:
         return ids.match_id(node.label)
     if node.type == NodeType.EVENT:
@@ -92,6 +136,7 @@ def _register_canonical(
     by_slug: dict[tuple[NodeType, str], CanonicalNode],
     by_label: dict[tuple[NodeType, str], CanonicalNode],
     by_alias: dict[tuple[NodeType, str], CanonicalNode],
+    fuzzy_index: _FuzzyIndex,
 ) -> None:
     canonical = CanonicalNode(
         canonical_id=canonical_id,
@@ -111,23 +156,32 @@ def _register_canonical(
         by_alias[(node.type, ids.normalize_label(alias))] = canonical
     for alias in [node.label]:
         by_alias[(node.type, ids.normalize_label(alias))] = canonical
+    fuzzy_index.add(node.type, node.label, canonical_id)
 
 
 def resolve_fragments(
     fragments: list[GraphFragment],
     settings: Settings,
     inference_method: str = "unknown",
+    inference_methods: list[str] | None = None,
 ) -> ResolutionState:
     state = ResolutionState()
     all_nodes: list[tuple[Node, str]] = []
 
-    for fragment in fragments:
+    for idx, fragment in enumerate(fragments):
+        method = (
+            inference_methods[idx]
+            if inference_methods is not None and idx < len(inference_methods)
+            else inference_method
+        )
         for node in fragment.nodes:
-            all_nodes.append((node, inference_method))
+            all_nodes.append((node, method))
 
+    competition_slug = _competition_slug_from_fragments(fragments)
     by_slug: dict[tuple[NodeType, str], CanonicalNode] = {}
     by_label: dict[tuple[NodeType, str], CanonicalNode] = {}
     by_alias: dict[tuple[NodeType, str], CanonicalNode] = {}
+    fuzzy_index = _FuzzyIndex()
 
     for node, method in all_nodes:
         polymarket_id = _polymarket_canonical_id(node)
@@ -151,6 +205,7 @@ def resolve_fragments(
                 by_slug,
                 by_label,
                 by_alias,
+                fuzzy_index,
             )
             _register_tier(state, "exact_id")
             continue
@@ -208,25 +263,22 @@ def resolve_fragments(
             continue
 
         # Tier 5: conservative rapidfuzz match
-        best_score = 0
-        best_canonical: CanonicalNode | None = None
-        for existing in state.canonical_nodes.values():
-            if existing.type != node.type:
-                continue
-            score = fuzz.token_sort_ratio(existing.label, node.label)
-            if score > best_score:
-                best_score = score
-                best_canonical = existing
-        if best_canonical and best_score >= settings.fuzzy_threshold:
-            state.canonical_nodes[best_canonical.canonical_id] = _merge_canonical(
+        best_canonical_id, best_score = fuzzy_index.best_match(
+            node.type,
+            node.label,
+            settings.fuzzy_threshold,
+        )
+        if best_canonical_id is not None:
+            best_canonical = state.canonical_nodes[best_canonical_id]
+            state.canonical_nodes[best_canonical_id] = _merge_canonical(
                 best_canonical, node, "fuzzy"
             )
-            state.local_to_canonical[node.local_id] = best_canonical.canonical_id
+            state.local_to_canonical[node.local_id] = best_canonical_id
             _register_tier(state, "fuzzy")
             continue
 
         # No match found: create new canonical entity with deterministic ID
-        new_id = _suggested_canonical_id(node)
+        new_id = _suggested_canonical_id(node, competition_slug)
         if new_id in state.canonical_nodes:
             existing = state.canonical_nodes[new_id]
             state.canonical_nodes[new_id] = _merge_canonical(existing, node, "new_entity")
@@ -242,6 +294,7 @@ def resolve_fragments(
                 by_slug,
                 by_label,
                 by_alias,
+                fuzzy_index,
             )
             _register_tier(state, "new_entity")
 

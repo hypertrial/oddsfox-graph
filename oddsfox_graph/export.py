@@ -10,7 +10,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from oddsfox_graph.ontology import dump_ontology_json
-from oddsfox_graph.schema import CanonicalEdge, CanonicalNode, InferenceReport, RejectedEdge, UnresolvedEntity
+from oddsfox_graph.schema import CanonicalEdge, CanonicalNode, InferenceReport, RejectedEdge
 
 
 def _table_with_schema(rows: list[dict], template_row: dict[str, Any]) -> pa.Table:
@@ -50,28 +50,15 @@ _REJECTED_EDGE_TEMPLATE: dict[str, Any] = {
     "rejection_reason": "",
 }
 
-_UNRESOLVED_TEMPLATE: dict[str, Any] = {
-    "local_id": "",
-    "type": "TEAM",
-    "label": "",
-    "aliases": [],
-    "confidence": 0.0,
-    "evidence_market_ids": [],
-    "inference_method": "",
-    "reason": "",
-}
-
 
 def export_graph_artifacts(
     nodes: list[CanonicalNode],
     edges: list[CanonicalEdge],
     rejected_edges: list[RejectedEdge],
-    unresolved: list[UnresolvedEntity],
     report: InferenceReport,
     nodes_path: Path,
     edges_path: Path,
     rejected_edges_path: Path,
-    unresolved_entities_path: Path,
     ontology_path: Path,
     inference_report_path: Path,
 ) -> None:
@@ -108,11 +95,6 @@ def export_graph_artifacts(
             for e in rejected_edges
         ],
         _REJECTED_EDGE_TEMPLATE,
-    )
-    _write_parquet(
-        unresolved_entities_path,
-        [u.model_dump() for u in unresolved],
-        _UNRESOLVED_TEMPLATE,
     )
     ontology_path.write_text(json.dumps(dump_ontology_json(), indent=2), encoding="utf-8")
     inference_report_path.write_text(report.model_dump_json(indent=2), encoding="utf-8")

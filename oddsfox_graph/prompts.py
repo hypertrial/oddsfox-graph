@@ -44,6 +44,8 @@ ALLOWED_EDGE_TYPES = {
     EdgeType.IMPLIES,
 }
 
+_PROMPT_FOOTER = "\n\nReturn a GraphFragment JSON object."
+
 
 def _truncate_text(text: str | None, max_chars: int) -> str | None:
     if text is None:
@@ -89,7 +91,7 @@ def build_event_prompt(
         SYSTEM_RULES
         + "\n\nPolymarket records:\n"
         + json.dumps(payload, indent=2, ensure_ascii=False)
-        + "\n\nReturn a GraphFragment JSON object."
+        + _PROMPT_FOOTER
     )
 
 
@@ -100,6 +102,35 @@ def estimate_prompt_tokens(prompt: str) -> int:
 def estimate_output_tokens(market_count: int) -> int:
     # Conservative estimate for nodes + edges JSON per market
     return max(1, market_count * 200)
+
+
+def _market_prompt_tokens(market: SemanticMarket, max_text_field_chars: int) -> int:
+    serialized = _serialize_market(market, max_text_field_chars)
+    return estimate_prompt_tokens(json.dumps(serialized, ensure_ascii=False))
+
+
+def _event_header_tokens(
+    event_id: str,
+    markets: list[SemanticMarket],
+    max_text_field_chars: int,
+) -> int:
+    if not markets:
+        return estimate_prompt_tokens(SYSTEM_RULES + _PROMPT_FOOTER)
+    event_title = markets[0].event_title or event_id
+    event_slug = markets[0].event_slug
+    header_payload = json.dumps(
+        {
+            "event_id": event_id,
+            "event_title": event_title,
+            "event_slug": event_slug,
+            "markets": [],
+        },
+        indent=2,
+        ensure_ascii=False,
+    )
+    return estimate_prompt_tokens(
+        SYSTEM_RULES + "\n\nPolymarket records:\n" + header_payload + _PROMPT_FOOTER
+    )
 
 
 def _chunk_exceeds_budget(
@@ -118,6 +149,21 @@ def _chunk_exceeds_budget(
     )
 
 
+def _chunk_exceeds_budget_incremental(
+    header_tokens: int,
+    market_token_sizes: list[int],
+    market_indices: list[int],
+    token_budget: int,
+    output_token_budget: int,
+) -> bool:
+    input_tokens = header_tokens + sum(market_token_sizes[i] for i in market_indices)
+    input_tokens += len(market_indices) * 2
+    return (
+        input_tokens > token_budget
+        or estimate_output_tokens(len(market_indices)) > output_token_budget
+    )
+
+
 def chunk_markets_for_prompt(
     markets: list[SemanticMarket],
     event_id: str,
@@ -129,38 +175,42 @@ def chunk_markets_for_prompt(
     if not markets:
         return []
 
-    chunks: list[list[SemanticMarket]] = []
-    current: list[SemanticMarket] = []
+    market_token_sizes = [
+        _market_prompt_tokens(market, max_text_field_chars) for market in markets
+    ]
+    header_tokens = _event_header_tokens(event_id, markets, max_text_field_chars)
 
-    for market in markets:
-        trial = current + [market]
+    chunks: list[list[SemanticMarket]] = []
+    current_indices: list[int] = []
+
+    for index, market in enumerate(markets):
+        trial_indices = current_indices + [index]
         exceeds = (
-            len(trial) > max_markets_per_chunk
-            or _chunk_exceeds_budget(
-                event_id,
-                trial,
+            len(trial_indices) > max_markets_per_chunk
+            or _chunk_exceeds_budget_incremental(
+                header_tokens,
+                market_token_sizes,
+                trial_indices,
                 token_budget,
                 output_token_budget,
-                max_text_field_chars,
             )
         )
-        if exceeds and current:
-            chunks.append(current)
-            current = [market]
-            if _chunk_exceeds_budget(
-                event_id,
-                current,
+        if exceeds and current_indices:
+            chunks.append([markets[i] for i in current_indices])
+            current_indices = [index]
+            if _chunk_exceeds_budget_incremental(
+                header_tokens,
+                market_token_sizes,
+                current_indices,
                 token_budget,
                 output_token_budget,
-                max_text_field_chars,
             ):
-                # Single market still too large after truncation; keep it isolated
-                chunks.append(current)
-                current = []
+                chunks.append([market])
+                current_indices = []
         else:
-            current = trial
+            current_indices = trial_indices
 
-    if current:
-        chunks.append(current)
+    if current_indices:
+        chunks.append([markets[i] for i in current_indices])
 
     return chunks
