@@ -1,0 +1,30 @@
+{
+  "nodes": [
+    {
+      "local_id": "competition:world-cup-2026",
+      "type": "COMPETITION",
+      "label": "2026 FIFA World Cup",
+      "aliases": [],
+      "confidence": 0.95,
+      "evidence_market_ids": ["839420"]
+    },
+    {
+      "local_id": "group:group-d",
+      "type": "GROUP",
+      "label": "Group D",
+      "aliases": ["world-cup-group-d-winner"],
+      "confidence": 0.9,
+      "evidence_market_ids": ["839420"]
+    }
+  ],
+  "edges": [
+    {
+      "source": "group:group-d",
+      "target": "competition:world-cup-2026",
+      "type": "PART_OF",
+      "confidence": 0.9,
+      "evidence_market_ids": ["839420"],
+      "evidence_text": "win Group D in the 2026 FIFA World Cup"
+    }
+  ]
+}

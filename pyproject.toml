@@ -5,15 +5,39 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "oddsfox-graph"
 version = "0.1.0"
-description = "WC2026 hourly-odds explorer (repository reset; rebuild in progress)."
+description = "Local WC2026 Polymarket graph inference pipeline."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
 authors = [{name = "Hypertrial"}]
-dependencies = []
+dependencies = [
+    "duckdb>=1.1",
+    "pyarrow>=18",
+    "llama-cpp-python>=0.3",
+    "pydantic>=2.10",
+    "rapidfuzz>=3.10",
+    "rustworkx>=0.15",
+    "typer>=0.15",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+oddsfox-graph = "oddsfox_graph.cli:app"
 
 [project.urls]
 Repository = "https://github.com/hypertrial/oddsfox-graph"
 
 [tool.setuptools.packages.find]
 include = ["oddsfox_graph*"]
+
+[tool.setuptools.package-data]
+oddsfox_graph = ["data/*.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+markers = [
+    "integration: live model integration tests",
+]

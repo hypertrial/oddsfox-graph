@@ -1,0 +1,70 @@
+{
+  "nodes": [
+    {
+      "local_id": "competition:world-cup-2026",
+      "type": "COMPETITION",
+      "label": "2026 FIFA World Cup",
+      "aliases": [],
+      "confidence": 0.95,
+      "evidence_market_ids": ["2754869"]
+    },
+    {
+      "local_id": "match:brazil-vs-norway-2026-07-05",
+      "type": "MATCH",
+      "label": "Brazil vs. Norway",
+      "aliases": ["fifwc-bra-nor-2026-07-05"],
+      "confidence": 0.9,
+      "evidence_market_ids": ["2754869"]
+    },
+    {
+      "local_id": "team:brazil",
+      "type": "TEAM",
+      "label": "Brazil",
+      "aliases": ["bra"],
+      "confidence": 0.95,
+      "evidence_market_ids": ["2754869"]
+    },
+    {
+      "local_id": "team:norway",
+      "type": "TEAM",
+      "label": "Norway",
+      "aliases": ["nor"],
+      "confidence": 0.95,
+      "evidence_market_ids": ["2754869"]
+    },
+    {
+      "local_id": "round:round-of-16",
+      "type": "ROUND",
+      "label": "Round of 16",
+      "aliases": [],
+      "confidence": 0.85,
+      "evidence_market_ids": ["2754869"]
+    }
+  ],
+  "edges": [
+    {
+      "source": "team:brazil",
+      "target": "match:brazil-vs-norway-2026-07-05",
+      "type": "PARTICIPATES_IN",
+      "confidence": 0.95,
+      "evidence_market_ids": ["2754869"],
+      "evidence_text": "FIFA World Cup game between Brazil and Norway"
+    },
+    {
+      "source": "team:norway",
+      "target": "match:brazil-vs-norway-2026-07-05",
+      "type": "PARTICIPATES_IN",
+      "confidence": 0.95,
+      "evidence_market_ids": ["2754869"],
+      "evidence_text": "FIFA World Cup game between Brazil and Norway"
+    },
+    {
+      "source": "team:brazil",
+      "target": "round:round-of-16",
+      "type": "ADVANCES_TO",
+      "confidence": 0.85,
+      "evidence_market_ids": ["2754869"],
+      "evidence_text": "advances from this match to the next round"
+    }
+  ]
+}

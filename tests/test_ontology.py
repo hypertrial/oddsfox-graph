@@ -1,0 +1,18 @@
+from oddsfox_graph.ontology import ALLOWED_EDGE_PATTERNS, EdgeType, NodeType, is_allowed_edge
+
+
+def test_allowed_edge_patterns_include_spec_examples() -> None:
+    assert is_allowed_edge(EdgeType.PARTICIPATES_IN, NodeType.TEAM, NodeType.COMPETITION)
+    assert is_allowed_edge(EdgeType.HAS_MARKET, NodeType.EVENT, NodeType.MARKET)
+    assert is_allowed_edge(EdgeType.HAS_OUTCOME, NodeType.MARKET, NodeType.OUTCOME)
+    assert is_allowed_edge(EdgeType.ADVANCES_TO, NodeType.MATCH, NodeType.MATCH)
+    assert is_allowed_edge(EdgeType.PART_OF, NodeType.ROUND, NodeType.COMPETITION)
+
+
+def test_rejects_invalid_pattern() -> None:
+    assert not is_allowed_edge(EdgeType.HAS_MARKET, NodeType.TEAM, NodeType.MARKET)
+
+
+def test_all_edge_types_have_patterns() -> None:
+    for edge_type in EdgeType:
+        assert edge_type in ALLOWED_EDGE_PATTERNS

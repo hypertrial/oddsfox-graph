@@ -1,0 +1,62 @@
+{
+  "nodes": [
+    {
+      "local_id": "competition:world-cup-2026",
+      "type": "COMPETITION",
+      "label": "2026 FIFA World Cup",
+      "aliases": ["world-cup-2026"],
+      "confidence": 0.95,
+      "evidence_market_ids": ["1897133"]
+    },
+    {
+      "local_id": "match:turkiye-vs-paraguay-2026-06-19",
+      "type": "MATCH",
+      "label": "Türkiye vs. Paraguay",
+      "aliases": ["fifwc-tur-par-2026-06-19"],
+      "confidence": 0.9,
+      "evidence_market_ids": ["1897133", "1897127", "1897130"]
+    },
+    {
+      "local_id": "team:turkiye",
+      "type": "TEAM",
+      "label": "Türkiye",
+      "aliases": ["tur"],
+      "confidence": 0.95,
+      "evidence_market_ids": ["1897127"]
+    },
+    {
+      "local_id": "team:paraguay",
+      "type": "TEAM",
+      "label": "Paraguay",
+      "aliases": ["par"],
+      "confidence": 0.95,
+      "evidence_market_ids": ["1897133"]
+    }
+  ],
+  "edges": [
+    {
+      "source": "match:turkiye-vs-paraguay-2026-06-19",
+      "target": "competition:world-cup-2026",
+      "type": "PART_OF",
+      "confidence": 0.9,
+      "evidence_market_ids": ["1897133"],
+      "evidence_text": "2026 FIFA World Cup game"
+    },
+    {
+      "source": "team:turkiye",
+      "target": "match:turkiye-vs-paraguay-2026-06-19",
+      "type": "PARTICIPATES_IN",
+      "confidence": 0.95,
+      "evidence_market_ids": ["1897127"],
+      "evidence_text": "Will Türkiye win on 2026-06-19?"
+    },
+    {
+      "source": "team:paraguay",
+      "target": "match:turkiye-vs-paraguay-2026-06-19",
+      "type": "PARTICIPATES_IN",
+      "confidence": 0.95,
+      "evidence_market_ids": ["1897133"],
+      "evidence_text": "Will Paraguay win on 2026-06-19?"
+    }
+  ]
+}

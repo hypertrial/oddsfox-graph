@@ -19,3 +19,6 @@ uv.lock
 # Local runtime/build outputs
 /output/
 /.oddsfox-runtime/
+
+# Local LLM model weights (large, not versioned)
+/models/*.gguf
