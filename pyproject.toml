@@ -4,62 +4,16 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "oddsfox-graph"
-version = "0.13.0"
-description = "Discover and explore FIFA World Cup 2026 team-progression logic from Polymarket exports."
+version = "0.1.0"
+description = "WC2026 hourly-odds explorer (repository reset; rebuild in progress)."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
 authors = [{name = "Hypertrial"}]
-dependencies = [
-  "duckdb>=1.0",
-  "httpx>=0.27",
-  "fastapi>=0.115",
-  "numpy>=1.26",
-  "pydantic>=2",
-  "pytz>=2025.2",
-  "python-sat==1.9.dev7",
-  "sentence-transformers>=5",
-  "usearch==2.26.0",
-  "uvicorn>=0.34",
-]
-classifiers = [
-  "Programming Language :: Python :: 3",
-  "Topic :: Scientific/Engineering :: Information Analysis",
-]
+dependencies = []
 
 [project.urls]
 Repository = "https://github.com/hypertrial/oddsfox-graph"
-DataPipeline = "https://github.com/hypertrial/oddsfox-pipeline"
-
-[project.optional-dependencies]
-recording = [
-  "playwright>=1.50,<2",
-]
-dev = [
-  "build>=1",
-  "pytest>=8",
-  "ruff>=0.11",
-  "mypy>=1.15",
-]
-
-[tool.mypy]
-python_version = "3.11"
-files = ["oddsfox_graph"]
-strict = true
-
-[[tool.mypy.overrides]]
-module = ["duckdb", "numpy", "sentence_transformers", "usearch.*", "pysat.*"]
-ignore_missing_imports = true
-
-[project.scripts]
-oddsfox-graph = "oddsfox_graph.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["oddsfox_graph*"]
-
-[tool.setuptools.package-data]
-oddsfox_graph = ["benchmarks/*.json", "static/explorer/**/*"]
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-pythonpath = ["."]
