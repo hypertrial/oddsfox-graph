@@ -96,6 +96,9 @@ def infer_event_fragments(
             event_markets,
             event_id,
             settings.chunk_token_budget,
+            settings.chunk_output_token_budget,
+            settings.max_markets_per_chunk,
+            settings.max_text_field_chars,
         )
         chunk_fragments: list[GraphFragment] = []
 
@@ -105,7 +108,9 @@ def infer_event_fragments(
                 if settings.resume and part_path.exists():
                     chunk_fragments.append(_load_fragment(part_path))
                     continue
-                prompt = build_event_prompt(event_id, chunk)
+                prompt = build_event_prompt(
+                    event_id, chunk, settings.max_text_field_chars
+                )
                 fragment = llm.generate_fragment(prompt, event_id)
                 _save_fragment(part_path, fragment)
                 chunk_fragments.append(fragment)

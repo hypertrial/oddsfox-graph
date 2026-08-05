@@ -1,16 +1,17 @@
-from pathlib import Path
+import duckdb
+import pyarrow.parquet as pq
 
 from oddsfox_graph.config import Settings
 from oddsfox_graph.export import export_graph_artifacts
 from oddsfox_graph.graphbuild import build_graph_from_fragments
 from oddsfox_graph.reporting import build_inference_report
 from oddsfox_graph.resolution import resolve_fragments
-from oddsfox_graph.schema import CanonicalEdge, CanonicalNode, InferenceReport
+from oddsfox_graph.schema import InferenceReport
 
 from tests.helpers import load_fixture_fragment
 
 
-def test_export_writes_parquet_files(tmp_path: Path) -> None:
+def test_export_writes_parquet_files(tmp_path) -> None:
     fragment = load_fixture_fragment("351746")
     settings = Settings()
     state = resolve_fragments([fragment], settings, inference_method="llm")
@@ -42,3 +43,30 @@ def test_export_writes_parquet_files(tmp_path: Path) -> None:
     assert edges_path.exists()
     assert ontology_path.exists()
     assert report_path.exists()
+
+
+def test_empty_exports_are_readable_by_duckdb(tmp_path) -> None:
+    export_graph_artifacts(
+        nodes=[],
+        edges=[],
+        rejected_edges=[],
+        unresolved=[],
+        report=InferenceReport(),
+        nodes_path=tmp_path / "nodes.parquet",
+        edges_path=tmp_path / "edges.parquet",
+        rejected_edges_path=tmp_path / "rejected.parquet",
+        unresolved_entities_path=tmp_path / "unresolved.parquet",
+        ontology_path=tmp_path / "ontology.json",
+        inference_report_path=tmp_path / "report.json",
+    )
+
+    unresolved_path = tmp_path / "unresolved.parquet"
+    table = pq.read_table(unresolved_path)
+    assert table.num_rows == 0
+    assert "local_id" in table.column_names
+    assert "label" in table.column_names
+
+    count = duckdb.sql(
+        f"SELECT count(*) FROM read_parquet('{unresolved_path}')"
+    ).fetchone()[0]
+    assert count == 0

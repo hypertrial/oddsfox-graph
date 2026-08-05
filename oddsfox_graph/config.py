@@ -34,6 +34,9 @@ class Settings:
     temperature: float = 0.1  # conservative for structured extraction
     max_retries: int = 2
     chunk_token_budget: int = 6000
+    chunk_output_token_budget: int = 3000
+    max_markets_per_chunk: int = 8
+    max_text_field_chars: int = 500
     fuzzy_threshold: int = 92
     minimum_confidence: float = 0.0
     resume: bool = True

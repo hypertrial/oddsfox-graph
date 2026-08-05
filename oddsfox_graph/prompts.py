@@ -45,15 +45,23 @@ ALLOWED_EDGE_TYPES = {
 }
 
 
-def _serialize_market(market: SemanticMarket) -> dict:
+def _truncate_text(text: str | None, max_chars: int) -> str | None:
+    if text is None:
+        return None
+    if len(text) <= max_chars:
+        return text
+    return text[: max_chars - 3] + "..."
+
+
+def _serialize_market(market: SemanticMarket, max_text_field_chars: int = 500) -> dict:
     return {
         "market_id": market.market_id,
         "event_id": market.event_id,
         "event_slug": market.event_slug,
         "event_title": market.event_title,
-        "event_description": market.event_description,
+        "event_description": _truncate_text(market.event_description, max_text_field_chars),
         "question": market.question,
-        "description": market.description,
+        "description": _truncate_text(market.description, max_text_field_chars),
         "market_slug": market.market_slug,
         "sports_market_type": market.sports_market_type,
         "group_item_title": market.group_item_title,
@@ -67,7 +75,7 @@ def _serialize_market(market: SemanticMarket) -> dict:
 def build_event_prompt(
     event_id: str,
     markets: list[SemanticMarket],
-    strict: bool = False,
+    max_text_field_chars: int = 500,
 ) -> str:
     event_title = markets[0].event_title if markets else event_id
     event_slug = markets[0].event_slug if markets else None
@@ -75,17 +83,10 @@ def build_event_prompt(
         "event_id": event_id,
         "event_title": event_title,
         "event_slug": event_slug,
-        "markets": [_serialize_market(m) for m in markets],
+        "markets": [_serialize_market(m, max_text_field_chars) for m in markets],
     }
-    strict_note = (
-        "\nSTRICT: Previous output failed validation. "
-        "Return only valid JSON with required fields and valid confidence values."
-        if strict
-        else ""
-    )
     return (
         SYSTEM_RULES
-        + strict_note
         + "\n\nPolymarket records:\n"
         + json.dumps(payload, indent=2, ensure_ascii=False)
         + "\n\nReturn a GraphFragment JSON object."
@@ -93,27 +94,73 @@ def build_event_prompt(
 
 
 def estimate_prompt_tokens(prompt: str) -> int:
-    # Rough heuristic: ~4 chars per token
     return max(1, len(prompt) // 4)
+
+
+def estimate_output_tokens(market_count: int) -> int:
+    # Conservative estimate for nodes + edges JSON per market
+    return max(1, market_count * 200)
+
+
+def _chunk_exceeds_budget(
+    event_id: str,
+    markets: list[SemanticMarket],
+    token_budget: int,
+    output_token_budget: int,
+    max_text_field_chars: int,
+) -> bool:
+    prompt = build_event_prompt(
+        event_id, markets, max_text_field_chars=max_text_field_chars
+    )
+    return (
+        estimate_prompt_tokens(prompt) > token_budget
+        or estimate_output_tokens(len(markets)) > output_token_budget
+    )
 
 
 def chunk_markets_for_prompt(
     markets: list[SemanticMarket],
     event_id: str,
     token_budget: int,
+    output_token_budget: int = 3000,
+    max_markets_per_chunk: int = 8,
+    max_text_field_chars: int = 500,
 ) -> list[list[SemanticMarket]]:
     if not markets:
         return []
+
     chunks: list[list[SemanticMarket]] = []
     current: list[SemanticMarket] = []
+
     for market in markets:
         trial = current + [market]
-        prompt = build_event_prompt(event_id, trial)
-        if estimate_prompt_tokens(prompt) > token_budget and current:
+        exceeds = (
+            len(trial) > max_markets_per_chunk
+            or _chunk_exceeds_budget(
+                event_id,
+                trial,
+                token_budget,
+                output_token_budget,
+                max_text_field_chars,
+            )
+        )
+        if exceeds and current:
             chunks.append(current)
             current = [market]
+            if _chunk_exceeds_budget(
+                event_id,
+                current,
+                token_budget,
+                output_token_budget,
+                max_text_field_chars,
+            ):
+                # Single market still too large after truncation; keep it isolated
+                chunks.append(current)
+                current = []
         else:
             current = trial
+
     if current:
         chunks.append(current)
+
     return chunks

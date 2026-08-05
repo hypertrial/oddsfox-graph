@@ -14,20 +14,21 @@ def test_exact_id_resolution() -> None:
     assert state.tier_counts.get("new_entity", 0) >= 1
 
 
-def test_fuzzy_below_threshold_creates_new_entity() -> None:
+def test_minimum_confidence_does_not_block_node_creation() -> None:
     fragment = GraphFragment(
         nodes=[
             Node(
-                local_id="team:totally-different",
+                local_id="team:xyz",
                 type=NodeType.TEAM,
-                label="Xyz Unknown Nation",
-                confidence=0.5,
-                evidence_market_ids=["999"],
+                label="Unique Team XYZ",
+                confidence=0.4,
+                evidence_market_ids=["1"],
             )
         ]
     )
     settings = Settings()
+    settings.minimum_confidence = 0.5
     settings.fuzzy_threshold = 99
     state = resolve_fragments([fragment], settings, inference_method="llm")
     assert len(state.unresolved) == 0
-    assert "team:xyz-unknown-nation" in state.canonical_nodes
+    assert "team:unique-team-xyz" in state.canonical_nodes

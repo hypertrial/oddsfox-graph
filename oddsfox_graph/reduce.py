@@ -16,24 +16,6 @@ from oddsfox_graph.schema import SemanticMarket
 
 logger = logging.getLogger(__name__)
 
-SEMANTIC_COLUMNS = [
-    "market_id",
-    "event_id",
-    "event_slug",
-    "event_title",
-    "event_description",
-    "question",
-    "description",
-    "market_slug",
-    "sports_market_type",
-    "group_item_title",
-    "outcomes",
-    "tags",
-    "event_tags",
-    "game_start_time",
-    "end_time",
-]
-
 
 def _parse_json_list(value: Any) -> list[str] | None:
     if value is None:

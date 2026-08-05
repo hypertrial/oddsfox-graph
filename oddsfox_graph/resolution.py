@@ -225,26 +225,7 @@ def resolve_fragments(
             _register_tier(state, "fuzzy")
             continue
 
-        # Tier 6: unresolved review queue (no forced merge)
-        if node.confidence < settings.minimum_confidence:
-            unresolved_id = f"unresolved:{node.type.value}:{ids.slugify(node.label)}"
-            state.unresolved.append(
-                UnresolvedEntity(
-                    local_id=node.local_id,
-                    type=node.type,
-                    label=node.label,
-                    aliases=list(node.aliases),
-                    confidence=node.confidence,
-                    evidence_market_ids=list(node.evidence_market_ids),
-                    inference_method=method,
-                    reason="no_match",
-                )
-            )
-            state.local_to_canonical[node.local_id] = unresolved_id
-            _register_tier(state, "unresolved")
-            continue
-
-        # No match found but confidence sufficient: create new canonical entity
+        # No match found: create new canonical entity with deterministic ID
         new_id = _suggested_canonical_id(node)
         if new_id in state.canonical_nodes:
             existing = state.canonical_nodes[new_id]

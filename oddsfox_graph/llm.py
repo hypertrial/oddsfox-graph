@@ -10,7 +10,7 @@ from pydantic import ValidationError
 
 from oddsfox_graph.config import Settings
 from oddsfox_graph.prompts import ALLOWED_EDGE_TYPES, ALLOWED_NODE_TYPES
-from oddsfox_graph.schema import Edge, GraphFragment, Node
+from oddsfox_graph.schema import GraphFragment
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +60,6 @@ class LocalGraphLLM:
         self,
         prompt: str,
         event_id: str,
-        strict: bool = False,
     ) -> GraphFragment:
         self._ensure_loaded()
         last_error: Exception | None = None

@@ -46,6 +46,9 @@ def _dedupe_edges(edges: list[CanonicalEdge]) -> list[CanonicalEdge]:
 
 
 def _has_progression_cycle(edges: list[CanonicalEdge]) -> bool:
+    if not edges:
+        return False
+
     graph = rx.PyDiGraph()
     node_index: dict[str, int] = {}
 
@@ -59,11 +62,10 @@ def _has_progression_cycle(edges: list[CanonicalEdge]) -> bool:
             continue
         graph.add_edge(idx(edge.source_id), idx(edge.target_id), edge)
 
-    try:
-        cycles = graph.simple_cycles()
-    except Exception:
+    if graph.num_nodes() == 0:
         return False
-    return len(cycles) > 0
+
+    return not rx.is_directed_acyclic_graph(graph)
 
 
 def build_graph_from_fragments(

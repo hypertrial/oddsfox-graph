@@ -55,7 +55,7 @@ Options:
 - `--event-id <id>` (repeatable)
 - `--model-path models/qwen3-4b-q4_k_m.gguf`
 - `--resume / --no-resume`
-- `--minimum-confidence 0.5`
+- `--minimum-confidence 0.5` — reject edges below this threshold during `build` (does not affect entity resolution)
 
 ## Output artifacts
 
