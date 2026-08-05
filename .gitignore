@@ -5,14 +5,11 @@ __pycache__/
 env/
 build/
 dist/
-node_modules/
-web/
-scripts/
-tests/
 .mypy_cache/
 .pytest_cache/
 .ruff_cache/
 .DS_Store
+uv.lock
 
 # WC2026 hourly-odds source data (large, not versioned)
 /polymarket_wc2026_market_hourly_odds_*.parquet
