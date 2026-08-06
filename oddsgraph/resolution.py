@@ -169,6 +169,49 @@ def _materialize_evidence(
     return sorted(indexes.evidence_sets.get(canonical_id, set()))
 
 
+def _more_specific_match_id(candidate: str, current: str) -> bool:
+    """True when candidate extends current (e.g. label-only → dateful MATCH id)."""
+    if not candidate.startswith("match:") or not current.startswith("match:"):
+        return False
+    return candidate != current and candidate.startswith(current + "-")
+
+
+def _remap_fuzzy_canonical_id(
+    fuzzy: _FuzzyIndex, node_type: NodeType, old_id: str, new_id: str
+) -> None:
+    ids_list = fuzzy.ids_by_type.get(node_type)
+    if not ids_list:
+        return
+    for i, cid in enumerate(ids_list):
+        if cid == old_id:
+            ids_list[i] = new_id
+
+
+def _upgrade_match_canonical_id(
+    state: ResolutionState,
+    existing: CanonicalNode,
+    new_id: str,
+    indexes: _ResolutionIndexes,
+) -> CanonicalNode:
+    """Re-key a MATCH canonical node when a more specific local_id arrives later."""
+    old_id = existing.canonical_id
+    if old_id == new_id or new_id in state.canonical_nodes:
+        return existing
+    old_evidence = indexes.evidence_sets.pop(old_id, set())
+    indexes.evidence_sets.setdefault(new_id, set()).update(old_evidence)
+    upgraded = existing.model_copy(update={"canonical_id": new_id})
+    del state.canonical_nodes[old_id]
+    state.canonical_nodes[new_id] = upgraded
+    for local_id, cid in list(state.local_to_canonical.items()):
+        if cid == old_id:
+            state.local_to_canonical[local_id] = new_id
+    indexes.by_slug[(upgraded.type, ids.slugify(upgraded.label))] = upgraded
+    indexes.by_label[(upgraded.type, ids.normalize_label(upgraded.label))] = upgraded
+    _index_aliases(upgraded, list(upgraded.aliases) + [upgraded.label], indexes)
+    _remap_fuzzy_canonical_id(indexes.fuzzy_index, upgraded.type, old_id, new_id)
+    return upgraded
+
+
 def _merge_canonical(
     state: ResolutionState,
     existing: CanonicalNode,
@@ -177,6 +220,7 @@ def _merge_canonical(
     indexes: _ResolutionIndexes,
 ) -> CanonicalNode:
     evidence = indexes.evidence_sets.setdefault(existing.canonical_id, set())
+    evidence.update(existing.evidence_market_ids)
     evidence.update(node.evidence_market_ids)
     previous_aliases = set(existing.aliases) | {existing.label}
     merged_aliases = sorted(set(existing.aliases) | set(node.aliases) | {node.label})
@@ -232,6 +276,15 @@ def _bind_existing(
     tier: str,
     indexes: _ResolutionIndexes,
 ) -> None:
+    # Official bracket arrives after topology; promote label-only MATCH ids to dateful.
+    if (
+        node.type == NodeType.MATCH
+        and node.local_id.startswith("match:")
+        and _more_specific_match_id(node.local_id, existing.canonical_id)
+    ):
+        existing = _upgrade_match_canonical_id(
+            state, existing, node.local_id, indexes
+        )
     _merge_canonical(state, existing, node, method, indexes)
     state.local_to_canonical[node.local_id] = existing.canonical_id
     _register_tier(state, tier)

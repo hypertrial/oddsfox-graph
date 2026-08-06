@@ -4,16 +4,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from oddsgraph.config import Settings
 from oddsgraph.ontology import EdgeType, NodeType
 from oddsgraph.pipeline import build_pipeline_from_markets
 from oddsgraph.schema import Edge, GraphFragment, Node, SemanticMarket
+from tests.helpers import make_settings
 
 
 def test_residual_llm_fragment_builds_with_deterministic_markets(tmp_path: Path) -> None:
-    settings = Settings()
-    settings.configure_build_dir(tmp_path / "build")
-    settings.ensure_dirs()
+    settings = make_settings(tmp_path)
     settings.official_bracket = False
 
     markets = [

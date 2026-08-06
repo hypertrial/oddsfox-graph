@@ -156,7 +156,7 @@ def test_merged_aliases_are_usable_by_later_nodes() -> None:
     assert state.local_to_canonical["team:ir-iran"] == "team:iran"
 
 
-def test_match_local_id_preferred_over_label_only_id() -> None:
+def _brazil_morocco_match_fragments() -> tuple[GraphFragment, GraphFragment]:
     dateful = GraphFragment(
         nodes=[
             Node(
@@ -179,6 +179,11 @@ def test_match_local_id_preferred_over_label_only_id() -> None:
             )
         ]
     )
+    return dateful, label_only
+
+
+def test_match_local_id_preferred_over_label_only_id() -> None:
+    dateful, label_only = _brazil_morocco_match_fragments()
     # Register dateful first via local_id suggested path, then merge by slug/label.
     state = resolve_fragments(
         [dateful, label_only],
@@ -186,6 +191,28 @@ def test_match_local_id_preferred_over_label_only_id() -> None:
         inference_methods=["deterministic", "llm"],
     )
     assert "match:brazil-vs-morocco-2026-06-14" in state.canonical_nodes
+    assert "match:brazil-vs-morocco" not in state.canonical_nodes
     assert state.local_to_canonical["match:brazil-vs-morocco"] == (
         "match:brazil-vs-morocco-2026-06-14"
     )
+
+
+def test_match_dateful_id_upgrades_when_label_only_arrives_first() -> None:
+    """Bracket is appended after topology; dateful MATCH ids must still win."""
+    dateful, label_only = _brazil_morocco_match_fragments()
+    state = resolve_fragments(
+        [label_only, dateful],
+        Settings(),
+        inference_methods=["deterministic", "official_bracket"],
+    )
+    assert "match:brazil-vs-morocco-2026-06-14" in state.canonical_nodes
+    assert "match:brazil-vs-morocco" not in state.canonical_nodes
+    assert state.local_to_canonical["match:brazil-vs-morocco"] == (
+        "match:brazil-vs-morocco-2026-06-14"
+    )
+    assert state.local_to_canonical["match:brazil-vs-morocco-2026-06-14"] == (
+        "match:brazil-vs-morocco-2026-06-14"
+    )
+    assert sorted(
+        state.canonical_nodes["match:brazil-vs-morocco-2026-06-14"].evidence_market_ids
+    ) == ["m1", "m2"]

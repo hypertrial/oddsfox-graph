@@ -139,6 +139,10 @@ Build / run options:
 - `--minimum-confidence 0.5` — reject edges below this threshold during `build` (does not affect entity resolution)
 - `--official-bracket / --no-official-bracket` — inject curated WC2026 stage ladder + official MATCH bracket (default: on)
 
+`oddsgraph run` with `--event-id` / `--limit-events` reuses the same in-memory
+market list for build, so the exported graph stays scoped to those events
+(standalone `oddsgraph build` still reads the full semantic parquet).
+
 ### Chunking settings (infer)
 
 Configured in `Settings` defaults in `oddsgraph/config.py`:
