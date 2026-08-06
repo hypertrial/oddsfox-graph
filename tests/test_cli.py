@@ -27,9 +27,25 @@ def test_cli_help() -> None:
     assert "build" in output
     assert "validate" in output
     assert "run" in output
+    assert "explore" in output
 
 
-def test_cli_infer_backend_options_in_help() -> None:
+def test_cli_explore_help() -> None:
+    result = runner.invoke(app, ["explore", "--help"])
+    assert result.exit_code == 0
+    output = _plain_output(result.output)
+    assert "--host" in output
+    assert "--port" in output
+    assert "--debug" in output
+
+
+def test_cli_explore_missing_artifacts(tmp_path: Path) -> None:
+    build_dir = tmp_path / "build"
+    build_dir.mkdir()
+    result = runner.invoke(app, ["--build-dir", str(build_dir), "explore"])
+    assert result.exit_code == 1
+    assert "No exported graph found" in result.output
+
     help_result = runner.invoke(app, ["infer", "--help"])
     assert help_result.exit_code == 0
     output = _plain_output(help_result.output)

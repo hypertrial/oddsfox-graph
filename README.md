@@ -59,6 +59,7 @@ oddsgraph reduce          # reduce parquet to semantic markets
 oddsgraph infer           # infer graph fragments per event
 oddsgraph build           # resolve, validate, export graph
 oddsgraph validate        # validate exported artifacts
+oddsgraph explore         # local Dash explorer over nodes/edges parquet
 oddsgraph run             # full pipeline
 ```
 
@@ -193,6 +194,30 @@ build/inference_report.json
 build/ontology.json
 ```
 
+## Explore
+
+Launch a local, read-only Dash + Cytoscape explorer over exported graph artifacts:
+
+```bash
+uv sync --extra explore   # or: uv sync --extra dev --extra explore
+oddsgraph explore         # http://127.0.0.1:8050
+```
+
+Options: `--host`, `--port`, `--debug`, plus the shared `--build-dir`.
+
+**Default view** is the topology layer only (`COMPETITION`, `STAGE`, `GROUP`, `ROUND`,
+`MATCH`, `TEAM`) — about 180 nodes / 700 edges on a full WC2026 build. Use the
+search box to pull in `EVENT` / `MARKET` / `OUTCOME` nodes and expand their
+neighbors; the type filter auto-enables the added types so results stay visible.
+Click any node or edge to inspect all exported features (confidence, aliases,
+evidence market IDs, inference/resolution methods, evidence text).
+
+**Important:** the topology layer and the market layer are currently
+**disconnected**. The export has no `PRICES` or `IMPLIES` edges linking
+`MATCH`/`TEAM` nodes to `EVENT`/`MARKET`/`OUTCOME` nodes, so expanding a
+topology node will not reach markets. Search for an event title (or market id)
+to explore the market layer independently.
+
 ## Stack
 
 - `duckdb` — query and reduce parquet
@@ -203,6 +228,7 @@ build/ontology.json
 - `rapidfuzz` — entity and alias matching
 - `rustworkx` — graph construction and validation
 - `typer` — CLI
+- `dash` / `dash-cytoscape` — optional local graph explorer (`--extra explore`)
 - `pytest` — tests
 
 ## Testing

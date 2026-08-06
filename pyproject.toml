@@ -23,6 +23,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
+explore = ["dash>=2.18", "dash-cytoscape>=1.0"]
 
 [project.scripts]
 oddsgraph = "oddsgraph.cli:app"
