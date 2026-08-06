@@ -208,13 +208,6 @@
   font-weight: 650;
 }
 
-.of-personas {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem;
-  margin: 0 0 1rem;
-}
-
 .of-persona {
   display: inline-block;
   padding: 0.15rem 0.55rem;

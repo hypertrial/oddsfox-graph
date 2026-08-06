@@ -128,7 +128,7 @@ def test_brand_assets_and_compact_styles_exist():
     assert css.count("@font-face") == 2
     assert ".of-hero" in css
     assert ".of-task-grid" in css
-    assert ".of-personas" in css
+    assert ".of-persona" in css
     assert ".of-persona--analyst" in css
 
 
