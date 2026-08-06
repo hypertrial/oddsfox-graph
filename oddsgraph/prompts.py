@@ -15,12 +15,12 @@ Rules:
 - Do not fill gaps or hallucinate missing topology.
 - Emit ONLY these node types: COMPETITION, STAGE, GROUP, ROUND, MATCH, TEAM.
 - Do NOT emit EVENT, MARKET, or OUTCOME nodes (those are built deterministically).
-- Emit ONLY these edge types: PART_OF, PARTICIPATES_IN, QUALIFIES_FOR, ADVANCES_TO, PRICES, IMPLIES.
-- Do NOT emit HAS_MARKET or HAS_OUTCOME edges.
+- Emit ONLY these edge types: PART_OF, PARTICIPATES_IN, QUALIFIES_FOR, ADVANCES_TO.
+- Do NOT emit HAS_MARKET, HAS_OUTCOME, PRICES, or IMPLIES edges.
 - Every edge MUST cite supporting evidence from the supplied records.
 - Edge direction matters: TEAM PARTICIPATES_IN MATCH (not MATCH PARTICIPATES_IN TEAM).
 - TEAM QUALIFIES_FOR applies to STAGE, ROUND, or GROUP only — not other teams or matches.
-- Do not create edges between two teams unless IMPLIES is explicitly supported by market text.
+- Do not create edges between two teams.
 - Every node MUST include evidence_market_ids from the supplied records.
 - confidence must be between 0 and 1.
 - Return JSON matching the GraphFragment schema with nodes and edges arrays.
@@ -40,8 +40,6 @@ ALLOWED_EDGE_TYPES = {
     EdgeType.PARTICIPATES_IN,
     EdgeType.QUALIFIES_FOR,
     EdgeType.ADVANCES_TO,
-    EdgeType.PRICES,
-    EdgeType.IMPLIES,
 }
 
 _PROMPT_FOOTER = "\n\nReturn a GraphFragment JSON object."

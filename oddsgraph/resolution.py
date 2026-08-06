@@ -56,6 +56,15 @@ class _FuzzyIndex:
         return self.ids_by_type[node_type][index], score
 
 
+@dataclass
+class _ResolutionIndexes:
+    by_slug: dict[tuple[NodeType, str], CanonicalNode] = field(default_factory=dict)
+    by_label: dict[tuple[NodeType, str], CanonicalNode] = field(default_factory=dict)
+    by_alias: dict[tuple[NodeType, str], CanonicalNode] = field(default_factory=dict)
+    fuzzy_index: _FuzzyIndex = field(default_factory=_FuzzyIndex)
+    evidence_sets: dict[str, set[str]] = field(default_factory=dict)
+
+
 def _competition_slug_from_fragments(fragments: list[GraphFragment]) -> str:
     for fragment in fragments:
         for node in fragment.nodes:
@@ -98,6 +107,9 @@ def _suggested_canonical_id(node: Node, competition_slug: str) -> str:
     if node.type == NodeType.ROUND:
         return ids.round_id(competition_slug, node.label)
     if node.type == NodeType.MATCH:
+        # Prefer builder local_ids (dateful) over label-only IDs.
+        if node.local_id.startswith("match:"):
+            return node.local_id
         return ids.match_id(node.label)
     if node.type == NodeType.EVENT:
         return ids.event_id(node.local_id.replace("event:", ""))
@@ -144,40 +156,44 @@ def _team_alias_compatible(alias: str, node_label: str, existing_label: str) -> 
 def _index_aliases(
     canonical: CanonicalNode,
     aliases: list[str],
-    by_alias: dict[tuple[NodeType, str], CanonicalNode],
+    indexes: _ResolutionIndexes,
 ) -> None:
     for alias in aliases:
-        by_alias[(canonical.type, ids.normalize_label(alias))] = canonical
+        indexes.by_alias[(canonical.type, ids.normalize_label(alias))] = canonical
+
+
+def _materialize_evidence(
+    canonical_id: str,
+    indexes: _ResolutionIndexes,
+) -> list[str]:
+    return sorted(indexes.evidence_sets.get(canonical_id, set()))
 
 
 def _merge_canonical(
+    state: ResolutionState,
     existing: CanonicalNode,
     node: Node,
     method: str,
-    by_slug: dict[tuple[NodeType, str], CanonicalNode],
-    by_label: dict[tuple[NodeType, str], CanonicalNode],
-    by_alias: dict[tuple[NodeType, str], CanonicalNode],
-    fuzzy_index: _FuzzyIndex,
+    indexes: _ResolutionIndexes,
 ) -> CanonicalNode:
-    merged_evidence = sorted(
-        set(existing.evidence_market_ids) | set(node.evidence_market_ids)
-    )
+    evidence = indexes.evidence_sets.setdefault(existing.canonical_id, set())
+    evidence.update(node.evidence_market_ids)
     previous_aliases = set(existing.aliases) | {existing.label}
     merged_aliases = sorted(set(existing.aliases) | set(node.aliases) | {node.label})
     merged = existing.model_copy(
         update={
             "confidence": max(existing.confidence, node.confidence),
-            "evidence_market_ids": merged_evidence,
+            # Evidence lists are finalized once at the end of resolve_fragments.
             "aliases": merged_aliases,
             "resolution_method": method,
         }
     )
-    by_slug[(merged.type, ids.slugify(merged.label))] = merged
-    by_label[(merged.type, ids.normalize_label(merged.label))] = merged
-    # Re-point all alias keys at the refreshed CanonicalNode, including newly merged ones.
-    _index_aliases(merged, merged_aliases + [merged.label], by_alias)
+    indexes.by_slug[(merged.type, ids.slugify(merged.label))] = merged
+    indexes.by_label[(merged.type, ids.normalize_label(merged.label))] = merged
+    _index_aliases(merged, merged_aliases + [merged.label], indexes)
     if node.label not in previous_aliases:
-        fuzzy_index.add(merged.type, node.label, merged.canonical_id)
+        indexes.fuzzy_index.add(merged.type, node.label, merged.canonical_id)
+    state.canonical_nodes[existing.canonical_id] = merged
     return merged
 
 
@@ -187,11 +203,9 @@ def _register_canonical(
     node: Node,
     method: str,
     inference_method: str,
-    by_slug: dict[tuple[NodeType, str], CanonicalNode],
-    by_label: dict[tuple[NodeType, str], CanonicalNode],
-    by_alias: dict[tuple[NodeType, str], CanonicalNode],
-    fuzzy_index: _FuzzyIndex,
+    indexes: _ResolutionIndexes,
 ) -> None:
+    indexes.evidence_sets[canonical_id] = set(node.evidence_market_ids)
     canonical = CanonicalNode(
         canonical_id=canonical_id,
         type=node.type,
@@ -204,10 +218,158 @@ def _register_canonical(
     )
     state.canonical_nodes[canonical_id] = canonical
     state.local_to_canonical[node.local_id] = canonical_id
-    by_slug[(node.type, ids.slugify(node.label))] = canonical
-    by_label[(node.type, ids.normalize_label(node.label))] = canonical
-    _index_aliases(canonical, list(node.aliases) + [node.label], by_alias)
-    fuzzy_index.add(node.type, node.label, canonical_id)
+    indexes.by_slug[(node.type, ids.slugify(node.label))] = canonical
+    indexes.by_label[(node.type, ids.normalize_label(node.label))] = canonical
+    _index_aliases(canonical, list(node.aliases) + [node.label], indexes)
+    indexes.fuzzy_index.add(node.type, node.label, canonical_id)
+
+
+def _bind_existing(
+    state: ResolutionState,
+    existing: CanonicalNode,
+    node: Node,
+    method: str,
+    tier: str,
+    indexes: _ResolutionIndexes,
+) -> None:
+    _merge_canonical(state, existing, node, method, indexes)
+    state.local_to_canonical[node.local_id] = existing.canonical_id
+    _register_tier(state, tier)
+
+
+def _try_exact_id(
+    state: ResolutionState,
+    node: Node,
+    method: str,
+    indexes: _ResolutionIndexes,
+) -> bool:
+    polymarket_id = _polymarket_canonical_id(node)
+    if not polymarket_id:
+        return False
+    if polymarket_id in state.canonical_nodes:
+        _bind_existing(
+            state,
+            state.canonical_nodes[polymarket_id],
+            node,
+            "exact_id",
+            "exact_id",
+            indexes,
+        )
+        return True
+    _register_canonical(
+        state, polymarket_id, node, "exact_id", method, indexes
+    )
+    _register_tier(state, "exact_id")
+    return True
+
+
+def _try_exact_slug(
+    state: ResolutionState,
+    node: Node,
+    indexes: _ResolutionIndexes,
+) -> bool:
+    slug_key = (node.type, ids.slugify(node.label))
+    existing = indexes.by_slug.get(slug_key)
+    if existing is None:
+        return False
+    _bind_existing(state, existing, node, "exact_slug", "exact_slug", indexes)
+    return True
+
+
+def _try_exact_label(
+    state: ResolutionState,
+    node: Node,
+    indexes: _ResolutionIndexes,
+) -> bool:
+    label_key = (node.type, ids.normalize_label(node.label))
+    existing = indexes.by_label.get(label_key)
+    if existing is None:
+        return False
+    _bind_existing(state, existing, node, "exact_label", "exact_label", indexes)
+    return True
+
+
+def _try_alias(
+    state: ResolutionState,
+    node: Node,
+    indexes: _ResolutionIndexes,
+) -> bool:
+    for alias in [node.label] + list(node.aliases):
+        alias_key = (node.type, ids.normalize_label(alias))
+        existing = indexes.by_alias.get(alias_key)
+        if existing is not None and (
+            node.type != NodeType.TEAM
+            or _team_alias_compatible(alias, node.label, existing.label)
+        ):
+            _bind_existing(state, existing, node, "alias", "alias", indexes)
+            return True
+        if node.type != NodeType.TEAM:
+            continue
+        if not _team_code_maps_to_label(alias, node.label):
+            continue
+        for code_alias in ids.team_aliases_from_code(alias):
+            code_key = (node.type, ids.normalize_label(code_alias))
+            existing = indexes.by_alias.get(code_key)
+            if existing is None:
+                continue
+            _bind_existing(state, existing, node, "alias", "alias", indexes)
+            return True
+    return False
+
+
+def _try_fuzzy(
+    state: ResolutionState,
+    node: Node,
+    settings: Settings,
+    indexes: _ResolutionIndexes,
+) -> bool:
+    best_canonical_id, _ = indexes.fuzzy_index.best_match(
+        node.type,
+        node.label,
+        settings.fuzzy_threshold,
+    )
+    if best_canonical_id is None:
+        return False
+    _bind_existing(
+        state,
+        state.canonical_nodes[best_canonical_id],
+        node,
+        "fuzzy",
+        "fuzzy",
+        indexes,
+    )
+    return True
+
+
+def _register_new(
+    state: ResolutionState,
+    node: Node,
+    method: str,
+    competition_slug: str,
+    indexes: _ResolutionIndexes,
+) -> None:
+    new_id = _suggested_canonical_id(node, competition_slug)
+    if new_id in state.canonical_nodes:
+        _bind_existing(
+            state,
+            state.canonical_nodes[new_id],
+            node,
+            "new_entity",
+            "new_entity",
+            indexes,
+        )
+        return
+    _register_canonical(state, new_id, node, "new_entity", method, indexes)
+    _register_tier(state, "new_entity")
+
+
+def _finalize_evidence(state: ResolutionState, indexes: _ResolutionIndexes) -> None:
+    for canonical_id, canonical in list(state.canonical_nodes.items()):
+        state.canonical_nodes[canonical_id] = canonical.model_copy(
+            update={
+                "evidence_market_ids": _materialize_evidence(canonical_id, indexes)
+            }
+        )
 
 
 def resolve_fragments(
@@ -229,175 +391,20 @@ def resolve_fragments(
             all_nodes.append((_prepare_team_node(node), method))
 
     competition_slug = _competition_slug_from_fragments(fragments)
-    by_slug: dict[tuple[NodeType, str], CanonicalNode] = {}
-    by_label: dict[tuple[NodeType, str], CanonicalNode] = {}
-    by_alias: dict[tuple[NodeType, str], CanonicalNode] = {}
-    fuzzy_index = _FuzzyIndex()
+    indexes = _ResolutionIndexes()
 
     for node, method in all_nodes:
-        polymarket_id = _polymarket_canonical_id(node)
-
-        # Tier 1: exact Polymarket identifier
-        if polymarket_id:
-            if polymarket_id in state.canonical_nodes:
-                existing = state.canonical_nodes[polymarket_id]
-                state.canonical_nodes[polymarket_id] = _merge_canonical(
-                    existing,
-                    node,
-                    "exact_id",
-                    by_slug,
-                    by_label,
-                    by_alias,
-                    fuzzy_index,
-                )
-                state.local_to_canonical[node.local_id] = polymarket_id
-                _register_tier(state, "exact_id")
-                continue
-            _register_canonical(
-                state,
-                polymarket_id,
-                node,
-                "exact_id",
-                method,
-                by_slug,
-                by_label,
-                by_alias,
-                fuzzy_index,
-            )
-            _register_tier(state, "exact_id")
+        if _try_exact_id(state, node, method, indexes):
             continue
-
-        # Tier 2: exact normalized slug
-        slug_key = (node.type, ids.slugify(node.label))
-        if slug_key in by_slug:
-            existing = by_slug[slug_key]
-            state.canonical_nodes[existing.canonical_id] = _merge_canonical(
-                existing,
-                node,
-                "exact_slug",
-                by_slug,
-                by_label,
-                by_alias,
-                fuzzy_index,
-            )
-            state.local_to_canonical[node.local_id] = existing.canonical_id
-            _register_tier(state, "exact_slug")
+        if _try_exact_slug(state, node, indexes):
             continue
-
-        # Tier 3: exact normalized label
-        label_key = (node.type, ids.normalize_label(node.label))
-        if label_key in by_label:
-            existing = by_label[label_key]
-            state.canonical_nodes[existing.canonical_id] = _merge_canonical(
-                existing,
-                node,
-                "exact_label",
-                by_slug,
-                by_label,
-                by_alias,
-                fuzzy_index,
-            )
-            state.local_to_canonical[node.local_id] = existing.canonical_id
-            _register_tier(state, "exact_label")
+        if _try_exact_label(state, node, indexes):
             continue
-
-        # Tier 4: alias match
-        alias_matched = False
-        for alias in [node.label] + list(node.aliases):
-            alias_key = (node.type, ids.normalize_label(alias))
-            if alias_key in by_alias:
-                existing = by_alias[alias_key]
-                if node.type != NodeType.TEAM or _team_alias_compatible(
-                    alias, node.label, existing.label
-                ):
-                    state.canonical_nodes[existing.canonical_id] = _merge_canonical(
-                        existing,
-                        node,
-                        "alias",
-                        by_slug,
-                        by_label,
-                        by_alias,
-                        fuzzy_index,
-                    )
-                    state.local_to_canonical[node.local_id] = existing.canonical_id
-                    _register_tier(state, "alias")
-                    alias_matched = True
-                    break
-            if node.type == NodeType.TEAM:
-                # Only expand codes that belong to this team's mapped identity
-                # (Polymarket reuses FIFA-looking codes such as kor→Curaçao).
-                if not _team_code_maps_to_label(alias, node.label):
-                    continue
-                for code_alias in ids.team_aliases_from_code(alias):
-                    code_key = (node.type, ids.normalize_label(code_alias))
-                    if code_key in by_alias:
-                        existing = by_alias[code_key]
-                        state.canonical_nodes[existing.canonical_id] = _merge_canonical(
-                            existing,
-                            node,
-                            "alias",
-                            by_slug,
-                            by_label,
-                            by_alias,
-                            fuzzy_index,
-                        )
-                        state.local_to_canonical[node.local_id] = existing.canonical_id
-                        _register_tier(state, "alias")
-                        alias_matched = True
-                        break
-            if alias_matched:
-                break
-        if alias_matched:
+        if _try_alias(state, node, indexes):
             continue
-
-        # Tier 5: conservative rapidfuzz match
-        best_canonical_id, _ = fuzzy_index.best_match(
-            node.type,
-            node.label,
-            settings.fuzzy_threshold,
-        )
-        if best_canonical_id is not None:
-            best_canonical = state.canonical_nodes[best_canonical_id]
-            state.canonical_nodes[best_canonical_id] = _merge_canonical(
-                best_canonical,
-                node,
-                "fuzzy",
-                by_slug,
-                by_label,
-                by_alias,
-                fuzzy_index,
-            )
-            state.local_to_canonical[node.local_id] = best_canonical_id
-            _register_tier(state, "fuzzy")
+        if _try_fuzzy(state, node, settings, indexes):
             continue
+        _register_new(state, node, method, competition_slug, indexes)
 
-        # No match found: create new canonical entity with deterministic ID
-        new_id = _suggested_canonical_id(node, competition_slug)
-        if new_id in state.canonical_nodes:
-            existing = state.canonical_nodes[new_id]
-            state.canonical_nodes[new_id] = _merge_canonical(
-                existing,
-                node,
-                "new_entity",
-                by_slug,
-                by_label,
-                by_alias,
-                fuzzy_index,
-            )
-            state.local_to_canonical[node.local_id] = new_id
-            _register_tier(state, "new_entity")
-        else:
-            _register_canonical(
-                state,
-                new_id,
-                node,
-                "new_entity",
-                method,
-                by_slug,
-                by_label,
-                by_alias,
-                fuzzy_index,
-            )
-            _register_tier(state, "new_entity")
-
+    _finalize_evidence(state, indexes)
     return state

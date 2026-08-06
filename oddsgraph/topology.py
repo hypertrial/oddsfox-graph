@@ -7,6 +7,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 
 from oddsgraph import ids
+from oddsgraph.fragments import make_edge, make_node, match_local_id
 from oddsgraph.ontology import EdgeType, NodeType
 from oddsgraph.schema import Edge, GraphFragment, Node, SemanticMarket
 
@@ -50,13 +51,12 @@ def _is_player_prop(market: SemanticMarket) -> bool:
 
 
 def _competition_node(competition_label: str, evidence_market_ids: list[str]) -> Node:
-    return Node(
-        local_id=ids.competition_id(competition_label),
-        type=NodeType.COMPETITION,
-        label=competition_label,
+    return make_node(
+        ids.competition_id(competition_label),
+        NodeType.COMPETITION,
+        competition_label,
+        evidence_market_ids,
         aliases=[ids.slugify(competition_label)],
-        confidence=1.0,
-        evidence_market_ids=evidence_market_ids,
     )
 
 
@@ -65,13 +65,12 @@ def _team_node(
     evidence_market_ids: list[str],
     aliases: list[str] | None = None,
 ) -> Node:
-    return Node(
-        local_id=ids.team_id(label),
-        type=NodeType.TEAM,
-        label=label,
-        aliases=sorted({a for a in (aliases or []) if a}),
-        confidence=1.0,
-        evidence_market_ids=evidence_market_ids,
+    return make_node(
+        ids.team_id(label),
+        NodeType.TEAM,
+        label,
+        evidence_market_ids,
+        aliases=aliases,
     )
 
 
@@ -81,13 +80,12 @@ def _group_node(
     evidence_market_ids: list[str],
     aliases: list[str] | None = None,
 ) -> Node:
-    return Node(
-        local_id=ids.group_id(competition_label, group_label),
-        type=NodeType.GROUP,
-        label=group_label,
-        aliases=sorted({a for a in (aliases or []) if a}),
-        confidence=1.0,
-        evidence_market_ids=evidence_market_ids,
+    return make_node(
+        ids.group_id(competition_label, group_label),
+        NodeType.GROUP,
+        group_label,
+        evidence_market_ids,
+        aliases=aliases,
     )
 
 
@@ -96,12 +94,11 @@ def _stage_node(
     stage_label: str,
     evidence_market_ids: list[str],
 ) -> Node:
-    return Node(
-        local_id=ids.stage_id(competition_label, stage_label),
-        type=NodeType.STAGE,
-        label=stage_label,
-        confidence=1.0,
-        evidence_market_ids=evidence_market_ids,
+    return make_node(
+        ids.stage_id(competition_label, stage_label),
+        NodeType.STAGE,
+        stage_label,
+        evidence_market_ids,
     )
 
 
@@ -111,13 +108,12 @@ def _match_node(
     evidence_market_ids: list[str],
     aliases: list[str] | None = None,
 ) -> Node:
-    return Node(
-        local_id=local_id,
-        type=NodeType.MATCH,
-        label=label,
-        aliases=sorted({a for a in (aliases or []) if a}),
-        confidence=1.0,
-        evidence_market_ids=evidence_market_ids,
+    return make_node(
+        local_id,
+        NodeType.MATCH,
+        label,
+        evidence_market_ids,
+        aliases=aliases,
     )
 
 
@@ -128,12 +124,11 @@ def _edge(
     evidence_market_ids: list[str],
     evidence_text: str = "",
 ) -> Edge:
-    return Edge(
-        source=source,
-        target=target,
-        type=edge_type,
-        confidence=1.0,
-        evidence_market_ids=evidence_market_ids,
+    return make_edge(
+        source,
+        target,
+        edge_type,
+        evidence_market_ids,
         evidence_text=evidence_text,
     )
 
@@ -187,12 +182,7 @@ def _codes_from_slug(event_slug: str | None) -> tuple[str, str] | None:
 
 
 def _match_local_id(team_a: str, team_b: str, event_slug: str | None) -> str:
-    date = _date_from_slug(event_slug)
-    slug_a = ids.slugify(team_a)
-    slug_b = ids.slugify(team_b)
-    if date:
-        return ids.match_id(f"{slug_a}-vs-{slug_b}-{date}")
-    return ids.match_id(f"{slug_a}-vs-{slug_b}")
+    return match_local_id(team_a, team_b, date=_date_from_slug(event_slug))
 
 
 def _match_alias(event_slug: str | None) -> str | None:

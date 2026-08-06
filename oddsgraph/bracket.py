@@ -8,6 +8,7 @@ from functools import lru_cache
 from pathlib import Path
 
 from oddsgraph import ids
+from oddsgraph.fragments import make_edge, make_node, match_local_id
 from oddsgraph.ontology import EdgeType, NodeType
 from oddsgraph.schema import Edge, GraphFragment, Node
 from oddsgraph.topology import DEFAULT_COMPETITION_LABEL
@@ -73,12 +74,7 @@ def _kickoff_date(kickoff_at_utc: str | None) -> str | None:
 
 
 def _match_local_id(team_a: str, team_b: str, kickoff_at_utc: str | None) -> str:
-    date = _kickoff_date(kickoff_at_utc)
-    slug_a = ids.slugify(team_a)
-    slug_b = ids.slugify(team_b)
-    if date:
-        return ids.match_id(f"{slug_a}-vs-{slug_b}-{date}")
-    return ids.match_id(f"{slug_a}-vs-{slug_b}")
+    return match_local_id(team_a, team_b, date=_kickoff_date(kickoff_at_utc))
 
 
 def _node(
@@ -88,14 +84,7 @@ def _node(
     evidence: list[str],
     aliases: list[str] | None = None,
 ) -> Node:
-    return Node(
-        local_id=local_id,
-        type=node_type,
-        label=label,
-        aliases=sorted({a for a in (aliases or []) if a}),
-        confidence=1.0,
-        evidence_market_ids=evidence,
-    )
+    return make_node(local_id, node_type, label, evidence, aliases=aliases)
 
 
 def _edge(
@@ -105,13 +94,8 @@ def _edge(
     evidence: list[str],
     evidence_text: str = "",
 ) -> Edge:
-    return Edge(
-        source=source,
-        target=target,
-        type=edge_type,
-        confidence=1.0,
-        evidence_market_ids=evidence,
-        evidence_text=evidence_text,
+    return make_edge(
+        source, target, edge_type, evidence, evidence_text=evidence_text
     )
 
 

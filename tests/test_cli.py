@@ -41,6 +41,16 @@ def test_cli_infer_backend_options_in_help() -> None:
     assert "no-deterministic" in output
 
 
+def test_cli_run_help_includes_infer_and_build_options() -> None:
+    help_result = runner.invoke(app, ["run", "--help"])
+    assert help_result.exit_code == 0
+    output = _plain_output(help_result.output)
+    assert "--llm-backend" in output
+    assert "--concurrency" in output
+    assert "official-bracket" in output
+    assert "--minimum-confidence" in output
+
+
 def test_cli_build_and_validate_with_fixture(tmp_path: Path) -> None:
     build_dir = tmp_path / "build"
     settings = Settings()

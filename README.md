@@ -78,7 +78,7 @@ Infer / run options:
   via a per-event chunk manifest
 - `--llm-backend inprocess|server` — in-process `llama-cpp-python` or remote `llama-server`
 - `--server-url http://127.0.0.1:8080` — base URL when using `--llm-backend server`
-- `--concurrency N` — concurrent LLM requests (server backend only)
+- `--concurrency N` — concurrent LLM requests (server backend only; prefer this for full-dataset runs)
 - `--deterministic-topology / --no-deterministic-topology` — extract TEAM/MATCH/GROUP/STAGE topology without LLM when possible (default: on)
 
 ### Deterministic topology (default on)

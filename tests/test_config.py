@@ -14,7 +14,7 @@ def test_resolve_input_glob_uses_data_dir(tmp_path: Path) -> None:
     pq.write_table(table, parquet_path)
 
     settings = Settings()
-    settings.data_dir = data_dir
+    settings.configure_data_dir(data_dir)
     resolved = settings.resolve_input_glob()
 
     assert resolved.startswith(str(data_dir))
@@ -27,6 +27,13 @@ def test_resolve_input_glob_explicit_data_dir_does_not_fall_back(
     empty = tmp_path / "empty-data"
     empty.mkdir()
     settings = Settings()
-    settings.data_dir = empty
+    settings.configure_data_dir(empty)
     resolved = settings.resolve_input_glob()
     assert resolved == str(empty / "*market_hourly_odds*.parquet")
+
+
+def test_configure_repo_root_aligns_default_data_dir(tmp_path: Path) -> None:
+    settings = Settings()
+    settings.configure_repo_root(tmp_path)
+    assert settings.data_dir == tmp_path / "data"
+    assert settings.models_dir == tmp_path / "models"

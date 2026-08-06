@@ -66,6 +66,22 @@ class Settings:
         self.ontology_path = build_dir / "ontology.json"
         self.inference_report_path = build_dir / "inference_report.json"
 
+    def configure_data_dir(self, data_dir: Path) -> None:
+        self.data_dir = data_dir
+
+    def configure_repo_root(self, repo_root: Path) -> None:
+        """Point repo_root and keep data_dir/models_dir aligned when still defaults."""
+        previous_root = self.repo_root
+        previous_data = previous_root / "data"
+        previous_models = previous_root / "models"
+        self.repo_root = repo_root
+        if self.data_dir == previous_data:
+            self.data_dir = repo_root / "data"
+        if self.models_dir == previous_models:
+            self.models_dir = repo_root / "models"
+            if self.model_path == previous_models / "qwen3-4b-q4_k_m.gguf":
+                self.model_path = self.models_dir / "qwen3-4b-q4_k_m.gguf"
+
     def ensure_dirs(self) -> None:
         self.build_dir.mkdir(parents=True, exist_ok=True)
         self.fragments_dir.mkdir(parents=True, exist_ok=True)

@@ -33,10 +33,9 @@ def _write_raw_odds_fixture(path: Path) -> None:
 
 def test_reduce_writes_semantic_markets(tmp_path: Path) -> None:
     settings = Settings()
-    settings.repo_root = tmp_path
-    settings.data_dir = tmp_path / "data"
-    settings.build_dir = tmp_path / "build"
-    settings.semantic_markets_path = settings.build_dir / "semantic_markets.parquet"
+    settings.configure_repo_root(tmp_path)
+    settings.configure_data_dir(tmp_path / "data")
+    settings.configure_build_dir(tmp_path / "build")
     _write_raw_odds_fixture(tmp_path / "data" / "market_hourly_odds_fixture.parquet")
 
     output = reduce_semantic_markets(settings)

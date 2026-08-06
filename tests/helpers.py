@@ -5,11 +5,22 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from oddsgraph.config import Settings
 from oddsgraph.schema import GraphFragment, SemanticMarket
 
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
 GOLDEN_MARKETS_PATH = FIXTURES_DIR / "golden_semantic_markets.parquet"
 FRAGMENTS_DIR = FIXTURES_DIR / "fragments"
+
+
+def make_settings(tmp_path: Path) -> Settings:
+    """Create Settings rooted at tmp_path with aligned build/data dirs."""
+    settings = Settings()
+    settings.configure_repo_root(tmp_path)
+    settings.configure_build_dir(tmp_path / "build")
+    settings.configure_data_dir(tmp_path / "data")
+    settings.ensure_dirs()
+    return settings
 
 
 def load_golden_markets() -> list[SemanticMarket]:

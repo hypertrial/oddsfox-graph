@@ -68,9 +68,13 @@ def build_pipeline_from_markets(
     return BuildPipelineResult(resolution=resolution, graph=graph, report=report)
 
 
-def run_build_and_export(settings: Settings) -> BuildPipelineResult:
+def run_build_and_export(
+    settings: Settings,
+    markets: list[SemanticMarket] | None = None,
+) -> BuildPipelineResult:
     settings.ensure_dirs()
-    markets = load_semantic_markets(settings.semantic_markets_path)
+    if markets is None:
+        markets = load_semantic_markets(settings.semantic_markets_path)
     inferred = load_all_fragments(settings)
     result = build_pipeline_from_markets(settings, markets, inferred)
 

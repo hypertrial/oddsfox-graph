@@ -154,3 +154,38 @@ def test_merged_aliases_are_usable_by_later_nodes() -> None:
     assert len(iran_teams) == 1
     assert iran_teams[0].canonical_id == "team:iran"
     assert state.local_to_canonical["team:ir-iran"] == "team:iran"
+
+
+def test_match_local_id_preferred_over_label_only_id() -> None:
+    dateful = GraphFragment(
+        nodes=[
+            Node(
+                local_id="match:brazil-vs-morocco-2026-06-14",
+                type=NodeType.MATCH,
+                label="Brazil vs. Morocco",
+                confidence=0.9,
+                evidence_market_ids=["m1"],
+            )
+        ]
+    )
+    label_only = GraphFragment(
+        nodes=[
+            Node(
+                local_id="match:brazil-vs-morocco",
+                type=NodeType.MATCH,
+                label="Brazil vs. Morocco",
+                confidence=0.8,
+                evidence_market_ids=["m2"],
+            )
+        ]
+    )
+    # Register dateful first via local_id suggested path, then merge by slug/label.
+    state = resolve_fragments(
+        [dateful, label_only],
+        Settings(),
+        inference_methods=["deterministic", "llm"],
+    )
+    assert "match:brazil-vs-morocco-2026-06-14" in state.canonical_nodes
+    assert state.local_to_canonical["match:brazil-vs-morocco"] == (
+        "match:brazil-vs-morocco-2026-06-14"
+    )

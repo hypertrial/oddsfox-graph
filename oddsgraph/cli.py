@@ -54,6 +54,23 @@ def _apply_infer_options(
     return settings
 
 
+def _apply_build_options(
+    settings: Settings,
+    minimum_confidence: float = 0.0,
+    official_bracket: Optional[bool] = None,
+) -> Settings:
+    settings.minimum_confidence = minimum_confidence
+    if official_bracket is not None:
+        settings.official_bracket = official_bracket
+    return settings
+
+
+def _echo_validation_errors(errors: list[str]) -> None:
+    typer.echo("Validation FAILED:")
+    for error in errors:
+        typer.echo(f"  - {error}")
+
+
 @app.callback()
 def main(
     ctx: typer.Context,
@@ -75,7 +92,7 @@ def main(
     if build_dir is not None:
         settings.configure_build_dir(build_dir)
     if data_dir is not None:
-        settings.data_dir = data_dir
+        settings.configure_data_dir(data_dir)
     if verbose:
         logging.basicConfig(
             level=logging.INFO,
@@ -164,10 +181,11 @@ def build(
     ] = None,
 ) -> None:
     """Resolve entities, build graph, validate, and export artifacts."""
-    settings = _base_settings(ctx)
-    settings.minimum_confidence = minimum_confidence
-    if official_bracket is not None:
-        settings.official_bracket = official_bracket
+    settings = _apply_build_options(
+        _base_settings(ctx),
+        minimum_confidence=minimum_confidence,
+        official_bracket=official_bracket,
+    )
     result = run_build_and_export(settings)
     typer.echo(
         f"Exported {len(result.graph.nodes)} nodes and {len(result.graph.edges)} edges"
@@ -180,9 +198,7 @@ def validate(ctx: typer.Context) -> None:
     settings = _base_settings(ctx)
     errors = validate_exported_artifacts(settings)
     if errors:
-        typer.echo("Validation FAILED:")
-        for error in errors:
-            typer.echo(f"  - {error}")
+        _echo_validation_errors(errors)
         raise typer.Exit(code=1)
 
     typer.echo("Validation PASSED")
@@ -232,30 +248,30 @@ def run(
     ] = None,
 ) -> None:
     """Run the full pipeline: reduce → infer → build → validate."""
-    settings = _apply_infer_options(
-        _base_settings(ctx),
-        model_path=model_path,
-        limit_events=limit_events,
-        event_id=event_id,
-        resume=resume,
-        llm_backend=llm_backend,
-        server_url=server_url,
-        concurrency=concurrency,
-        deterministic_topology=deterministic_topology,
+    settings = _apply_build_options(
+        _apply_infer_options(
+            _base_settings(ctx),
+            model_path=model_path,
+            limit_events=limit_events,
+            event_id=event_id,
+            resume=resume,
+            llm_backend=llm_backend,
+            server_url=server_url,
+            concurrency=concurrency,
+            deterministic_topology=deterministic_topology,
+        ),
+        minimum_confidence=minimum_confidence,
+        official_bracket=official_bracket,
     )
-    settings.minimum_confidence = minimum_confidence
-    if official_bracket is not None:
-        settings.official_bracket = official_bracket
     reduce_semantic_markets(settings)
     markets = load_markets_for_infer(settings)
     # Lazy LLM load inside infer_event_fragments only when residual chunks remain.
     infer_event_fragments(settings, markets)
-    run_build_and_export(settings)
+    # Reuse the same market list so --event-id/--limit-events stay consistent.
+    run_build_and_export(settings, markets=markets)
     errors = validate_exported_artifacts(settings)
     if errors:
-        typer.echo("Validation FAILED:")
-        for error in errors:
-            typer.echo(f"  - {error}")
+        _echo_validation_errors(errors)
         raise typer.Exit(code=1)
     typer.echo("Pipeline completed successfully")
 

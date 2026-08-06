@@ -74,23 +74,24 @@ def reduce_semantic_markets(settings: Settings) -> Path:
     output_path = settings.semantic_markets_path
 
     query = f"""
-        SELECT DISTINCT
+        SELECT
             market_id,
-            event_id,
-            event_slug,
-            event_title,
-            event_description,
-            question,
-            description,
-            market_slug,
-            sports_market_type,
-            group_item_title,
-            outcomes,
-            tags,
-            event_tags,
-            game_start_time,
-            end_time
+            any_value(event_id) AS event_id,
+            any_value(event_slug) AS event_slug,
+            any_value(event_title) AS event_title,
+            any_value(event_description) AS event_description,
+            any_value(question) AS question,
+            any_value(description) AS description,
+            any_value(market_slug) AS market_slug,
+            any_value(sports_market_type) AS sports_market_type,
+            any_value(group_item_title) AS group_item_title,
+            any_value(outcomes) AS outcomes,
+            any_value(tags) AS tags,
+            any_value(event_tags) AS event_tags,
+            any_value(game_start_time) AS game_start_time,
+            any_value(end_time) AS end_time
         FROM read_parquet('{input_glob}')
+        GROUP BY market_id
     """
     con = duckdb.connect()
     arrow_result = con.execute(query).arrow()

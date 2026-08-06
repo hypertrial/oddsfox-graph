@@ -102,7 +102,16 @@ def test_filter_llm_fragment_removes_disallowed_types(tmp_path) -> None:
                             "evidence_market_ids": ["m1"],
                         },
                     ],
-                    "edges": [],
+                    "edges": [
+                        {
+                            "source": "market:m1",
+                            "target": "team:brazil",
+                            "type": "PRICES",
+                            "confidence": 0.8,
+                            "evidence_market_ids": ["m1"],
+                            "evidence_text": "price",
+                        }
+                    ],
                 }
             )
         )
@@ -111,3 +120,4 @@ def test_filter_llm_fragment_removes_disallowed_types(tmp_path) -> None:
     filtered = llm._filter_llm_fragment(fragment)
     assert len(filtered.nodes) == 1
     assert filtered.nodes[0].type.value == "TEAM"
+    assert filtered.edges == []
