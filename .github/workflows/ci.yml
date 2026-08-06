@@ -19,7 +19,11 @@ jobs:
       - name: Install dependencies
         run: |
           uv sync --frozen --extra dev --no-install-package llama-cpp-python
-          uv pip install "llama-cpp-python==0.3.34" \
+          # Install the locked version from the official CPU wheel index
+          # (PyPI only publishes an sdist, which takes ~3 minutes to compile).
+          LLAMA_VER=$(uv export --frozen --no-emit-project --no-annotate --no-hashes \
+            | sed -n 's/^llama-cpp-python==\([^; ]*\).*/\1/p' | head -n 1)
+          uv pip install "llama-cpp-python==${LLAMA_VER}" \
             --index https://abetlen.github.io/llama-cpp-python/whl/cpu
       - name: Run tests
         run: uv run pytest -q
