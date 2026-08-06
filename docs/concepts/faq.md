@@ -32,6 +32,7 @@ page mirrors those code defaults.
 ## See also
 
 - [Architecture](architecture.md)
+- [Glossary](glossary.md)
 - [Known limitations](limitations.md)
 - [Troubleshooting](troubleshooting.md)
 - [Explorer](../guides/explorer.md)

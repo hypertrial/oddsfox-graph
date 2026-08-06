@@ -1,5 +1,5 @@
 site_name: OddsFox Graph
-site_description: Build prediction market logical knowledge graphs. Public documentation for OddsFox Graph's local WC2026 Polymarket pipeline.
+site_description: Build prediction market logical knowledge graphs. Public documentation for OddsFox Graph, a local Logical Knowledge Graph Compiler for Polymarket WC2026.
 site_url: https://graph.oddsfox.io/
 repo_url: https://github.com/hypertrial/oddsfox-graph
 repo_name: hypertrial/oddsfox-graph
@@ -94,6 +94,7 @@ nav:
       - Source data schema: reference/source-data-schema.md
   - Concepts:
       - Architecture: concepts/architecture.md
+      - Glossary: concepts/glossary.md
       - Entity resolution: concepts/entity-resolution.md
       - Known limitations: concepts/limitations.md
       - Troubleshooting: concepts/troubleshooting.md

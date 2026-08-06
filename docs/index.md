@@ -12,8 +12,10 @@ hide:
 
 # OddsFox Graph
 
-Convert Polymarket WC2026 hourly-odds parquet into a logical knowledge graph of
-competitions, teams, stages, matches, markets, outcomes, and relationships.
+OddsFox Graph is a local **Logical Knowledge Graph Compiler** for prediction
+markets. It converts Polymarket WC2026 hourly-odds parquet into a logical
+knowledge graph of competitions, teams, stages, matches, markets, outcomes, and
+relationships.
 
 Hypertrial-owned MIT software. No hosted service or bundled production data.
 [FAQ](concepts/faq.md) ·

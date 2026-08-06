@@ -17,7 +17,7 @@ from oddsgraph import cli_options as opts
 
 app = typer.Typer(
     name="oddsgraph",
-    help="Local WC2026 Polymarket logical knowledge graph pipeline.",
+    help="Local Logical Knowledge Graph Compiler for Polymarket WC2026.",
     no_args_is_help=True,
 )
 

@@ -42,3 +42,13 @@ introduces them.
   residual LLM path.
 - MkDocs documentation site with persona-based navigation (Analysts,
   Operators, Contributors, Integrators).
+
+### Documentation
+
+- Introduce OddsFox Graph as a **Logical Knowledge Graph Compiler** (README,
+  homepage, package/CLI description, site meta).
+- Restructure Architecture around compiler phases (lexer / parser / constant
+  folding / semantic analysis / linker / type check / codegen) with a phase
+  diagram that separates residual LLM and official-bracket paths.
+- Add Concepts glossary for core terms (fragment, residual event, resolution
+  tier, inference method, and related).

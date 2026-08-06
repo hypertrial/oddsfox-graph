@@ -2,8 +2,9 @@
 
 **Build prediction market logical knowledge graphs.**
 
-Local, open-source pipeline that converts Polymarket WC2026 hourly-odds parquet
-into a logical knowledge graph of competitions, teams, stages, matches, markets,
+oddsgraph is a local, open-source **Logical Knowledge Graph Compiler** for
+prediction markets. It converts Polymarket WC2026 hourly-odds parquet into a
+logical knowledge graph of competitions, teams, stages, matches, markets,
 outcomes, and relationships.
 
 ## Pipeline
