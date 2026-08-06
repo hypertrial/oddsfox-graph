@@ -11,6 +11,11 @@ import duckdb
 
 from oddsgraph.config import Settings
 from oddsgraph.explorer import KNOCKOUT_STAGE_LABELS, TOPOLOGY_NODE_TYPES
+from oddsgraph.explorer.presentation import (
+    bracket_positions,
+    short_match_label,
+    stage_rank,
+)
 
 
 @dataclass
@@ -32,21 +37,31 @@ def _connect() -> duckdb.DuckDBPyConnection:
     return duckdb.connect(database=":memory:")
 
 
-def node_element(row: dict[str, Any]) -> dict[str, Any]:
-    """Convert a parquet node row into a Cytoscape element."""
-    return {
-        "data": {
-            "id": row["canonical_id"],
-            "label": row["label"],
-            "type": row["type"],
-            "confidence": row["confidence"],
-            "aliases": row.get("aliases") or [],
-            "evidence_market_ids": row.get("evidence_market_ids") or [],
-            "resolution_method": row.get("resolution_method") or "",
-            "inference_method": row.get("inference_method") or "",
-        },
+def node_element(row: dict[str, Any], *, bracket: bool = False) -> dict[str, Any]:
+    """Convert a parquet node row into a Cytoscape element.
+
+    When ``bracket`` is True, attach short card labels and stage metadata.
+    """
+    data: dict[str, Any] = {
+        "id": row["canonical_id"],
+        "label": row["label"],
+        "type": row["type"],
+        "confidence": row["confidence"],
+        "aliases": row.get("aliases") or [],
+        "evidence_market_ids": row.get("evidence_market_ids") or [],
+        "resolution_method": row.get("resolution_method") or "",
+        "inference_method": row.get("inference_method") or "",
+    }
+    if bracket or row.get("stage"):
+        stage = str(row.get("stage") or "")
+        data["stage"] = stage
+        data["stage_rank"] = stage_rank(stage)
+        data["short_label"] = short_match_label(str(row["label"]))
+    element: dict[str, Any] = {
+        "data": data,
         "classes": row["type"],
     }
+    return element
 
 
 def edge_element(row: dict[str, Any]) -> dict[str, Any]:
@@ -115,7 +130,11 @@ def topology_elements(settings: Settings) -> GraphSlice:
 
 
 def bracket_elements(settings: Settings) -> GraphSlice:
-    """Return the 32-node knockout MATCH DAG (MATCH ADVANCES_TO MATCH only)."""
+    """Return the 32-node knockout MATCH DAG (MATCH ADVANCES_TO MATCH only).
+
+    Each MATCH node is enriched with ``stage``, ``stage_rank``, ``short_label``,
+    and a deterministic left-to-right ``position`` for the preset bracket layout.
+    """
     nodes_path = _quote_path(settings.nodes_path)
     edges_path = _quote_path(settings.edges_path)
     stage_labels = sorted(KNOCKOUT_STAGE_LABELS)
@@ -125,7 +144,9 @@ def bracket_elements(settings: Settings) -> GraphSlice:
         nodes = _fetch_dicts(
             conn,
             f"""
-            SELECT DISTINCT m.*
+            SELECT DISTINCT
+              m.*,
+              s.label AS stage
             FROM read_parquet('{nodes_path}') m
             INNER JOIN read_parquet('{edges_path}') e
               ON e.source_id = m.canonical_id
@@ -157,10 +178,19 @@ def bracket_elements(settings: Settings) -> GraphSlice:
             [*match_ids, *match_ids],
         )
 
-    return GraphSlice(
-        nodes=[node_element(n) for n in nodes],
-        edges=[edge_element(e) for e in edges],
-    )
+    node_els = [node_element(n, bracket=True) for n in nodes]
+    edge_els = [edge_element(e) for e in edges]
+    positions = bracket_positions(node_els, edge_els)
+    positioned: list[dict[str, Any]] = []
+    for el in node_els:
+        node_id = el["data"]["id"]
+        pos = positions.get(node_id)
+        if pos is not None:
+            positioned.append({**el, "position": pos})
+        else:
+            positioned.append(el)
+
+    return GraphSlice(nodes=positioned, edges=edge_els)
 
 
 def search_nodes(settings: Settings, query: str, limit: int = 25) -> list[dict[str, Any]]:

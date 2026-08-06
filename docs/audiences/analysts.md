@@ -44,12 +44,13 @@ dataset.
 
 ## Topology vs market layer
 
-The default explorer view is the knockout bracket (32 `MATCH` nodes,
-`ADVANCES_TO` edges). Switch to **Full topology** for
-`COMPETITION` / `STAGE` / `GROUP` / `ROUND` / `MATCH` / `TEAM`. The market layer
-(`EVENT`, `MARKET`, `OUTCOME`) is currently **disconnected**: the export has no
-`PRICES` or `IMPLIES` edges linking topology nodes to markets. Search for an
-event title or market id to explore the market layer independently.
+The default explorer view is a left-to-right knockout bracket (32 `MATCH`
+cards, `ADVANCES_TO` edges, path highlight on click). Switch to **Full
+topology** for `COMPETITION` / `STAGE` / `GROUP` / `ROUND` / `MATCH` / `TEAM`.
+The market layer (`EVENT`, `MARKET`, `OUTCOME`) is currently **disconnected**:
+the export has no `PRICES` or `IMPLIES` edges linking topology nodes to markets.
+Search for an event title or market id to explore the market layer
+independently.
 
 ## Next pages
 

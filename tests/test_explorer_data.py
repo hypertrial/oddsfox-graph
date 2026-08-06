@@ -236,6 +236,27 @@ def test_bracket_elements_returns_only_knockout_matches(tmp_path: Path) -> None:
     assert slice_.edges[0]["data"]["target"] == "match:final"
 
 
+def test_bracket_elements_enrich_stage_labels_and_positions(tmp_path: Path) -> None:
+    settings = make_settings(tmp_path)
+    _write_fixture_graph(settings.build_dir)
+
+    slice_ = bracket_elements(settings)
+    by_id = {el["data"]["id"]: el for el in slice_.nodes}
+
+    r16 = by_id["match:brazil-vs-france"]
+    final = by_id["match:final"]
+    assert r16["data"]["stage"] == "Round of 16"
+    assert final["data"]["stage"] == "Final"
+    assert r16["data"]["stage_rank"] == 2
+    assert final["data"]["stage_rank"] == 5
+    assert r16["data"]["short_label"] == "Brazil\nFrance"
+    assert final["data"]["short_label"] == "Brazil\nSpain"
+    assert "position" in r16 and "position" in final
+    assert r16["position"]["x"] < final["position"]["x"]
+    # Final sits near the vertical midpoint of its predecessor.
+    assert abs(final["position"]["y"] - r16["position"]["y"]) < 1e-6
+
+
 def test_bracket_elements_is_acyclic(tmp_path: Path) -> None:
     settings = make_settings(tmp_path)
     _write_fixture_graph(settings.build_dir)
@@ -348,6 +369,19 @@ def test_bracket_elements_on_real_build_if_present() -> None:
     assert len(slice_.edges) == 32
     assert {n["data"]["type"] for n in slice_.nodes} == {"MATCH"}
     assert {e["data"]["edge_type"] for e in slice_.edges} == {"ADVANCES_TO"}
+    assert all(n["data"].get("stage") for n in slice_.nodes)
+    assert all(n["data"].get("short_label") for n in slice_.nodes)
+    assert all("position" in n for n in slice_.nodes)
+
+    xs = {n["data"]["stage"]: n["position"]["x"] for n in slice_.nodes}
+    assert xs["Round of 32"] < xs["Round of 16"] < xs["Quarterfinals"]
+    assert xs["Semifinals"] < xs["Final"]
+    assert xs["Final"] == xs["Third Place"]
+
+    finals = [n for n in slice_.nodes if n["data"]["stage"] == "Final"]
+    thirds = [n for n in slice_.nodes if n["data"]["stage"] == "Third Place"]
+    assert len(finals) == 1 and len(thirds) == 1
+    assert thirds[0]["position"]["y"] > finals[0]["position"]["y"]
 
     graph = rx.PyDiGraph()
     index: dict[str, int] = {}

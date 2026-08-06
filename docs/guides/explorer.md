@@ -18,19 +18,30 @@ Requires `build/nodes.parquet` and `build/edges.parquet` from a prior
 
 ## Default view
 
-The **knockout bracket** (32 `MATCH` nodes connected by `ADVANCES_TO` edges):
+The **knockout bracket** is a classic left-to-right tournament:
 
+- Exactly 32 `MATCH` cards connected by `ADVANCES_TO` edges
 - Round of 32 → Round of 16 → Quarterfinals → Semifinals → Final / Third Place
-- Laid out as a top-to-bottom DAG with dagre
+- Deterministic `preset` layout (not a force-directed hairball)
+- Orthogonal taxi edges without repeated `ADVANCES_TO` labels
+- Click a match to highlight its path through the DAG and inspect features
 
 Switch **View → Full topology** for the broader
 `COMPETITION` / `STAGE` / `GROUP` / `ROUND` / `MATCH` / `TEAM` graph (~180 nodes
 on a full WC2026 build).
 
-Use the search box to pull in `EVENT` / `MARKET` / `OUTCOME` nodes and expand
-their neighbors; the type filter auto-enables added types so results stay
-visible. Click any node or edge to inspect exported features (confidence,
-aliases, evidence market IDs, inference/resolution methods, evidence text).
+### Progressive controls
+
+- Primary: View, Search, Reset
+- Advanced (collapsed by default): node-type filter, confidence, inference
+  method, free layout chooser
+- Search or **Expand neighbors** from the bracket switches into Full topology
+  so the 32-node preset stays clean
+- Hover a card for a compact preview; the inspector shows identity, provenance,
+  and evidence (long market-id lists stay collapsed)
+
+On narrower viewports, use the **Controls** / **Inspector** toggles so the
+canvas keeps most of the screen.
 
 ## Topology / market disconnect
 

@@ -4,6 +4,12 @@ from __future__ import annotations
 
 from typing import Any
 
+from oddsgraph.explorer.presentation import (
+    PRESERVED_CLASSES,
+    merge_class_sets,
+    split_classes,
+)
+
 
 def element_id(el: dict[str, Any]) -> str | None:
     data = el.get("data") or {}
@@ -23,7 +29,7 @@ def merge_elements(
     current: list[dict[str, Any]] | None,
     incoming: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """Deduplicate Cytoscape elements by id, preserving a prior ``hidden`` class."""
+    """Deduplicate Cytoscape elements by id, preserving interaction classes."""
     merged: dict[str, dict[str, Any]] = {}
     for el in current or []:
         eid = element_id(el)
@@ -35,12 +41,14 @@ def merge_elements(
             continue
         existing = merged.get(eid)
         if existing is not None:
-            classes = existing.get("classes") or ""
-            new_classes = el.get("classes") or ""
-            type_class = new_classes.split()[0] if new_classes else ""
-            hidden = "hidden" if "hidden" in classes.split() else ""
-            combined = " ".join(c for c in (type_class, hidden) if c)
+            _, preserved = split_classes(existing.get("classes"))
+            semantic, _ = split_classes(el.get("classes"))
+            # Keep prior interaction/visibility classes; take new semantic type.
+            combined = merge_class_sets(semantic, preserved)
             el = {**el, "classes": combined}
+            # Preserve preset positions when the incoming element lacks them.
+            if "position" in existing and "position" not in el:
+                el = {**el, "position": existing["position"]}
         merged[eid] = el
     return list(merged.values())
 
@@ -67,6 +75,9 @@ def apply_filters(
 
     An empty ``visible_types`` list hides all nodes (and therefore all edges).
     ``None`` is treated the same as an empty list.
+
+    Preserves non-hidden interaction classes (``path-active``, ``path-muted``,
+    ``hovered``) across filter passes.
     """
     visible = set(visible_types or [])
     method = (inference_method or "").strip()
@@ -74,8 +85,8 @@ def apply_filters(
 
     for el in elements:
         data = el.get("data") or {}
-        classes = (el.get("classes") or "").split()
-        base_classes = [c for c in classes if c != "hidden"]
+        semantic, preserved = split_classes(el.get("classes"))
+        preserved.discard("hidden")
         confidence = float(data.get("confidence") or 0.0)
         el_method = str(data.get("inference_method") or "")
         hide = False
@@ -90,15 +101,15 @@ def apply_filters(
                 hide = True
 
         if hide:
-            base_classes.append("hidden")
-        filtered.append({**el, "classes": " ".join(base_classes)})
+            preserved.add("hidden")
+        filtered.append({**el, "classes": merge_class_sets(semantic, preserved)})
 
     visible_node_ids: set[str] = set()
     for el in filtered:
         if not is_node(el):
             continue
-        classes = (el.get("classes") or "").split()
-        if "hidden" in classes:
+        _, preserved = split_classes(el.get("classes"))
+        if "hidden" in preserved:
             continue
         eid = element_id(el)
         if eid is not None:
@@ -110,15 +121,12 @@ def apply_filters(
             result.append(el)
             continue
         data = el.get("data") or {}
-        classes = (el.get("classes") or "").split()
-        base_classes = [c for c in classes if c != "hidden"]
+        semantic, preserved = split_classes(el.get("classes"))
         source = data.get("source")
         target = data.get("target")
         if source not in visible_node_ids or target not in visible_node_ids:
-            base_classes.append("hidden")
-        elif "hidden" in classes:
-            base_classes.append("hidden")
-        result.append({**el, "classes": " ".join(base_classes)})
+            preserved.add("hidden")
+        result.append({**el, "classes": merge_class_sets(semantic, preserved)})
     return result
 
 
@@ -131,3 +139,23 @@ def union_types(current: list[str] | None, extra: list[str]) -> list[str]:
             merged.append(item)
             seen.add(item)
     return merged
+
+
+def clear_interaction_classes(
+    elements: list[dict[str, Any]],
+    *,
+    keep_hidden: bool = True,
+) -> list[dict[str, Any]]:
+    """Strip path/hover classes; optionally keep ``hidden``."""
+    result: list[dict[str, Any]] = []
+    for el in elements:
+        semantic, preserved = split_classes(el.get("classes"))
+        keep: set[str] = set()
+        if keep_hidden and "hidden" in preserved:
+            keep.add("hidden")
+        # Drop everything else in PRESERVED_CLASSES.
+        for token in list(preserved):
+            if token not in PRESERVED_CLASSES:
+                keep.add(token)
+        result.append({**el, "classes": merge_class_sets(semantic, keep)})
+    return result

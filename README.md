@@ -323,14 +323,15 @@ oddsgraph explore         # http://127.0.0.1:8050
 
 Options: `--host`, `--port`, `--debug`, plus the shared `--build-dir`.
 
-**Default view** is the knockout bracket: 32 `MATCH` nodes connected by
-`ADVANCES_TO` edges (Round of 32 → … → Final / Third Place), laid out as a
-top-to-bottom DAG with dagre. Switch **View → Full topology** for the broader
-`COMPETITION`/`STAGE`/`GROUP`/`ROUND`/`MATCH`/`TEAM` graph (~180 nodes). Use the
-search box to pull in `EVENT` / `MARKET` / `OUTCOME` nodes and expand their
-neighbors; the type filter auto-enables the added types so results stay visible.
-Click any node or edge to inspect all exported features (confidence, aliases,
-evidence market IDs, inference/resolution methods, evidence text).
+**Default view** is a left-to-right knockout bracket: 32 `MATCH` cards connected
+by `ADVANCES_TO` edges (Round of 32 → … → Final / Third Place), laid out with a
+deterministic preset + taxi edges. Click a match to highlight its path. Switch
+**View → Full topology** for the broader
+`COMPETITION`/`STAGE`/`GROUP`/`ROUND`/`MATCH`/`TEAM` graph (~180 nodes). Search
+or expand from the bracket opens Full topology so the 32-node canvas stays
+clean. Use Advanced filters for type/confidence/layout. Click any node or edge
+to inspect exported features (confidence, aliases, evidence market IDs,
+inference/resolution methods, evidence text).
 
 **Important:** the topology layer and the market layer are currently
 **disconnected**. The export has no `PRICES` or `IMPLIES` edges linking

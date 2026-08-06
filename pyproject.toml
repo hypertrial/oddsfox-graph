@@ -39,7 +39,7 @@ Repository = "https://github.com/hypertrial/oddsfox-graph"
 include = ["oddsgraph*"]
 
 [tool.setuptools.package-data]
-oddsgraph = ["data/*.json"]
+oddsgraph = ["data/*.json", "explorer/assets/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

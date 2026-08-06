@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from dash import Dash, dcc, html
@@ -10,119 +11,36 @@ import dash_cytoscape as cyto
 from oddsgraph.config import Settings
 from oddsgraph.explorer import VIEW_BRACKET, VIEW_TOPOLOGY
 from oddsgraph.explorer.data import bracket_elements, graph_counts
+from oddsgraph.explorer.presentation import (
+    EDGE_COLORS,
+    NODE_COLORS,
+    bracket_layout,
+    bracket_stylesheet,
+    topology_stylesheet,
+)
 from oddsgraph.ontology import NodeType
 
 # Extra layouts used by the explorer (dagre lives in the extra bundle).
 cyto.load_extra_layouts()
 
-BRACKET_LAYOUT: dict[str, Any] = {
-    "name": "dagre",
-    "rankDir": "TB",
-    "nodeSep": 40,
-    "rankSep": 80,
-    "animate": True,
-    "padding": 20,
-}
-
-NODE_COLORS: dict[str, str] = {
-    "COMPETITION": "#1f4e79",
-    "STAGE": "#2e75b6",
-    "GROUP": "#5b9bd5",
-    "ROUND": "#9dc3e6",
-    "MATCH": "#ed7d31",
-    "TEAM": "#70ad47",
-    "EVENT": "#7030a0",
-    "MARKET": "#ffc000",
-    "OUTCOME": "#a5a5a5",
-}
-
-EDGE_COLORS: dict[str, str] = {
-    "PART_OF": "#5b9bd5",
-    "PARTICIPATES_IN": "#70ad47",
-    "QUALIFIES_FOR": "#ed7d31",
-    "ADVANCES_TO": "#c00000",
-    "HAS_MARKET": "#7030a0",
-    "HAS_OUTCOME": "#a5a5a5",
-    "PRICES": "#ffc000",
-    "IMPLIES": "#7f7f7f",
-}
+ASSETS_DIR = Path(__file__).resolve().parent / "assets"
 
 ALL_NODE_TYPES = [t.value for t in NodeType]
 
+STAGE_STRIP = [
+    "Round of 32",
+    "Round of 16",
+    "Quarterfinals",
+    "Semifinals",
+    "Final / 3rd",
+]
 
-def default_stylesheet() -> list[dict[str, Any]]:
-    styles: list[dict[str, Any]] = [
-        {
-            "selector": "node",
-            "style": {
-                "label": "data(label)",
-                "text-valign": "center",
-                "text-halign": "center",
-                "font-size": "10px",
-                "color": "#111",
-                "background-color": "#888",
-                "width": 28,
-                "height": 28,
-                "text-wrap": "wrap",
-                "text-max-width": 80,
-            },
-        },
-        {
-            "selector": "edge",
-            "style": {
-                "label": "data(label)",
-                "font-size": "8px",
-                "color": "#444",
-                "curve-style": "bezier",
-                "target-arrow-shape": "triangle",
-                "arrow-scale": 0.8,
-                "width": 1.5,
-                "line-color": "#999",
-                "target-arrow-color": "#999",
-                "text-rotation": "autorotate",
-                "text-margin-y": -8,
-            },
-        },
-        {
-            "selector": ":selected",
-            "style": {
-                "border-width": 3,
-                "border-color": "#000",
-                "line-color": "#000",
-                "target-arrow-color": "#000",
-                "z-index": 999,
-            },
-        },
-        {
-            "selector": ".hidden",
-            "style": {"display": "none"},
-        },
-    ]
-    for node_type, color in NODE_COLORS.items():
-        styles.append(
-            {
-                "selector": f".{node_type}",
-                "style": {"background-color": color},
-            }
-        )
-    for edge_type, color in EDGE_COLORS.items():
-        styles.append(
-            {
-                "selector": f".{edge_type}",
-                "style": {
-                    "line-color": color,
-                    "target-arrow-color": color,
-                },
-            }
-        )
-    # Emphasize bracket progression.
-    styles.append(
-        {
-            "selector": ".ADVANCES_TO",
-            "style": {"width": 2.5},
-        }
-    )
-    return styles
+
+def default_stylesheet(view_mode: str = VIEW_BRACKET) -> list[dict[str, Any]]:
+    """Return the Cytoscape stylesheet for the active view."""
+    if view_mode == VIEW_TOPOLOGY:
+        return topology_stylesheet(NODE_COLORS, EDGE_COLORS)
+    return bracket_stylesheet()
 
 
 def _counts_summary(counts: dict[str, Any]) -> str:
@@ -139,210 +57,333 @@ def build_app(settings: Settings) -> Dash:
     initial = bracket_elements(settings)
     counts = graph_counts(settings)
 
-    app = Dash(__name__, title="oddsgraph explorer")
+    app = Dash(
+        __name__,
+        title="oddsgraph explorer",
+        assets_folder=str(ASSETS_DIR),
+        suppress_callback_exceptions=True,
+    )
     app.layout = html.Div(
         className="explorer-root",
-        style={
-            "fontFamily": "system-ui, -apple-system, Segoe UI, sans-serif",
-            "display": "flex",
-            "flexDirection": "column",
-            "height": "100vh",
-            "margin": 0,
-        },
         children=[
-            html.Div(
-                style={
-                    "padding": "10px 16px",
-                    "borderBottom": "1px solid #ddd",
-                    "background": "#f7f7f7",
-                },
+            html.Header(
+                className="explorer-header",
                 children=[
-                    html.H2("oddsgraph explorer", style={"margin": "0 0 4px 0"}),
                     html.Div(
-                        [
-                            html.Span(f"build: {settings.build_dir}"),
-                            html.Span(" · "),
-                            html.Span(id="header-counts", children=_counts_summary(counts)),
+                        className="explorer-header-main",
+                        children=[
+                            html.H1("oddsgraph explorer", className="explorer-title"),
+                            html.Div(
+                                className="explorer-meta",
+                                children=[
+                                    html.Span(f"build: {settings.build_dir}"),
+                                    html.Span(" · "),
+                                    html.Span(
+                                        id="header-counts",
+                                        children=_counts_summary(counts),
+                                    ),
+                                ],
+                            ),
                         ],
-                        style={"fontSize": "13px", "color": "#555"},
                     ),
                     html.Div(
-                        "Default view is the knockout bracket (32 MATCH nodes, "
-                        "ADVANCES_TO edges, dagre DAG). Switch to Full topology for "
-                        "teams/stages/groups. EVENT/MARKET/OUTCOME are disconnected "
-                        "from topology today (no PRICES/IMPLIES edges) — use Search "
-                        "to open the market layer.",
-                        style={"fontSize": "12px", "color": "#666", "marginTop": "6px"},
+                        className="explorer-stage-strip",
+                        role="list",
+                        children=[
+                            html.Span(
+                                label,
+                                className=(
+                                    "stage-chip is-terminal"
+                                    if "Final" in label
+                                    else "stage-chip"
+                                ),
+                                role="listitem",
+                            )
+                            for label in STAGE_STRIP
+                        ],
                     ),
                 ],
             ),
             html.Div(
-                style={
-                    "display": "flex",
-                    "flex": "1",
-                    "minHeight": 0,
-                },
+                className="explorer-body",
                 children=[
-                    # Left controls
-                    html.Div(
-                        style={
-                            "width": "280px",
-                            "padding": "12px",
-                            "borderRight": "1px solid #ddd",
-                            "overflowY": "auto",
-                            "background": "#fafafa",
-                        },
+                    html.Button(
+                        "Controls",
+                        id="toggle-controls",
+                        n_clicks=0,
+                        className="rail-toggle rail-toggle-controls",
+                        type="button",
+                    ),
+                    html.Button(
+                        "Inspector",
+                        id="toggle-inspector",
+                        n_clicks=0,
+                        className="rail-toggle rail-toggle-inspector",
+                        type="button",
+                    ),
+                    html.Aside(
+                        id="controls-panel",
+                        className="explorer-controls is-open",
                         children=[
-                            html.Label("View", style={"fontWeight": 600}),
-                            dcc.RadioItems(
-                                id="view-mode",
-                                options=[
-                                    {
-                                        "label": "Knockout bracket",
-                                        "value": VIEW_BRACKET,
-                                    },
-                                    {
-                                        "label": "Full topology",
-                                        "value": VIEW_TOPOLOGY,
-                                    },
+                            html.Div(
+                                className="panel-section",
+                                children=[
+                                    html.Label(
+                                        "View",
+                                        htmlFor="view-mode",
+                                        className="panel-label",
+                                    ),
+                                    dcc.RadioItems(
+                                        id="view-mode",
+                                        options=[
+                                            {
+                                                "label": "Knockout bracket",
+                                                "value": VIEW_BRACKET,
+                                            },
+                                            {
+                                                "label": "Full topology",
+                                                "value": VIEW_TOPOLOGY,
+                                            },
+                                        ],
+                                        value=VIEW_BRACKET,
+                                        className="view-mode-radio",
+                                    ),
+                                    html.P(
+                                        "Left-to-right knockout bracket: 32 MATCH "
+                                        "cards, ADVANCES_TO edges, preset layout. "
+                                        "Search or expand switches to Full topology.",
+                                        className="panel-hint",
+                                    ),
                                 ],
-                                value=VIEW_BRACKET,
-                                style={"fontSize": "13px", "marginBottom": "10px"},
                             ),
-                            html.Label("Search nodes", style={"fontWeight": 600}),
-                            dcc.Input(
-                                id="search-input",
-                                type="text",
-                                placeholder="label, id, or alias…",
-                                debounce=True,
-                                style={"width": "100%", "marginBottom": "6px"},
-                            ),
-                            html.Button(
-                                "Search",
-                                id="search-button",
-                                n_clicks=0,
-                                style={"width": "100%", "marginBottom": "8px"},
-                            ),
-                            html.Div(id="search-results"),
-                            html.Hr(),
-                            html.Label("Node types on canvas", style={"fontWeight": 600}),
-                            dcc.Checklist(
-                                id="type-filter",
-                                options=[{"label": t, "value": t} for t in ALL_NODE_TYPES],
-                                value=["MATCH"],
-                                style={"fontSize": "12px"},
-                            ),
-                            html.Br(),
-                            html.Label("Min confidence", style={"fontWeight": 600}),
-                            dcc.Slider(
-                                id="confidence-filter",
-                                min=0,
-                                max=1,
-                                step=0.05,
-                                value=0,
-                                marks={0: "0", 0.5: "0.5", 1: "1"},
-                                tooltip={"placement": "bottom"},
-                            ),
-                            html.Label(
-                                "Inference method",
-                                style={"fontWeight": 600, "marginTop": "8px"},
-                            ),
-                            dcc.Dropdown(
-                                id="inference-filter",
-                                options=[
-                                    {"label": "(any)", "value": ""},
-                                    {"label": "deterministic", "value": "deterministic"},
-                                    {"label": "official_bracket", "value": "official_bracket"},
-                                    {"label": "llm", "value": "llm"},
-                                    {"label": "unknown", "value": "unknown"},
+                            html.Hr(className="panel-divider"),
+                            html.Div(
+                                className="panel-section",
+                                children=[
+                                    html.Label(
+                                        "Search nodes",
+                                        htmlFor="search-input",
+                                        className="panel-label",
+                                    ),
+                                    dcc.Input(
+                                        id="search-input",
+                                        type="text",
+                                        placeholder="label, id, or alias…",
+                                        debounce=True,
+                                        className="search-input",
+                                    ),
+                                    html.Button(
+                                        "Search",
+                                        id="search-button",
+                                        n_clicks=0,
+                                        className="btn btn-primary",
+                                        type="button",
+                                    ),
+                                    html.Div(
+                                        id="search-results",
+                                        className="search-results",
+                                        role="list",
+                                    ),
                                 ],
-                                value="",
-                                clearable=False,
-                            ),
-                            html.Label("Layout", style={"fontWeight": 600, "marginTop": "8px"}),
-                            dcc.Dropdown(
-                                id="layout-dropdown",
-                                options=[
-                                    {"label": "dagre (bracket)", "value": "dagre"},
-                                    {"label": "breadthfirst", "value": "breadthfirst"},
-                                    {"label": "cose (force)", "value": "cose"},
-                                    {"label": "circle", "value": "circle"},
-                                    {"label": "grid", "value": "grid"},
-                                    {"label": "concentric", "value": "concentric"},
-                                ],
-                                value="dagre",
-                                clearable=False,
                             ),
                             html.Button(
                                 "Reset view",
                                 id="reset-button",
                                 n_clicks=0,
-                                style={"width": "100%", "marginTop": "12px"},
+                                className="btn btn-primary",
+                                type="button",
+                            ),
+                            html.Details(
+                                className="advanced-details",
+                                open=False,
+                                children=[
+                                    html.Summary("Advanced filters & layout"),
+                                    html.Div(
+                                        className="advanced-body",
+                                        children=[
+                                            html.Label(
+                                                "Node types on canvas",
+                                                htmlFor="type-filter",
+                                                className="panel-label",
+                                            ),
+                                            dcc.Checklist(
+                                                id="type-filter",
+                                                options=[
+                                                    {"label": t, "value": t}
+                                                    for t in ALL_NODE_TYPES
+                                                ],
+                                                value=["MATCH"],
+                                                className="type-filter",
+                                            ),
+                                            html.Label(
+                                                "Min confidence",
+                                                htmlFor="confidence-filter",
+                                                className="panel-label",
+                                            ),
+                                            dcc.Slider(
+                                                id="confidence-filter",
+                                                min=0,
+                                                max=1,
+                                                step=0.05,
+                                                value=0,
+                                                marks={0: "0", 0.5: "0.5", 1: "1"},
+                                                tooltip={"placement": "bottom"},
+                                            ),
+                                            html.Label(
+                                                "Inference method",
+                                                htmlFor="inference-filter",
+                                                className="panel-label",
+                                            ),
+                                            dcc.Dropdown(
+                                                id="inference-filter",
+                                                options=[
+                                                    {"label": "(any)", "value": ""},
+                                                    {
+                                                        "label": "deterministic",
+                                                        "value": "deterministic",
+                                                    },
+                                                    {
+                                                        "label": "official_bracket",
+                                                        "value": "official_bracket",
+                                                    },
+                                                    {"label": "llm", "value": "llm"},
+                                                    {
+                                                        "label": "unknown",
+                                                        "value": "unknown",
+                                                    },
+                                                ],
+                                                value="",
+                                                clearable=False,
+                                            ),
+                                            html.Label(
+                                                "Layout",
+                                                htmlFor="layout-dropdown",
+                                                className="panel-label",
+                                            ),
+                                            dcc.Dropdown(
+                                                id="layout-dropdown",
+                                                options=[
+                                                    {
+                                                        "label": "preset (bracket)",
+                                                        "value": "preset",
+                                                    },
+                                                    {
+                                                        "label": "dagre",
+                                                        "value": "dagre",
+                                                    },
+                                                    {
+                                                        "label": "breadthfirst",
+                                                        "value": "breadthfirst",
+                                                    },
+                                                    {
+                                                        "label": "cose (force)",
+                                                        "value": "cose",
+                                                    },
+                                                    {
+                                                        "label": "circle",
+                                                        "value": "circle",
+                                                    },
+                                                    {
+                                                        "label": "grid",
+                                                        "value": "grid",
+                                                    },
+                                                    {
+                                                        "label": "concentric",
+                                                        "value": "concentric",
+                                                    },
+                                                ],
+                                                value="preset",
+                                                clearable=False,
+                                            ),
+                                        ],
+                                    ),
+                                ],
                             ),
                         ],
                     ),
-                    # Center canvas
-                    html.Div(
-                        style={"flex": "1", "minWidth": 0, "position": "relative"},
+                    html.Main(
+                        className="explorer-canvas-wrap",
                         children=[
                             cyto.Cytoscape(
                                 id="graph-cyto",
                                 elements=initial.to_elements(),
-                                stylesheet=default_stylesheet(),
-                                layout=dict(BRACKET_LAYOUT),
+                                stylesheet=default_stylesheet(VIEW_BRACKET),
+                                layout=bracket_layout(),
                                 style={"width": "100%", "height": "100%"},
-                                minZoom=0.1,
-                                maxZoom=3,
+                                minZoom=0.15,
+                                maxZoom=2.5,
+                                zoom=1,
                                 boxSelectionEnabled=True,
+                                responsive=True,
+                                userZoomingEnabled=True,
+                                userPanningEnabled=True,
+                            ),
+                            html.Div(
+                                id="hover-card",
+                                className="hover-card",
+                                style={"display": "none"},
+                                children=[],
                             ),
                         ],
                     ),
-                    # Right inspector
-                    html.Div(
-                        style={
-                            "width": "320px",
-                            "padding": "12px",
-                            "borderLeft": "1px solid #ddd",
-                            "overflowY": "auto",
-                            "background": "#fafafa",
-                        },
+                    html.Aside(
+                        id="inspector-rail",
+                        className="explorer-inspector is-open",
                         children=[
-                            html.H4("Inspector", style={"marginTop": 0}),
+                            html.H2("Inspector", className="inspector-title"),
                             html.Div(
                                 id="inspector-panel",
                                 children=html.P(
-                                    "Click a node or edge to inspect its features.",
-                                    style={"color": "#666", "fontSize": "13px"},
+                                    "Click a match to inspect features and "
+                                    "highlight its path to the Final.",
+                                    className="panel-hint",
                                 ),
                             ),
                             html.Div(
-                                style={"display": "flex", "gap": "8px", "marginTop": "12px"},
+                                className="action-row",
                                 children=[
                                     html.Button(
                                         "Expand neighbors",
                                         id="expand-button",
                                         n_clicks=0,
                                         disabled=True,
+                                        type="button",
                                     ),
                                     html.Button(
                                         "Remove from canvas",
                                         id="remove-button",
                                         n_clicks=0,
                                         disabled=True,
+                                        type="button",
+                                    ),
+                                    html.Button(
+                                        "View in topology",
+                                        id="view-in-topology-button",
+                                        n_clicks=0,
+                                        disabled=True,
+                                        type="button",
+                                        title=(
+                                            "Open this node in the Full topology "
+                                            "view with its neighbors"
+                                        ),
                                     ),
                                 ],
                             ),
                             html.Div(
                                 id="action-status",
-                                style={"fontSize": "12px", "color": "#666", "marginTop": "8px"},
+                                className="action-status",
+                                role="status",
+                                **{"aria-live": "polite"},
                             ),
                         ],
                     ),
                 ],
             ),
-            # Stores
             dcc.Store(id="selected-node-id", data=None),
             dcc.Store(id="selected-edge-id", data=None),
+            dcc.Store(id="controls-open", data=True),
+            dcc.Store(id="inspector-open", data=True),
+            dcc.Store(id="skip-view-reload", data=False),
         ],
     )
 
