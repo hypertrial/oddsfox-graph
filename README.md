@@ -65,6 +65,9 @@ Infer / run options:
 - `--event-id <id>` (repeatable)
 - `--model-path models/qwen3-4b-q4_k_m.gguf`
 - `--resume / --no-resume`
+- `--llm-backend inprocess|server` — in-process `llama-cpp-python` or remote `llama-server`
+- `--server-url http://127.0.0.1:8080` — base URL when using `--llm-backend server`
+- `--concurrency N` — concurrent LLM requests (server backend only)
 
 Build / run options:
 
@@ -76,10 +79,34 @@ Configured in `Settings` defaults in `oddsgraph/config.py`:
 
 | Setting | Default | Purpose |
 |---------|---------|---------|
-| `chunk_token_budget` | 6000 | Max estimated input tokens per LLM chunk |
-| `chunk_output_token_budget` | 3000 | Max estimated output tokens per chunk |
-| `max_markets_per_chunk` | 8 | Hard cap on markets per chunk |
+| `n_ctx` | 12288 | Model context window (input + output per chunk) |
+| `chunk_token_budget` | 7000 | Max estimated input tokens per LLM chunk |
+| `chunk_output_token_budget` | 4096 | Max estimated output tokens per chunk |
+| `max_markets_per_chunk` | 24 | Hard cap on markets per chunk |
 | `max_text_field_chars` | 500 | Truncate long description fields in prompts |
+| `flash_attn` | true | Enable Metal flash attention (in-process backend) |
+| `n_batch` / `n_ubatch` | 1024 | llama.cpp batch sizes (in-process backend) |
+| `llm_concurrency` | 4 | Concurrent requests when `--llm-backend server` |
+
+### Faster infer with llama-server (optional)
+
+For large full-dataset runs on Apple Silicon, start `llama-server` with continuous
+batching and point oddsgraph at it:
+
+```bash
+llama-server -m models/qwen3-4b-q4_k_m.gguf -ngl -1 -c 12288 -np 4 -cb -fa on \
+  --host 127.0.0.1 --port 8080
+```
+
+Then run infer (or the full pipeline) against the server:
+
+```bash
+oddsgraph run --llm-backend server --concurrency 4
+```
+
+Install `llama-server` via Homebrew: `brew install llama.cpp`. The default
+in-process backend (`--llm-backend inprocess`) remains the default and does not
+require a separate server process.
 
 ## Output artifacts
 
@@ -96,6 +123,7 @@ build/ontology.json
 ## Stack
 
 - `duckdb` — query and reduce parquet
+- `httpx` — optional `llama-server` HTTP client
 - `llama-cpp-python` — local Metal-accelerated inference
 - `Qwen3-4B-Q4_K_M` — initial local model
 - `pydantic` — constrained graph output schema
@@ -114,4 +142,10 @@ Live model integration tests (optional):
 
 ```bash
 ODDSGRAPH_LIVE_MODEL_TEST=1 uv run pytest -m integration
+```
+
+Live server integration tests (optional, requires running `llama-server`):
+
+```bash
+ODDSGRAPH_LIVE_SERVER_TEST=1 uv run pytest -m integration
 ```

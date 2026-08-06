@@ -22,6 +22,14 @@ def test_cli_help() -> None:
     assert "run" in result.output
 
 
+def test_cli_infer_backend_options_in_help() -> None:
+    help_result = runner.invoke(app, ["infer", "--help"])
+    assert help_result.exit_code == 0
+    assert "--llm-backend" in help_result.output
+    assert "--server-url" in help_result.output
+    assert "--concurrency" in help_result.output
+
+
 def test_cli_build_and_validate_with_fixture(tmp_path: Path) -> None:
     build_dir = tmp_path / "build"
     settings = Settings()

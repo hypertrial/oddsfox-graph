@@ -69,4 +69,5 @@ def test_incremental_chunking_matches_full_prompt_budget() -> None:
             token_budget=100000,
             output_token_budget=100000,
             max_text_field_chars=500,
+            n_ctx=200000,
         )

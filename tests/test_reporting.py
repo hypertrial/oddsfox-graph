@@ -63,5 +63,10 @@ def test_infer_after_build_preserves_report_metrics(tmp_path: Path) -> None:
 
 
 class _NoOpLLM:
-    def generate_fragment(self, prompt: str, event_id: str) -> GraphFragment:
+    def generate_fragment(
+        self,
+        prompt: str,
+        event_id: str,
+        max_tokens_override: int | None = None,
+    ) -> GraphFragment:
         return GraphFragment()

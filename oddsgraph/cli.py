@@ -10,7 +10,7 @@ import typer
 
 from oddsgraph.config import Settings
 from oddsgraph.infer import infer_event_fragments, load_markets_for_infer
-from oddsgraph.llm import LocalGraphLLM
+from oddsgraph.llm import build_graph_llm
 from oddsgraph.pipeline import run_build_and_export, validate_exported_artifacts
 from oddsgraph.reduce import reduce_semantic_markets
 
@@ -31,6 +31,9 @@ def _apply_infer_options(
     limit_events: Optional[int] = None,
     event_id: list[str] = [],
     resume: bool = True,
+    llm_backend: Optional[str] = None,
+    server_url: Optional[str] = None,
+    concurrency: Optional[int] = None,
 ) -> Settings:
     if model_path is not None:
         settings.model_path = model_path
@@ -39,6 +42,12 @@ def _apply_infer_options(
     if event_id:
         settings.event_ids = list(event_id)
     settings.resume = resume
+    if llm_backend is not None:
+        settings.llm_backend = llm_backend
+    if server_url is not None:
+        settings.server_base_url = server_url
+    if concurrency is not None:
+        settings.llm_concurrency = concurrency
     return settings
 
 
@@ -93,6 +102,18 @@ def infer(
         list[str], typer.Option(help="Specific event IDs to infer")
     ] = [],
     resume: Annotated[bool, typer.Option(help="Skip events with existing fragments")] = True,
+    llm_backend: Annotated[
+        Optional[str],
+        typer.Option(help="LLM backend: inprocess or server"),
+    ] = None,
+    server_url: Annotated[
+        Optional[str],
+        typer.Option(help="Base URL for llama-server when llm-backend=server"),
+    ] = None,
+    concurrency: Annotated[
+        Optional[int],
+        typer.Option(help="Concurrent LLM requests (server backend only)"),
+    ] = None,
 ) -> None:
     """Infer graph fragments per event using local LLM."""
     settings = _apply_infer_options(
@@ -101,9 +122,12 @@ def infer(
         limit_events=limit_events,
         event_id=event_id,
         resume=resume,
+        llm_backend=llm_backend,
+        server_url=server_url,
+        concurrency=concurrency,
     )
     markets = load_markets_for_infer(settings)
-    llm = LocalGraphLLM(settings)
+    llm = build_graph_llm(settings)
     results = infer_event_fragments(settings, markets, llm=llm)
     typer.echo(f"Inferred fragments for {len(results)} events")
 
@@ -154,6 +178,18 @@ def run(
     minimum_confidence: Annotated[
         float, typer.Option(help="Minimum edge confidence threshold")
     ] = 0.0,
+    llm_backend: Annotated[
+        Optional[str],
+        typer.Option(help="LLM backend: inprocess or server"),
+    ] = None,
+    server_url: Annotated[
+        Optional[str],
+        typer.Option(help="Base URL for llama-server when llm-backend=server"),
+    ] = None,
+    concurrency: Annotated[
+        Optional[int],
+        typer.Option(help="Concurrent LLM requests (server backend only)"),
+    ] = None,
 ) -> None:
     """Run the full pipeline: reduce → infer → build → validate."""
     settings = _apply_infer_options(
@@ -162,11 +198,14 @@ def run(
         limit_events=limit_events,
         event_id=event_id,
         resume=resume,
+        llm_backend=llm_backend,
+        server_url=server_url,
+        concurrency=concurrency,
     )
     settings.minimum_confidence = minimum_confidence
     reduce_semantic_markets(settings)
     markets = load_markets_for_infer(settings)
-    infer_event_fragments(settings, markets, llm=LocalGraphLLM(settings))
+    infer_event_fragments(settings, markets, llm=build_graph_llm(settings))
     run_build_and_export(settings)
     errors = validate_exported_artifacts(settings)
     if errors:

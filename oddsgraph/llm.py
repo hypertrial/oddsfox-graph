@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from abc import ABC, abstractmethod
 from typing import Any
 
 from pydantic import ValidationError
@@ -19,30 +20,9 @@ class LLMInferenceError(RuntimeError):
     pass
 
 
-class LocalGraphLLM:
+class BaseGraphLLM(ABC):
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
-        self._llama: Any = None
-        self._grammar: Any = None
-
-    def _ensure_loaded(self) -> None:
-        if self._llama is not None:
-            return
-        from llama_cpp import Llama, LlamaGrammar
-
-        model_path = self.settings.model_path
-        if not model_path.exists():
-            raise FileNotFoundError(f"Model not found: {model_path}")
-
-        self._grammar = LlamaGrammar.from_json_schema(
-            json.dumps(GraphFragment.model_json_schema())
-        )
-        self._llama = Llama(
-            model_path=str(model_path),
-            n_gpu_layers=self.settings.n_gpu_layers,
-            n_ctx=self.settings.n_ctx,
-            verbose=False,
-        )
 
     def _filter_llm_fragment(self, fragment: GraphFragment) -> GraphFragment:
         nodes = [n for n in fragment.nodes if n.type in ALLOWED_NODE_TYPES]
@@ -60,10 +40,11 @@ class LocalGraphLLM:
         self,
         prompt: str,
         event_id: str,
+        max_tokens_override: int | None = None,
     ) -> GraphFragment:
-        self._ensure_loaded()
         last_error: Exception | None = None
         raw_output = ""
+        max_tokens = max_tokens_override if max_tokens_override is not None else self.settings.max_tokens
 
         for attempt in range(self.settings.max_retries + 1):
             attempt_prompt = prompt
@@ -73,16 +54,11 @@ class LocalGraphLLM:
                     "confidence must be 0-1. evidence_market_ids must be non-empty."
                 )
             try:
-                response = self._llama.create_chat_completion(
-                    messages=[
-                        {"role": "system", "content": "You are a structured graph extractor."},
-                        {"role": "user", "content": attempt_prompt},
-                    ],
-                    max_tokens=self.settings.max_tokens,
+                raw_output = self._complete(
+                    attempt_prompt,
+                    max_tokens=max_tokens,
                     temperature=self.settings.temperature,
-                    grammar=self._grammar,
                 )
-                raw_output = response["choices"][0]["message"]["content"]
                 parsed = json.loads(raw_output)
                 fragment = GraphFragment.model_validate(parsed)
                 return self._filter_llm_fragment(fragment)
@@ -110,3 +86,88 @@ class LocalGraphLLM:
             f"error: {error}\n\nraw_output:\n{raw_output}",
             encoding="utf-8",
         )
+
+    @abstractmethod
+    def _complete(
+        self,
+        user_prompt: str,
+        max_tokens: int,
+        temperature: float,
+    ) -> str:
+        """Return raw assistant message content from the LLM backend."""
+
+
+def _resolve_ggml_type(name: str | None) -> int | None:
+    if name is None:
+        return None
+    import llama_cpp
+
+    key = f"GGML_TYPE_{name.upper()}"
+    value = getattr(llama_cpp, key, None)
+    if value is None:
+        raise ValueError(f"Unknown KV cache type: {name}")
+    return value
+
+
+class LocalGraphLLM(BaseGraphLLM):
+    def __init__(self, settings: Settings) -> None:
+        super().__init__(settings)
+        self._llama: Any = None
+        self._grammar: Any = None
+
+    def _ensure_loaded(self) -> None:
+        if self._llama is not None:
+            return
+        from llama_cpp import Llama, LlamaGrammar, LlamaRAMCache
+
+        model_path = self.settings.model_path
+        if not model_path.exists():
+            raise FileNotFoundError(f"Model not found: {model_path}")
+
+        llama_kwargs: dict[str, Any] = {
+            "model_path": str(model_path),
+            "n_gpu_layers": self.settings.n_gpu_layers,
+            "n_ctx": self.settings.n_ctx,
+            "flash_attn": self.settings.flash_attn,
+            "n_batch": self.settings.n_batch,
+            "n_ubatch": self.settings.n_ubatch,
+            "verbose": False,
+        }
+        type_k = _resolve_ggml_type(self.settings.kv_cache_type_k)
+        type_v = _resolve_ggml_type(self.settings.kv_cache_type_v)
+        if type_k is not None:
+            llama_kwargs["type_k"] = type_k
+        if type_v is not None:
+            llama_kwargs["type_v"] = type_v
+
+        self._grammar = LlamaGrammar.from_json_schema(
+            json.dumps(GraphFragment.model_json_schema())
+        )
+        self._llama = Llama(**llama_kwargs)
+        self._llama.set_cache(LlamaRAMCache())
+
+    def _complete(
+        self,
+        user_prompt: str,
+        max_tokens: int,
+        temperature: float,
+    ) -> str:
+        self._ensure_loaded()
+        response = self._llama.create_chat_completion(
+            messages=[
+                {"role": "system", "content": "You are a structured graph extractor."},
+                {"role": "user", "content": user_prompt},
+            ],
+            max_tokens=max_tokens,
+            temperature=temperature,
+            grammar=self._grammar,
+        )
+        return response["choices"][0]["message"]["content"]
+
+
+def build_graph_llm(settings: Settings) -> BaseGraphLLM:
+    if settings.llm_backend == "server":
+        from oddsgraph.llm_remote import RemoteGraphLLM
+
+        return RemoteGraphLLM(settings)
+    return LocalGraphLLM(settings)

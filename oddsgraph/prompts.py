@@ -139,13 +139,23 @@ def _chunk_exceeds_budget(
     token_budget: int,
     output_token_budget: int,
     max_text_field_chars: int,
+    n_ctx: int,
+    context_safety_margin: int = 64,
 ) -> bool:
-    prompt = build_event_prompt(
-        event_id, markets, max_text_field_chars=max_text_field_chars
-    )
-    return (
-        estimate_prompt_tokens(prompt) > token_budget
-        or estimate_output_tokens(len(markets)) > output_token_budget
+    if not markets:
+        return False
+    market_token_sizes = [
+        _market_prompt_tokens(m, max_text_field_chars) for m in markets
+    ]
+    header_tokens = _event_header_tokens(event_id, markets, max_text_field_chars)
+    return _chunk_exceeds_budget_incremental(
+        header_tokens,
+        market_token_sizes,
+        list(range(len(markets))),
+        token_budget,
+        output_token_budget,
+        n_ctx,
+        context_safety_margin,
     )
 
 
@@ -155,22 +165,27 @@ def _chunk_exceeds_budget_incremental(
     market_indices: list[int],
     token_budget: int,
     output_token_budget: int,
+    n_ctx: int,
+    context_safety_margin: int = 64,
 ) -> bool:
     input_tokens = header_tokens + sum(market_token_sizes[i] for i in market_indices)
     input_tokens += len(market_indices) * 2
-    return (
-        input_tokens > token_budget
-        or estimate_output_tokens(len(market_indices)) > output_token_budget
-    )
+    output_tokens = estimate_output_tokens(len(market_indices))
+    total_tokens = input_tokens + output_tokens
+    if total_tokens > n_ctx - context_safety_margin:
+        return True
+    return input_tokens > token_budget or output_tokens > output_token_budget
 
 
 def chunk_markets_for_prompt(
     markets: list[SemanticMarket],
     event_id: str,
     token_budget: int,
-    output_token_budget: int = 3000,
-    max_markets_per_chunk: int = 8,
+    output_token_budget: int = 4096,
+    max_markets_per_chunk: int = 24,
     max_text_field_chars: int = 500,
+    n_ctx: int = 12288,
+    context_safety_margin: int = 64,
 ) -> list[list[SemanticMarket]]:
     if not markets:
         return []
@@ -193,6 +208,8 @@ def chunk_markets_for_prompt(
                 trial_indices,
                 token_budget,
                 output_token_budget,
+                n_ctx,
+                context_safety_margin,
             )
         )
         if exceeds and current_indices:
@@ -204,6 +221,8 @@ def chunk_markets_for_prompt(
                 current_indices,
                 token_budget,
                 output_token_budget,
+                n_ctx,
+                context_safety_margin,
             ):
                 chunks.append([market])
                 current_indices = []
