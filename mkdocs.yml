@@ -1,0 +1,99 @@
+site_name: OddsFox Graph
+site_description: Public documentation for the OddsFox Graph local WC2026 Polymarket graph inference pipeline.
+site_url: https://graph.oddsfox.io/
+repo_url: https://github.com/hypertrial/oddsfox-graph
+repo_name: hypertrial/oddsfox-graph
+strict: true
+
+theme:
+  name: material
+  language: en
+  font: false
+  logo: assets/images/oddsfox-favicon.png
+  favicon: assets/images/oddsfox-favicon.png
+  icon:
+    repo: fontawesome/brands/github
+  features:
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.indexes
+    - navigation.path
+    - navigation.tracking
+    - navigation.footer
+    - navigation.top
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+  palette:
+    scheme: slate
+    primary: custom
+    accent: custom
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - pymdownx.details
+  - pymdownx.highlight
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - toc:
+      permalink: true
+
+extra_css:
+  - assets/stylesheets/extra.css
+
+extra_javascript:
+  - https://cdn.jsdelivr.net/npm/mermaid@11.15.0/dist/mermaid.min.js
+  - assets/javascripts/mermaid.js
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/hypertrial/oddsfox-graph
+      name: OddsFox Graph on GitHub
+
+copyright: >
+  Hypertrial-owned MIT software, not a hosted dataset.
+  <a href="/concepts/faq/">FAQ</a> ·
+  <a href="https://github.com/hypertrial/oddsfox-graph/blob/main/LICENSE">License</a>.
+  Marks belong to their owners.
+
+nav:
+  - Home: index.md
+  - Audiences:
+      - Analysts: audiences/analysts.md
+      - Operators: audiences/operators.md
+      - Contributors: audiences/contributors.md
+      - Integrators: audiences/integrators.md
+  - Get started:
+      - Quickstart: getting-started/index.md
+  - Guides:
+      - Running the pipeline: guides/running-the-pipeline.md
+      - Deterministic topology: guides/deterministic-topology.md
+      - Official bracket: guides/official-bracket.md
+      - llama-server: guides/llama-server.md
+      - Explorer: guides/explorer.md
+      - Fine-tuning: guides/finetuning.md
+  - Reference:
+      - CLI: reference/cli.md
+      - Configuration: reference/configuration.md
+      - Ontology: reference/ontology.md
+      - Output artifacts: reference/output-artifacts.md
+      - Source data schema: reference/source-data-schema.md
+  - Concepts:
+      - Architecture: concepts/architecture.md
+      - Entity resolution: concepts/entity-resolution.md
+      - FAQ: concepts/faq.md
+  - Development:
+      - Development guide: development/index.md

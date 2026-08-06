@@ -4,8 +4,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+import rustworkx as rx
+
+from oddsgraph.config import Settings
 from oddsgraph.explorer import TOPOLOGY_NODE_TYPES
 from oddsgraph.explorer.data import (
+    bracket_elements,
     get_edge,
     get_node,
     graph_counts,
@@ -20,138 +25,160 @@ from oddsgraph.schema import CanonicalEdge, CanonicalNode, InferenceReport
 from tests.helpers import make_settings
 
 
+def _node(
+    canonical_id: str,
+    node_type: NodeType,
+    label: str,
+    *,
+    aliases: list[str] | None = None,
+    confidence: float = 1.0,
+    evidence: list[str] | None = None,
+    resolution_method: str = "exact_id",
+    inference_method: str = "deterministic",
+) -> CanonicalNode:
+    return CanonicalNode(
+        canonical_id=canonical_id,
+        type=node_type,
+        label=label,
+        aliases=aliases or [],
+        confidence=confidence,
+        evidence_market_ids=evidence or ["m1"],
+        resolution_method=resolution_method,
+        inference_method=inference_method,
+    )
+
+
+def _edge(
+    source_id: str,
+    target_id: str,
+    edge_type: EdgeType,
+    *,
+    confidence: float = 1.0,
+    evidence_text: str = "",
+    inference_method: str = "deterministic",
+) -> CanonicalEdge:
+    return CanonicalEdge(
+        source_id=source_id,
+        target_id=target_id,
+        edge_type=edge_type,
+        confidence=confidence,
+        evidence_market_ids=["m1"],
+        evidence_text=evidence_text,
+        inference_method=inference_method,
+    )
+
+
 def _write_fixture_graph(build_dir: Path) -> None:
     nodes = [
-        CanonicalNode(
-            canonical_id="competition:world-cup-2026",
-            type=NodeType.COMPETITION,
-            label="World Cup 2026",
+        _node(
+            "competition:world-cup-2026",
+            NodeType.COMPETITION,
+            "World Cup 2026",
             aliases=["WC2026"],
-            confidence=1.0,
-            evidence_market_ids=["m1"],
             resolution_method="seed",
             inference_method="official_bracket",
         ),
-        CanonicalNode(
-            canonical_id="match:brazil-vs-france",
-            type=NodeType.MATCH,
-            label="Brazil vs. France",
+        _node("stage:world-cup-2026:group-stage", NodeType.STAGE, "Group Stage"),
+        _node("stage:world-cup-2026:round-of-16", NodeType.STAGE, "Round of 16"),
+        _node("stage:world-cup-2026:final", NodeType.STAGE, "Final"),
+        _node(
+            "match:brazil-vs-france",
+            NodeType.MATCH,
+            "Brazil vs. France",
             aliases=["bra-fra"],
             confidence=0.95,
-            evidence_market_ids=["m1"],
-            resolution_method="exact_id",
-            inference_method="deterministic",
         ),
-        CanonicalNode(
-            canonical_id="team:brazil",
-            type=NodeType.TEAM,
-            label="Brazil",
+        _node(
+            "match:group-a-opener",
+            NodeType.MATCH,
+            "Mexico vs. South Africa",
+            aliases=["mex-rsa"],
+        ),
+        _node(
+            "match:final",
+            NodeType.MATCH,
+            "Brazil vs. Spain",
+            aliases=["bra-esp-final"],
+        ),
+        _node(
+            "team:brazil",
+            NodeType.TEAM,
+            "Brazil",
             aliases=["bra", "Seleção"],
             confidence=0.99,
-            evidence_market_ids=["m1"],
-            resolution_method="exact_id",
-            inference_method="deterministic",
         ),
-        CanonicalNode(
-            canonical_id="team:france",
-            type=NodeType.TEAM,
-            label="France",
+        _node(
+            "team:france",
+            NodeType.TEAM,
+            "France",
             aliases=["fra"],
             confidence=0.99,
-            evidence_market_ids=["m1"],
-            resolution_method="exact_id",
-            inference_method="deterministic",
         ),
-        CanonicalNode(
-            canonical_id="event:100",
-            type=NodeType.EVENT,
-            label="Brazil vs. France Markets",
-            aliases=[],
-            confidence=1.0,
-            evidence_market_ids=["m1"],
-            resolution_method="exact_id",
-            inference_method="deterministic",
-        ),
-        CanonicalNode(
-            canonical_id="market:m1",
-            type=NodeType.MARKET,
-            label="Match Winner",
-            aliases=[],
-            confidence=1.0,
-            evidence_market_ids=["m1"],
-            resolution_method="exact_id",
-            inference_method="deterministic",
-        ),
-        CanonicalNode(
-            canonical_id="outcome:m1:brazil",
-            type=NodeType.OUTCOME,
-            label="Brazil",
-            aliases=[],
-            confidence=1.0,
-            evidence_market_ids=["m1"],
-            resolution_method="exact_id",
-            inference_method="deterministic",
-        ),
+        _node("event:100", NodeType.EVENT, "Brazil vs. France Markets"),
+        _node("market:m1", NodeType.MARKET, "Match Winner"),
+        _node("outcome:m1:brazil", NodeType.OUTCOME, "Brazil"),
     ]
     edges = [
-        CanonicalEdge(
-            source_id="match:brazil-vs-france",
-            target_id="competition:world-cup-2026",
-            edge_type=EdgeType.PART_OF,
+        _edge(
+            "match:brazil-vs-france",
+            "stage:world-cup-2026:round-of-16",
+            EdgeType.PART_OF,
             confidence=0.9,
-            evidence_market_ids=["m1"],
-            evidence_text="match belongs to competition",
+            evidence_text="Round of 16",
             inference_method="official_bracket",
         ),
-        CanonicalEdge(
-            source_id="team:brazil",
-            target_id="match:brazil-vs-france",
-            edge_type=EdgeType.PARTICIPATES_IN,
+        _edge(
+            "match:group-a-opener",
+            "stage:world-cup-2026:group-stage",
+            EdgeType.PART_OF,
+            evidence_text="Group Stage",
+            inference_method="official_bracket",
+        ),
+        _edge(
+            "match:final",
+            "stage:world-cup-2026:final",
+            EdgeType.PART_OF,
+            evidence_text="Final",
+            inference_method="official_bracket",
+        ),
+        _edge(
+            "match:brazil-vs-france",
+            "match:final",
+            EdgeType.ADVANCES_TO,
+            evidence_text="team continuity across consecutive knockout stages",
+            inference_method="official_bracket",
+        ),
+        _edge(
+            "team:brazil",
+            "match:brazil-vs-france",
+            EdgeType.PARTICIPATES_IN,
             confidence=0.95,
-            evidence_market_ids=["m1"],
             evidence_text="Brazil plays",
-            inference_method="deterministic",
         ),
-        CanonicalEdge(
-            source_id="team:france",
-            target_id="match:brazil-vs-france",
-            edge_type=EdgeType.PARTICIPATES_IN,
+        _edge(
+            "team:france",
+            "match:brazil-vs-france",
+            EdgeType.PARTICIPATES_IN,
             confidence=0.95,
-            evidence_market_ids=["m1"],
             evidence_text="France plays",
-            inference_method="deterministic",
         ),
-        CanonicalEdge(
-            source_id="event:100",
-            target_id="market:m1",
-            edge_type=EdgeType.HAS_MARKET,
-            confidence=1.0,
-            evidence_market_ids=["m1"],
-            evidence_text="",
-            inference_method="deterministic",
-        ),
-        CanonicalEdge(
-            source_id="market:m1",
-            target_id="outcome:m1:brazil",
-            edge_type=EdgeType.HAS_OUTCOME,
-            confidence=1.0,
-            evidence_market_ids=["m1"],
-            evidence_text="",
-            inference_method="deterministic",
-        ),
+        _edge("event:100", "market:m1", EdgeType.HAS_MARKET),
+        _edge("market:m1", "outcome:m1:brazil", EdgeType.HAS_OUTCOME),
     ]
     report = InferenceReport(
         events_processed=1,
         node_counts={
             "COMPETITION": 1,
-            "MATCH": 1,
+            "STAGE": 3,
+            "MATCH": 3,
             "TEAM": 2,
             "EVENT": 1,
             "MARKET": 1,
             "OUTCOME": 1,
         },
         edge_counts={
-            "PART_OF": 1,
+            "PART_OF": 3,
+            "ADVANCES_TO": 1,
             "PARTICIPATES_IN": 2,
             "HAS_MARKET": 1,
             "HAS_OUTCOME": 1,
@@ -191,6 +218,43 @@ def test_topology_elements_excludes_market_layer(tmp_path: Path) -> None:
     assert "PART_OF" in edge_types
 
 
+def test_bracket_elements_returns_only_knockout_matches(tmp_path: Path) -> None:
+    settings = make_settings(tmp_path)
+    _write_fixture_graph(settings.build_dir)
+
+    slice_ = bracket_elements(settings)
+    node_ids = {el["data"]["id"] for el in slice_.nodes}
+    node_types = {el["data"]["type"] for el in slice_.nodes}
+    edge_types = {el["data"]["edge_type"] for el in slice_.edges}
+
+    assert node_types == {"MATCH"}
+    assert node_ids == {"match:brazil-vs-france", "match:final"}
+    assert "match:group-a-opener" not in node_ids
+    assert edge_types == {"ADVANCES_TO"}
+    assert len(slice_.edges) == 1
+    assert slice_.edges[0]["data"]["source"] == "match:brazil-vs-france"
+    assert slice_.edges[0]["data"]["target"] == "match:final"
+
+
+def test_bracket_elements_is_acyclic(tmp_path: Path) -> None:
+    settings = make_settings(tmp_path)
+    _write_fixture_graph(settings.build_dir)
+
+    slice_ = bracket_elements(settings)
+    graph = rx.PyDiGraph()
+    index: dict[str, int] = {}
+    for node in slice_.nodes:
+        node_id = node["data"]["id"]
+        index[node_id] = graph.add_node(node_id)
+    for edge in slice_.edges:
+        graph.add_edge(
+            index[edge["data"]["source"]],
+            index[edge["data"]["target"]],
+            edge["data"]["edge_type"],
+        )
+    assert rx.is_directed_acyclic_graph(graph)
+
+
 def test_search_nodes_matches_label_alias_and_limit(tmp_path: Path) -> None:
     settings = make_settings(tmp_path)
     _write_fixture_graph(settings.build_dir)
@@ -218,7 +282,8 @@ def test_node_neighbors_match_and_event_are_disconnected(tmp_path: Path) -> None
     match_ids = {el["data"]["id"] for el in match_slice.nodes}
     assert "team:brazil" in match_ids
     assert "team:france" in match_ids
-    assert "competition:world-cup-2026" in match_ids
+    assert "stage:world-cup-2026:round-of-16" in match_ids
+    assert "match:final" in match_ids
     assert "event:100" not in match_ids
     assert "market:m1" not in match_ids
 
@@ -260,12 +325,39 @@ def test_search_nodes_escapes_like_wildcards(tmp_path: Path) -> None:
     rows = search_nodes(settings, "%", limit=25)
     assert rows == []
 
+
+def test_graph_counts_from_inference_report(tmp_path: Path) -> None:
     settings = make_settings(tmp_path)
     _write_fixture_graph(settings.build_dir)
 
     counts = graph_counts(settings)
     assert counts["source"] == "inference_report"
-    assert counts["total_nodes"] == 7
-    assert counts["total_edges"] == 5
+    assert counts["total_nodes"] == 12
+    assert counts["total_edges"] == 8
     assert counts["node_counts"]["TEAM"] == 2
     assert counts["edge_counts"]["HAS_MARKET"] == 1
+
+
+def test_bracket_elements_on_real_build_if_present() -> None:
+    """Optional smoke against a local full build (skipped when artifacts missing)."""
+    settings = Settings()
+    if not settings.nodes_path.exists() or not settings.edges_path.exists():
+        pytest.skip("build/nodes.parquet and build/edges.parquet not present")
+    slice_ = bracket_elements(settings)
+    assert len(slice_.nodes) == 32
+    assert len(slice_.edges) == 32
+    assert {n["data"]["type"] for n in slice_.nodes} == {"MATCH"}
+    assert {e["data"]["edge_type"] for e in slice_.edges} == {"ADVANCES_TO"}
+
+    graph = rx.PyDiGraph()
+    index: dict[str, int] = {}
+    for node in slice_.nodes:
+        node_id = node["data"]["id"]
+        index[node_id] = graph.add_node(node_id)
+    for edge in slice_.edges:
+        graph.add_edge(
+            index[edge["data"]["source"]],
+            index[edge["data"]["target"]],
+            edge["data"]["edge_type"],
+        )
+    assert rx.is_directed_acyclic_graph(graph)

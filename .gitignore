@@ -17,6 +17,7 @@ dist/
 
 # Local runtime/build outputs
 /output/
+/site/
 /.oddsgraph-runtime/
 
 # Local LLM model weights (large, not versioned)

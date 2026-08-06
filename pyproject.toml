@@ -24,7 +24,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0"]
+dev = ["pytest>=8.0", "pyyaml>=6.0"]
+docs = ["mkdocs>=1.6.0", "mkdocs-material>=9.5.0"]
 explore = ["dash>=2.18", "dash-cytoscape>=1.0"]
 mlx = ["mlx-lm>=0.22", "outlines>=1.0"]
 

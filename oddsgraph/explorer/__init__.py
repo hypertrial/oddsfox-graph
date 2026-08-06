@@ -2,7 +2,14 @@
 
 from __future__ import annotations
 
-__all__ = ["TOPOLOGY_NODE_TYPES"]
+from oddsgraph.bracket import ALL_STAGE_LABELS
+
+__all__ = [
+    "TOPOLOGY_NODE_TYPES",
+    "KNOCKOUT_STAGE_LABELS",
+    "VIEW_BRACKET",
+    "VIEW_TOPOLOGY",
+]
 
 TOPOLOGY_NODE_TYPES: frozenset[str] = frozenset(
     {
@@ -14,3 +21,11 @@ TOPOLOGY_NODE_TYPES: frozenset[str] = frozenset(
         "TEAM",
     }
 )
+
+# Knockout match stages only — excludes Group Stage and the Champion pseudo-stage.
+KNOCKOUT_STAGE_LABELS: frozenset[str] = frozenset(
+    label for label in ALL_STAGE_LABELS if label not in ("Group Stage", "Champion")
+)
+
+VIEW_BRACKET = "bracket"
+VIEW_TOPOLOGY = "topology"

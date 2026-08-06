@@ -1,4 +1,4 @@
-# Polymarket WC2026 market hourly odds — parquet schema
+# Source data schema
 
 Pipeline golden mart export used as the primary input for oddsgraph.
 
@@ -18,7 +18,7 @@ Each row carries primary-outcome hourly OHLC odds plus market and event metadata
 
 ## Columns
 
-### Grain
+### Grain keys
 
 | Column | Type | Nullable | Description |
 | --- | --- | --- | --- |
@@ -105,4 +105,10 @@ Each parquet export is paired with a machine-readable schema:
 
 - `polymarket_wc2026_market_hourly_odds_<timestamp>.schema.json`
 
-Place parquet and schema files at the repository root or under `data/`. They are git-ignored because the parquet is large (~600 MB).
+Place parquet and schema files at the repository root or under `data/`. They are
+git-ignored because the parquet is large (~600 MB).
+
+## See also
+
+- [Quickstart](../getting-started/index.md)
+- [Output artifacts](output-artifacts.md)

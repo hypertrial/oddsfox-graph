@@ -52,6 +52,19 @@ CMAKE_ARGS="-DGGML_METAL=on" uv sync --frozen --extra dev
 
 Download the local model (see `models/README.md`).
 
+## Documentation
+
+Public docs: [https://graph.oddsfox.io/](https://graph.oddsfox.io/)
+
+Local preview:
+
+```bash
+uv sync --extra docs
+uv run mkdocs serve -a 127.0.0.1:8000
+```
+
+Start from [docs/getting-started/index.md](docs/getting-started/index.md).
+
 ## CLI
 
 ```bash
@@ -310,8 +323,10 @@ oddsgraph explore         # http://127.0.0.1:8050
 
 Options: `--host`, `--port`, `--debug`, plus the shared `--build-dir`.
 
-**Default view** is the topology layer only (`COMPETITION`, `STAGE`, `GROUP`, `ROUND`,
-`MATCH`, `TEAM`) — about 180 nodes / 700 edges on a full WC2026 build. Use the
+**Default view** is the knockout bracket: 32 `MATCH` nodes connected by
+`ADVANCES_TO` edges (Round of 32 → … → Final / Third Place), laid out as a
+top-to-bottom DAG with dagre. Switch **View → Full topology** for the broader
+`COMPETITION`/`STAGE`/`GROUP`/`ROUND`/`MATCH`/`TEAM` graph (~180 nodes). Use the
 search box to pull in `EVENT` / `MARKET` / `OUTCOME` nodes and expand their
 neighbors; the type filter auto-enables the added types so results stay visible.
 Click any node or edge to inspect all exported features (confidence, aliases,

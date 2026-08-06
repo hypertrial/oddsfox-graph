@@ -9,9 +9,10 @@ from dash import ALL, Dash, Input, Output, State, callback_context, html, no_upd
 from dash.exceptions import PreventUpdate
 
 from oddsgraph.config import Settings
-from oddsgraph.explorer import TOPOLOGY_NODE_TYPES
+from oddsgraph.explorer import TOPOLOGY_NODE_TYPES, VIEW_BRACKET, VIEW_TOPOLOGY
 from oddsgraph.explorer.data import (
     GraphSlice,
+    bracket_elements,
     get_edge,
     get_node,
     node_element,
@@ -26,6 +27,23 @@ from oddsgraph.explorer.filters import (
     node_types_in_elements,
     union_types,
 )
+
+
+def _view_payload(settings: Settings, view_mode: str) -> tuple[GraphSlice, list[str], str, str]:
+    """Return (slice, type_filter, layout_name, status) for a view mode."""
+    if view_mode == VIEW_TOPOLOGY:
+        return (
+            topology_elements(settings),
+            sorted(TOPOLOGY_NODE_TYPES),
+            "breadthfirst",
+            "Loaded full topology view.",
+        )
+    return (
+        bracket_elements(settings),
+        ["MATCH"],
+        "dagre",
+        "Loaded knockout bracket view.",
+    )
 
 
 def _format_value(value: Any) -> str:
@@ -136,6 +154,8 @@ def register_callbacks(app: Dash, settings: Settings) -> None:
         Output("graph-cyto", "elements"),
         Output("action-status", "children"),
         Output("type-filter", "value"),
+        Output("layout-dropdown", "value"),
+        Input("view-mode", "value"),
         Input("reset-button", "n_clicks"),
         Input("expand-button", "n_clicks"),
         Input("remove-button", "n_clicks"),
@@ -148,6 +168,7 @@ def register_callbacks(app: Dash, settings: Settings) -> None:
         prevent_initial_call=True,
     )
     def mutate_elements(
+        view_mode_input: str | None,
         reset_clicks: int | None,
         expand_clicks: int | None,
         remove_clicks: int | None,
@@ -157,7 +178,7 @@ def register_callbacks(app: Dash, settings: Settings) -> None:
         inference_method: str | None,
         elements: list[dict[str, Any]] | None,
         selected_node_id: str | None,
-    ) -> tuple[Any, Any, Any]:
+    ) -> tuple[Any, Any, Any, Any]:
         del reset_clicks, expand_clicks, remove_clicks, search_clicks
         if not callback_context.triggered:
             raise PreventUpdate
@@ -165,6 +186,8 @@ def register_callbacks(app: Dash, settings: Settings) -> None:
         triggered = callback_context.triggered[0]["prop_id"]
         conf = float(min_confidence or 0.0)
         method = inference_method or ""
+        # view-mode is an Input, so Dash always passes the current radio value.
+        view_mode = view_mode_input or VIEW_BRACKET
 
         if (
             triggered.startswith("type-filter")
@@ -175,20 +198,23 @@ def register_callbacks(app: Dash, settings: Settings) -> None:
                 apply_filters(elements or [], visible_types, conf, method),
                 no_update,
                 no_update,
+                no_update,
             )
 
-        if triggered.startswith("reset-button"):
-            slice_ = topology_elements(settings)
-            topo_types = sorted(TOPOLOGY_NODE_TYPES)
+        if triggered.startswith("view-mode") or triggered.startswith("reset-button"):
+            slice_, next_types, layout_name, status = _view_payload(settings, view_mode)
+            if triggered.startswith("reset-button"):
+                status = f"Reset to {view_mode} view."
             return (
-                apply_filters(slice_.to_elements(), topo_types, conf, method),
-                "Reset to topology view.",
-                topo_types,
+                apply_filters(slice_.to_elements(), next_types, conf, method),
+                status,
+                next_types,
+                layout_name,
             )
 
         if triggered.startswith("expand-button"):
             if not selected_node_id:
-                return no_update, "Select a node before expanding.", no_update
+                return no_update, "Select a node before expanding.", no_update, no_update
             slice_ = node_neighbors(settings, selected_node_id, limit=300)
             if not slice_.edges and len(slice_.nodes) <= 1:
                 return (
@@ -199,6 +225,7 @@ def register_callbacks(app: Dash, settings: Settings) -> None:
                         "(no PRICES/IMPLIES edges yet)."
                     ),
                     no_update,
+                    no_update,
                 )
             merged = merge_elements(elements, slice_.to_elements())
             next_types = union_types(visible_types, node_types_in_elements(slice_.nodes))
@@ -206,11 +233,12 @@ def register_callbacks(app: Dash, settings: Settings) -> None:
                 apply_filters(merged, next_types, conf, method),
                 f"Expanded neighbors of {selected_node_id}.",
                 next_types,
+                no_update,
             )
 
         if triggered.startswith("remove-button"):
             if not selected_node_id:
-                return no_update, "Select a node before removing.", no_update
+                return no_update, "Select a node before removing.", no_update, no_update
             remaining: list[dict[str, Any]] = []
             for el in elements or []:
                 data = el.get("data") or {}
@@ -227,6 +255,7 @@ def register_callbacks(app: Dash, settings: Settings) -> None:
                 apply_filters(remaining, visible_types, conf, method),
                 f"Removed {selected_node_id} from canvas.",
                 no_update,
+                no_update,
             )
 
         if "search-result" in triggered:
@@ -234,15 +263,15 @@ def register_callbacks(app: Dash, settings: Settings) -> None:
             try:
                 payload = json.loads(prop)
             except json.JSONDecodeError:
-                return no_update, "Failed to parse search result.", no_update
+                return no_update, "Failed to parse search result.", no_update, no_update
             node_id = payload.get("index")
             if not node_id:
-                return no_update, no_update, no_update
+                return no_update, no_update, no_update, no_update
             if not callback_context.triggered[0]["value"]:
                 raise PreventUpdate
             row = get_node(settings, node_id)
             if row is None:
-                return no_update, f"Node not found: {node_id}", no_update
+                return no_update, f"Node not found: {node_id}", no_update, no_update
             slice_ = GraphSlice(nodes=[node_element(row)], edges=[])
             neighbors = node_neighbors(settings, node_id, limit=300)
             merged = merge_elements(elements, slice_.to_elements())
@@ -253,6 +282,7 @@ def register_callbacks(app: Dash, settings: Settings) -> None:
                 apply_filters(merged, next_types, conf, method),
                 f"Added {node_id} and its neighbors to the canvas.",
                 next_types,
+                no_update,
             )
 
         raise PreventUpdate
@@ -263,7 +293,16 @@ def register_callbacks(app: Dash, settings: Settings) -> None:
         prevent_initial_call=True,
     )
     def update_layout(layout_name: str | None) -> dict[str, Any]:
-        name = layout_name or "cose"
+        name = layout_name or "dagre"
+        if name == "dagre":
+            return {
+                "name": "dagre",
+                "rankDir": "TB",
+                "nodeSep": 40,
+                "rankSep": 80,
+                "animate": True,
+                "padding": 20,
+            }
         layout: dict[str, Any] = {"name": name, "animate": True, "padding": 20}
         if name == "breadthfirst":
             layout["directed"] = True

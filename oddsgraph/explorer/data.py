@@ -10,7 +10,7 @@ from typing import Any
 import duckdb
 
 from oddsgraph.config import Settings
-from oddsgraph.explorer import TOPOLOGY_NODE_TYPES
+from oddsgraph.explorer import KNOCKOUT_STAGE_LABELS, TOPOLOGY_NODE_TYPES
 
 
 @dataclass
@@ -106,6 +106,55 @@ def topology_elements(settings: Settings) -> GraphSlice:
             ORDER BY e.edge_type, e.source_id, e.target_id
             """,
             [*topology_types, *topology_types],
+        )
+
+    return GraphSlice(
+        nodes=[node_element(n) for n in nodes],
+        edges=[edge_element(e) for e in edges],
+    )
+
+
+def bracket_elements(settings: Settings) -> GraphSlice:
+    """Return the 32-node knockout MATCH DAG (MATCH ADVANCES_TO MATCH only)."""
+    nodes_path = _quote_path(settings.nodes_path)
+    edges_path = _quote_path(settings.edges_path)
+    stage_labels = sorted(KNOCKOUT_STAGE_LABELS)
+    placeholders = ", ".join(["?"] * len(stage_labels))
+
+    with _connect() as conn:
+        nodes = _fetch_dicts(
+            conn,
+            f"""
+            SELECT DISTINCT m.*
+            FROM read_parquet('{nodes_path}') m
+            INNER JOIN read_parquet('{edges_path}') e
+              ON e.source_id = m.canonical_id
+             AND e.edge_type = 'PART_OF'
+            INNER JOIN read_parquet('{nodes_path}') s
+              ON e.target_id = s.canonical_id
+             AND s.type = 'STAGE'
+            WHERE m.type = 'MATCH'
+              AND s.label IN ({placeholders})
+            ORDER BY m.label
+            """,
+            stage_labels,
+        )
+        if not nodes:
+            return GraphSlice()
+
+        match_ids = [n["canonical_id"] for n in nodes]
+        id_placeholders = ", ".join(["?"] * len(match_ids))
+        edges = _fetch_dicts(
+            conn,
+            f"""
+            SELECT *
+            FROM read_parquet('{edges_path}')
+            WHERE edge_type = 'ADVANCES_TO'
+              AND source_id IN ({id_placeholders})
+              AND target_id IN ({id_placeholders})
+            ORDER BY source_id, target_id
+            """,
+            [*match_ids, *match_ids],
         )
 
     return GraphSlice(

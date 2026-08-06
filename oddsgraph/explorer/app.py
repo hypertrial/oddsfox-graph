@@ -8,12 +8,21 @@ from dash import Dash, dcc, html
 import dash_cytoscape as cyto
 
 from oddsgraph.config import Settings
-from oddsgraph.explorer import TOPOLOGY_NODE_TYPES
-from oddsgraph.explorer.data import graph_counts, topology_elements
+from oddsgraph.explorer import VIEW_BRACKET, VIEW_TOPOLOGY
+from oddsgraph.explorer.data import bracket_elements, graph_counts
 from oddsgraph.ontology import NodeType
 
-# Extra layouts used by the explorer (cose is built-in; breadthfirst too).
+# Extra layouts used by the explorer (dagre lives in the extra bundle).
 cyto.load_extra_layouts()
+
+BRACKET_LAYOUT: dict[str, Any] = {
+    "name": "dagre",
+    "rankDir": "TB",
+    "nodeSep": 40,
+    "rankSep": 80,
+    "animate": True,
+    "padding": 20,
+}
 
 NODE_COLORS: dict[str, str] = {
     "COMPETITION": "#1f4e79",
@@ -127,7 +136,7 @@ def build_app(settings: Settings) -> Dash:
     """Build the Dash explorer app bound to ``settings`` build artifacts."""
     from oddsgraph.explorer.callbacks import register_callbacks
 
-    initial = topology_elements(settings)
+    initial = bracket_elements(settings)
     counts = graph_counts(settings)
 
     app = Dash(__name__, title="oddsgraph explorer")
@@ -158,9 +167,11 @@ def build_app(settings: Settings) -> Dash:
                         style={"fontSize": "13px", "color": "#555"},
                     ),
                     html.Div(
-                        "Default view is topology only (COMPETITION/STAGE/GROUP/ROUND/"
-                        "MATCH/TEAM). EVENT/MARKET/OUTCOME are disconnected from topology "
-                        "today (no PRICES/IMPLIES edges) — use Search to open the market layer.",
+                        "Default view is the knockout bracket (32 MATCH nodes, "
+                        "ADVANCES_TO edges, dagre DAG). Switch to Full topology for "
+                        "teams/stages/groups. EVENT/MARKET/OUTCOME are disconnected "
+                        "from topology today (no PRICES/IMPLIES edges) — use Search "
+                        "to open the market layer.",
                         style={"fontSize": "12px", "color": "#666", "marginTop": "6px"},
                     ),
                 ],
@@ -182,6 +193,22 @@ def build_app(settings: Settings) -> Dash:
                             "background": "#fafafa",
                         },
                         children=[
+                            html.Label("View", style={"fontWeight": 600}),
+                            dcc.RadioItems(
+                                id="view-mode",
+                                options=[
+                                    {
+                                        "label": "Knockout bracket",
+                                        "value": VIEW_BRACKET,
+                                    },
+                                    {
+                                        "label": "Full topology",
+                                        "value": VIEW_TOPOLOGY,
+                                    },
+                                ],
+                                value=VIEW_BRACKET,
+                                style={"fontSize": "13px", "marginBottom": "10px"},
+                            ),
                             html.Label("Search nodes", style={"fontWeight": 600}),
                             dcc.Input(
                                 id="search-input",
@@ -202,7 +229,7 @@ def build_app(settings: Settings) -> Dash:
                             dcc.Checklist(
                                 id="type-filter",
                                 options=[{"label": t, "value": t} for t in ALL_NODE_TYPES],
-                                value=sorted(TOPOLOGY_NODE_TYPES),
+                                value=["MATCH"],
                                 style={"fontSize": "12px"},
                             ),
                             html.Br(),
@@ -236,17 +263,18 @@ def build_app(settings: Settings) -> Dash:
                             dcc.Dropdown(
                                 id="layout-dropdown",
                                 options=[
-                                    {"label": "breadthfirst (bracket)", "value": "breadthfirst"},
+                                    {"label": "dagre (bracket)", "value": "dagre"},
+                                    {"label": "breadthfirst", "value": "breadthfirst"},
                                     {"label": "cose (force)", "value": "cose"},
                                     {"label": "circle", "value": "circle"},
                                     {"label": "grid", "value": "grid"},
                                     {"label": "concentric", "value": "concentric"},
                                 ],
-                                value="breadthfirst",
+                                value="dagre",
                                 clearable=False,
                             ),
                             html.Button(
-                                "Reset to topology view",
+                                "Reset view",
                                 id="reset-button",
                                 n_clicks=0,
                                 style={"width": "100%", "marginTop": "12px"},
@@ -261,12 +289,7 @@ def build_app(settings: Settings) -> Dash:
                                 id="graph-cyto",
                                 elements=initial.to_elements(),
                                 stylesheet=default_stylesheet(),
-                                layout={
-                                    "name": "breadthfirst",
-                                    "directed": True,
-                                    "padding": 20,
-                                    "spacingFactor": 1.2,
-                                },
+                                layout=dict(BRACKET_LAYOUT),
                                 style={"width": "100%", "height": "100%"},
                                 minZoom=0.1,
                                 maxZoom=3,
