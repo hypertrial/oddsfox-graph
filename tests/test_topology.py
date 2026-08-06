@@ -211,6 +211,130 @@ def test_match_uses_group_index_when_available() -> None:
     assert any(n.type == NodeType.GROUP and n.label == "Group C" for n in match_nodes)
 
 
+def test_polymarket_kor_is_curacao_kr_is_south_korea() -> None:
+    """Polymarket WC2026 slugs use kor=Curaçao and kr=South Korea."""
+    from oddsgraph import ids
+
+    assert ids.team_aliases_from_code("kor")[0] == "Curaçao"
+    assert ids.team_aliases_from_code("kr")[0] == "South Korea"
+    assert ids.canonical_team_name("Korea Republic") == "South Korea"
+
+    markets = [
+        _market(
+            market_id="c1",
+            event_id="gE",
+            event_title="World Cup Group E Winner",
+            event_slug="group-e",
+            group_item_title="Curaçao",
+            question="Will Curaçao win Group E?",
+        ),
+        _market(
+            market_id="c2",
+            event_id="gE",
+            event_title="World Cup Group E Winner",
+            event_slug="group-e",
+            group_item_title="Germany",
+            question="Will Germany win Group E?",
+        ),
+        _market(
+            market_id="c3",
+            event_id="mE",
+            event_title="Germany vs. Curaçao",
+            event_slug="fifwc-ger-kor-2026-06-14",
+            sports_market_type="moneyline",
+        ),
+        _market(
+            market_id="k1",
+            event_id="gA",
+            event_title="World Cup Group A Winner",
+            event_slug="group-a",
+            group_item_title="South Korea",
+            question="Will South Korea win Group A?",
+        ),
+        _market(
+            market_id="k2",
+            event_id="gA",
+            event_title="World Cup Group A Winner",
+            event_slug="group-a",
+            group_item_title="Czechia",
+            question="Will Czechia win Group A?",
+        ),
+        _market(
+            market_id="k3",
+            event_id="mA",
+            event_title="Korea Republic vs. Czechia",
+            event_slug="fifwc-kr-cze-2026-06-11",
+            sports_market_type="moneyline",
+        ),
+    ]
+    settings = Settings()
+    det = build_deterministic_fragments_by_event(markets)
+    resolution = resolve_fragments(
+        list(det.values()), settings, inference_methods=["deterministic"] * len(det)
+    )
+    teams = {
+        n.label
+        for n in resolution.canonical_nodes.values()
+        if n.type == NodeType.TEAM
+    }
+    assert "Curaçao" in teams
+    assert "South Korea" in teams
+    assert teams & {"Korea Republic"} == set()
+
+
+def test_aliased_match_title_resolves_into_group() -> None:
+    markets = [
+        _market(
+            market_id="90",
+            event_id="gA",
+            event_title="World Cup Group A Winner",
+            event_slug="group-a",
+            group_item_title="South Korea",
+            question="Will South Korea win Group A?",
+        ),
+        _market(
+            market_id="91",
+            event_id="gA",
+            event_title="World Cup Group A Winner",
+            event_slug="group-a",
+            group_item_title="Czechia",
+            question="Will Czechia win Group A?",
+        ),
+        _market(
+            market_id="92",
+            event_id="mA",
+            event_title="Korea Republic vs. Czechia",
+            event_slug="fifwc-kr-cze-2026-06-11",
+            sports_market_type="moneyline",
+        ),
+    ]
+    classified = classify_events(markets)
+    match = classified["mA"]
+    assert match.fully_covered is True
+    assert any(n.type == NodeType.GROUP and n.label == "Group A" for n in match.fragment.nodes)
+    teams = {n.label for n in match.fragment.nodes if n.type == NodeType.TEAM}
+    assert teams == {"South Korea", "Czechia"}
+
+
+def test_mismatched_slug_code_does_not_attach_foreign_team_alias() -> None:
+    """If a slug code maps to another team, keep the raw code but not its name."""
+    markets = [
+        _market(
+            market_id="x1",
+            event_id="x1",
+            event_title="Korea Republic vs. Czechia",
+            # Intentionally wrong Polymarket-style code (kor=Curaçao).
+            event_slug="fifwc-kor-cze-2026-06-11",
+            sports_market_type="moneyline",
+        ),
+    ]
+    result = classify_events(markets)["x1"]
+    korea = next(n for n in result.fragment.nodes if n.type == NodeType.TEAM and n.label == "South Korea")
+    assert "kor" in korea.aliases
+    assert "Curaçao" not in korea.aliases
+    assert "curacao" not in {a.casefold() for a in korea.aliases}
+
+
 def test_infer_skips_llm_for_covered_events(tmp_path: Path) -> None:
     settings = Settings()
     settings.configure_build_dir(tmp_path / "build")

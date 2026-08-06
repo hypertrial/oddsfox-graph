@@ -10,6 +10,7 @@ outcomes, and relationships.
 Polymarket parquet
     → semantic market records
     → deterministic topology (match/group/stage templates)
+    → official WC2026 bracket (curated FIFA schedule)
     → local structured LLM extraction (residual events only)
     → entity resolution
     → graph validation
@@ -89,6 +90,12 @@ Infer / run options:
 | Stage of elimination | `World Cup: Portugal Stage of Elimination` | TEAM, STAGE, QUALIFIES_FOR |
 | Tournament winner | `World Cup Winner` | TEAM, STAGE(Champion), QUALIFIES_FOR |
 
+Team names are canonicalized via `oddsgraph/data/team_name_aliases.json` (e.g.
+`Korea Republic` → `South Korea`, `IR Iran` → `Iran`) so group membership and
+match nodes merge cleanly. FIFA/Polymarket team codes live in
+`oddsgraph/data/team_codes.json` — note Polymarket WC2026 slugs use `kor` for
+**Curaçao** and `kr` for **South Korea**.
+
 Covered events are recorded as `deterministic` in `inference_report.json` and
 skip LLM chunking entirely. On the WC2026 dataset this covers ~91% of events and
 cuts estimated LLM chunk volume by ~15×. Player-prop markets (`soccer_player_*`)
@@ -102,9 +109,33 @@ Escape hatch:
 oddsgraph infer --no-deterministic-topology
 ```
 
+### Official WC2026 bracket (default on)
+
+`build` / `run` inject a curated fragment from `oddsgraph/data/wc2026_schedule.json`
+(104 FIFA-reviewed fixtures exported once from `oddsfox-pipeline`'s OpenFootball
+warehouse). This adds:
+
+- Stage ladder: `Group Stage → Round of 32 → Round of 16 → Quarterfinals → Semifinals → Final → Champion`, plus `Semifinals → Third Place` (`STAGE ADVANCES_TO STAGE`)
+- All 104 matches placed with `MATCH PART_OF STAGE`
+- Knockout progression `MATCH ADVANCES_TO MATCH` derived from team continuity across consecutive stages (~32 edges)
+- `inference_method=official_bracket` on those edges/nodes
+
+Regenerate the schedule snapshot (requires local `oddsfox-pipeline` DuckDB):
+
+```bash
+uv run python scripts/export_wc2026_schedule.py
+```
+
+Escape hatch:
+
+```bash
+oddsgraph build --no-official-bracket
+```
+
 Build / run options:
 
 - `--minimum-confidence 0.5` — reject edges below this threshold during `build` (does not affect entity resolution)
+- `--official-bracket / --no-official-bracket` — inject curated WC2026 stage ladder + official MATCH bracket (default: on)
 
 ### Chunking settings (infer)
 
@@ -121,6 +152,7 @@ Configured in `Settings` defaults in `oddsgraph/config.py`:
 | `n_batch` / `n_ubatch` | 1024 | llama.cpp batch sizes (in-process backend) |
 | `llm_concurrency` | 4 | Concurrent requests when `--llm-backend server` |
 | `deterministic_topology` | true | Skip LLM for template-covered events |
+| `official_bracket` | true | Inject curated FIFA schedule bracket on build |
 | `competition_label` | World Cup 2026 | Label/slug for COMPETITION nodes |
 
 ### Faster infer with llama-server (optional)

@@ -34,6 +34,23 @@ def load_team_codes() -> dict[str, str]:
     return {k.lower(): v for k, v in data.items()}
 
 
+@lru_cache(maxsize=1)
+def load_team_name_aliases() -> dict[str, str]:
+    """Map normalized name variants to the graph's canonical team display name."""
+    path = _DATA_DIR / "team_name_aliases.json"
+    if not path.exists():
+        return {}
+    with path.open(encoding="utf-8") as fh:
+        data = json.load(fh)
+    return {normalize_label(k): v for k, v in data.items()}
+
+
+def canonical_team_name(name: str) -> str:
+    """Normalize a team display name to the graph's canonical spelling, if known."""
+    aliases = load_team_name_aliases()
+    return aliases.get(normalize_label(name), name)
+
+
 def team_aliases_from_code(code: str) -> list[str]:
     codes = load_team_codes()
     name = codes.get(code.lower())

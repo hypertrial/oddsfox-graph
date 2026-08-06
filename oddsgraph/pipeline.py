@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pyarrow.parquet as pq
 
+from oddsgraph.bracket import build_official_bracket_fragment
 from oddsgraph.config import Settings
 from oddsgraph.deterministic import build_deterministic_fragments_by_event
 from oddsgraph.export import export_graph_artifacts
@@ -41,6 +42,11 @@ def build_pipeline_from_markets(
     inf_fragments = list(inferred.values())
     all_fragments = det_fragments + inf_fragments
     inference_methods = ["deterministic"] * len(det_fragments) + ["llm"] * len(inf_fragments)
+
+    if settings.official_bracket:
+        bracket = build_official_bracket_fragment(settings.competition_label)
+        all_fragments.append(bracket)
+        inference_methods.append("official_bracket")
 
     resolution = resolve_fragments(
         all_fragments,

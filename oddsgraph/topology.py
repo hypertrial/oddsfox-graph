@@ -206,6 +206,24 @@ def _match_alias(event_slug: str | None) -> str | None:
     return event_slug
 
 
+def _code_aliases_for_team(code: str, team_label: str) -> list[str]:
+    """Return slug-code aliases that belong to ``team_label`` only.
+
+    Polymarket WC2026 reuses some FIFA-looking codes incorrectly (e.g. ``kor``
+    for Curaçao). Always keep the raw code as a weak alias, but only attach the
+    mapped display name when it canonicalizes to this team.
+    """
+    aliases = [code]
+    mapped = ids.load_team_codes().get(code.lower())
+    if not mapped:
+        return aliases
+    if ids.normalize_label(ids.canonical_team_name(mapped)) == ids.normalize_label(
+        team_label
+    ):
+        aliases.extend(ids.team_aliases_from_code(code))
+    return aliases
+
+
 def _build_group_index(markets_by_event: dict[str, list[SemanticMarket]]) -> _TopologyIndex:
     index = _TopologyIndex()
     for event_markets in markets_by_event.values():
@@ -215,9 +233,10 @@ def _build_group_index(markets_by_event: dict[str, list[SemanticMarket]]) -> _To
             continue
         group_label = f"Group {letter}"
         for market in event_markets:
-            team = (market.group_item_title or "").strip()
-            if not team:
+            raw_team = (market.group_item_title or "").strip()
+            if not raw_team:
                 continue
+            team = ids.canonical_team_name(raw_team)
             key = ids.normalize_label(team)
             index.team_to_group[key] = group_label
             index.group_evidence.setdefault(key, []).append(market.market_id)
@@ -234,7 +253,9 @@ def _build_match_fragment(
     if not parsed:
         return None
 
-    team_a, team_b, _category = parsed
+    raw_team_a, raw_team_b, _category = parsed
+    team_a = ids.canonical_team_name(raw_team_a)
+    team_b = ids.canonical_team_name(raw_team_b)
     evidence = [m.market_id for m in markets]
     event_slug = markets[0].event_slug
     match_label = f"{team_a} vs. {team_b}"
@@ -243,12 +264,14 @@ def _build_match_fragment(
 
     aliases_a: list[str] = []
     aliases_b: list[str] = []
+    if raw_team_a != team_a:
+        aliases_a.append(raw_team_a)
+    if raw_team_b != team_b:
+        aliases_b.append(raw_team_b)
     codes = _codes_from_slug(event_slug)
     if codes:
-        aliases_a.append(codes[0])
-        aliases_b.append(codes[1])
-        aliases_a.extend(ids.team_aliases_from_code(codes[0]))
-        aliases_b.extend(ids.team_aliases_from_code(codes[1]))
+        aliases_a.extend(_code_aliases_for_team(codes[0], team_a))
+        aliases_b.extend(_code_aliases_for_team(codes[1], team_b))
 
     nodes: list[Node] = [
         _competition_node(competition_label, evidence),
@@ -358,11 +381,13 @@ def _build_group_winner_fragment(
     ]
 
     for market in markets:
-        team = (market.group_item_title or "").strip()
-        if not team:
+        raw_team = (market.group_item_title or "").strip()
+        if not raw_team:
             continue
+        team = ids.canonical_team_name(raw_team)
         team_evidence = [market.market_id]
-        nodes.append(_team_node(team, team_evidence))
+        aliases = [raw_team] if raw_team != team else None
+        nodes.append(_team_node(team, team_evidence, aliases=aliases))
         edges.append(
             _edge(
                 ids.team_id(team),
@@ -391,14 +416,16 @@ def _build_stage_elimination_fragment(
     competition_label: str,
 ) -> EventTopologyResult | None:
     title = markets[0].event_title
-    team = parse_stage_elimination_title(title)
-    if not team:
+    raw_team = parse_stage_elimination_title(title)
+    if not raw_team:
         return None
+    team = ids.canonical_team_name(raw_team)
 
     evidence = [m.market_id for m in markets]
+    team_aliases = [raw_team] if raw_team != team else None
     nodes: list[Node] = [
         _competition_node(competition_label, evidence),
-        _team_node(team, evidence),
+        _team_node(team, evidence, aliases=team_aliases),
     ]
     edges: list[Edge] = []
     stages_seen: set[str] = set()
@@ -467,16 +494,18 @@ def _build_world_cup_winner_fragment(
     ]
 
     for market in markets:
-        team = (market.group_item_title or "").strip()
-        if not team:
+        raw_team = (market.group_item_title or "").strip()
+        if not raw_team:
             # Fall back to question patterns like "Will Austria win..."
             question = market.question or ""
             q_match = re.match(r"^Will (.+?) win the .+ World Cup\?$", question)
             if q_match:
-                team = q_match.group(1).strip()
-        if not team:
+                raw_team = q_match.group(1).strip()
+        if not raw_team:
             continue
-        nodes.append(_team_node(team, [market.market_id]))
+        team = ids.canonical_team_name(raw_team)
+        aliases = [raw_team] if raw_team != team else None
+        nodes.append(_team_node(team, [market.market_id], aliases=aliases))
         edges.append(
             _edge(
                 ids.team_id(team),

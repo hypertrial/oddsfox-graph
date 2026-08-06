@@ -68,6 +68,7 @@ ALLOWED_EDGE_PATTERNS: dict[EdgeType, set[tuple[NodeType, NodeType]]] = {
         (NodeType.MATCH, NodeType.MATCH),
         (NodeType.TEAM, NodeType.ROUND),
         (NodeType.TEAM, NodeType.STAGE),
+        (NodeType.STAGE, NodeType.STAGE),
     },
     EdgeType.IMPLIES: {
         (NodeType.MARKET, NodeType.MARKET),

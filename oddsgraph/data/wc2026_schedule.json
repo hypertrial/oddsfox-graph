@@ -1,0 +1,1057 @@
+{
+  "_provenance": {
+    "source": "oddsfox-pipeline openfootball_wc2026_staging.stg_openfootball_wc2026_schedule_fixtures",
+    "source_url": "https://raw.githubusercontent.com/openfootball/worldcup/bd46a148289f9930da66c140d4d7d2325e95d387/",
+    "openfootball_revision": "bd46a148289f9930da66c140d4d7d2325e95d387",
+    "fifa_schedule_sha256": "165fb909253b746e6173a4443bdc3e5d786530f0684af6e85c1fd21fff252811",
+    "exported_at": "2026-08-06T09:53:48.366848+00:00",
+    "row_count": 104,
+    "team_remaps": {
+      "Czech Republic": "Czechia",
+      "Turkey": "Türkiye",
+      "Congo DR": "DR Congo"
+    }
+  },
+  "fixtures": [
+    {
+      "fifa_match_id": 1,
+      "stage_key": "group_stage",
+      "group_label": "a",
+      "home_team": "Mexico",
+      "away_team": "South Africa",
+      "kickoff_at_utc": "2026-06-11T19:00:00",
+      "venue": "Mexico City",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 2,
+      "stage_key": "group_stage",
+      "group_label": "a",
+      "home_team": "South Korea",
+      "away_team": "Czechia",
+      "kickoff_at_utc": "2026-06-12T02:00:00",
+      "venue": "Guadalajara (Zapopan)",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 3,
+      "stage_key": "group_stage",
+      "group_label": "b",
+      "home_team": "Canada",
+      "away_team": "Bosnia and Herzegovina",
+      "kickoff_at_utc": "2026-06-12T19:00:00",
+      "venue": "Toronto",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 4,
+      "stage_key": "group_stage",
+      "group_label": "d",
+      "home_team": "United States",
+      "away_team": "Paraguay",
+      "kickoff_at_utc": "2026-06-13T01:00:00",
+      "venue": "Los Angeles (Inglewood)",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 5,
+      "stage_key": "group_stage",
+      "group_label": "c",
+      "home_team": "Haiti",
+      "away_team": "Scotland",
+      "kickoff_at_utc": "2026-06-14T01:00:00",
+      "venue": "Boston (Foxborough)",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 6,
+      "stage_key": "group_stage",
+      "group_label": "d",
+      "home_team": "Australia",
+      "away_team": "Türkiye",
+      "kickoff_at_utc": "2026-06-14T04:00:00",
+      "venue": "Vancouver",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 7,
+      "stage_key": "group_stage",
+      "group_label": "c",
+      "home_team": "Brazil",
+      "away_team": "Morocco",
+      "kickoff_at_utc": "2026-06-13T22:00:00",
+      "venue": "New York/New Jersey (East Rutherford)",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 8,
+      "stage_key": "group_stage",
+      "group_label": "b",
+      "home_team": "Qatar",
+      "away_team": "Switzerland",
+      "kickoff_at_utc": "2026-06-13T19:00:00",
+      "venue": "San Francisco Bay Area (Santa Clara)",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 9,
+      "stage_key": "group_stage",
+      "group_label": "e",
+      "home_team": "Ivory Coast",
+      "away_team": "Ecuador",
+      "kickoff_at_utc": "2026-06-14T23:00:00",
+      "venue": "Philadelphia",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 10,
+      "stage_key": "group_stage",
+      "group_label": "e",
+      "home_team": "Germany",
+      "away_team": "Curaçao",
+      "kickoff_at_utc": "2026-06-14T17:00:00",
+      "venue": "Houston",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 11,
+      "stage_key": "group_stage",
+      "group_label": "f",
+      "home_team": "Netherlands",
+      "away_team": "Japan",
+      "kickoff_at_utc": "2026-06-14T20:00:00",
+      "venue": "Dallas (Arlington)",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 12,
+      "stage_key": "group_stage",
+      "group_label": "f",
+      "home_team": "Sweden",
+      "away_team": "Tunisia",
+      "kickoff_at_utc": "2026-06-15T02:00:00",
+      "venue": "Monterrey (Guadalupe)",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 13,
+      "stage_key": "group_stage",
+      "group_label": "h",
+      "home_team": "Saudi Arabia",
+      "away_team": "Uruguay",
+      "kickoff_at_utc": "2026-06-15T22:00:00",
+      "venue": "Miami (Miami Gardens)",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 14,
+      "stage_key": "group_stage",
+      "group_label": "h",
+      "home_team": "Spain",
+      "away_team": "Cape Verde",
+      "kickoff_at_utc": "2026-06-15T16:00:00",
+      "venue": "Atlanta",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 15,
+      "stage_key": "group_stage",
+      "group_label": "g",
+      "home_team": "Iran",
+      "away_team": "New Zealand",
+      "kickoff_at_utc": "2026-06-16T01:00:00",
+      "venue": "Los Angeles (Inglewood)",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 16,
+      "stage_key": "group_stage",
+      "group_label": "g",
+      "home_team": "Belgium",
+      "away_team": "Egypt",
+      "kickoff_at_utc": "2026-06-15T19:00:00",
+      "venue": "Seattle",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 17,
+      "stage_key": "group_stage",
+      "group_label": "i",
+      "home_team": "France",
+      "away_team": "Senegal",
+      "kickoff_at_utc": "2026-06-16T19:00:00",
+      "venue": "New York/New Jersey (East Rutherford)",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 18,
+      "stage_key": "group_stage",
+      "group_label": "i",
+      "home_team": "Iraq",
+      "away_team": "Norway",
+      "kickoff_at_utc": "2026-06-16T22:00:00",
+      "venue": "Boston (Foxborough)",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 19,
+      "stage_key": "group_stage",
+      "group_label": "j",
+      "home_team": "Argentina",
+      "away_team": "Algeria",
+      "kickoff_at_utc": "2026-06-17T01:00:00",
+      "venue": "Kansas City",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 20,
+      "stage_key": "group_stage",
+      "group_label": "j",
+      "home_team": "Austria",
+      "away_team": "Jordan",
+      "kickoff_at_utc": "2026-06-17T04:00:00",
+      "venue": "San Francisco Bay Area (Santa Clara)",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 21,
+      "stage_key": "group_stage",
+      "group_label": "l",
+      "home_team": "Ghana",
+      "away_team": "Panama",
+      "kickoff_at_utc": "2026-06-17T23:00:00",
+      "venue": "Toronto",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 22,
+      "stage_key": "group_stage",
+      "group_label": "l",
+      "home_team": "England",
+      "away_team": "Croatia",
+      "kickoff_at_utc": "2026-06-17T20:00:00",
+      "venue": "Dallas (Arlington)",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 23,
+      "stage_key": "group_stage",
+      "group_label": "k",
+      "home_team": "Portugal",
+      "away_team": "DR Congo",
+      "kickoff_at_utc": "2026-06-17T17:00:00",
+      "venue": "Houston",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 24,
+      "stage_key": "group_stage",
+      "group_label": "k",
+      "home_team": "Uzbekistan",
+      "away_team": "Colombia",
+      "kickoff_at_utc": "2026-06-18T02:00:00",
+      "venue": "Mexico City",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 25,
+      "stage_key": "group_stage",
+      "group_label": "a",
+      "home_team": "Czechia",
+      "away_team": "South Africa",
+      "kickoff_at_utc": "2026-06-18T16:00:00",
+      "venue": "Atlanta",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 26,
+      "stage_key": "group_stage",
+      "group_label": "b",
+      "home_team": "Switzerland",
+      "away_team": "Bosnia and Herzegovina",
+      "kickoff_at_utc": "2026-06-18T19:00:00",
+      "venue": "Los Angeles (Inglewood)",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 27,
+      "stage_key": "group_stage",
+      "group_label": "b",
+      "home_team": "Canada",
+      "away_team": "Qatar",
+      "kickoff_at_utc": "2026-06-18T22:00:00",
+      "venue": "Vancouver",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 28,
+      "stage_key": "group_stage",
+      "group_label": "a",
+      "home_team": "Mexico",
+      "away_team": "South Korea",
+      "kickoff_at_utc": "2026-06-19T01:00:00",
+      "venue": "Guadalajara (Zapopan)",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 29,
+      "stage_key": "group_stage",
+      "group_label": "c",
+      "home_team": "Brazil",
+      "away_team": "Haiti",
+      "kickoff_at_utc": "2026-06-20T00:30:00",
+      "venue": "Philadelphia",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 30,
+      "stage_key": "group_stage",
+      "group_label": "c",
+      "home_team": "Scotland",
+      "away_team": "Morocco",
+      "kickoff_at_utc": "2026-06-19T22:00:00",
+      "venue": "Boston (Foxborough)",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 31,
+      "stage_key": "group_stage",
+      "group_label": "d",
+      "home_team": "Türkiye",
+      "away_team": "Paraguay",
+      "kickoff_at_utc": "2026-06-20T03:00:00",
+      "venue": "San Francisco Bay Area (Santa Clara)",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 32,
+      "stage_key": "group_stage",
+      "group_label": "d",
+      "home_team": "United States",
+      "away_team": "Australia",
+      "kickoff_at_utc": "2026-06-19T19:00:00",
+      "venue": "Seattle",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 33,
+      "stage_key": "group_stage",
+      "group_label": "e",
+      "home_team": "Germany",
+      "away_team": "Ivory Coast",
+      "kickoff_at_utc": "2026-06-20T20:00:00",
+      "venue": "Toronto",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 34,
+      "stage_key": "group_stage",
+      "group_label": "e",
+      "home_team": "Ecuador",
+      "away_team": "Curaçao",
+      "kickoff_at_utc": "2026-06-21T00:00:00",
+      "venue": "Kansas City",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 35,
+      "stage_key": "group_stage",
+      "group_label": "f",
+      "home_team": "Netherlands",
+      "away_team": "Sweden",
+      "kickoff_at_utc": "2026-06-20T17:00:00",
+      "venue": "Houston",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 36,
+      "stage_key": "group_stage",
+      "group_label": "f",
+      "home_team": "Tunisia",
+      "away_team": "Japan",
+      "kickoff_at_utc": "2026-06-21T04:00:00",
+      "venue": "Monterrey (Guadalupe)",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 37,
+      "stage_key": "group_stage",
+      "group_label": "h",
+      "home_team": "Uruguay",
+      "away_team": "Cape Verde",
+      "kickoff_at_utc": "2026-06-21T22:00:00",
+      "venue": "Miami (Miami Gardens)",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 38,
+      "stage_key": "group_stage",
+      "group_label": "h",
+      "home_team": "Spain",
+      "away_team": "Saudi Arabia",
+      "kickoff_at_utc": "2026-06-21T16:00:00",
+      "venue": "Atlanta",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 39,
+      "stage_key": "group_stage",
+      "group_label": "g",
+      "home_team": "Belgium",
+      "away_team": "Iran",
+      "kickoff_at_utc": "2026-06-21T19:00:00",
+      "venue": "Los Angeles (Inglewood)",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 40,
+      "stage_key": "group_stage",
+      "group_label": "g",
+      "home_team": "New Zealand",
+      "away_team": "Egypt",
+      "kickoff_at_utc": "2026-06-22T01:00:00",
+      "venue": "Vancouver",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 41,
+      "stage_key": "group_stage",
+      "group_label": "i",
+      "home_team": "Norway",
+      "away_team": "Senegal",
+      "kickoff_at_utc": "2026-06-23T00:00:00",
+      "venue": "New York/New Jersey (East Rutherford)",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 42,
+      "stage_key": "group_stage",
+      "group_label": "i",
+      "home_team": "France",
+      "away_team": "Iraq",
+      "kickoff_at_utc": "2026-06-22T21:00:00",
+      "venue": "Philadelphia",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 43,
+      "stage_key": "group_stage",
+      "group_label": "j",
+      "home_team": "Argentina",
+      "away_team": "Austria",
+      "kickoff_at_utc": "2026-06-22T17:00:00",
+      "venue": "Dallas (Arlington)",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 44,
+      "stage_key": "group_stage",
+      "group_label": "j",
+      "home_team": "Jordan",
+      "away_team": "Algeria",
+      "kickoff_at_utc": "2026-06-23T03:00:00",
+      "venue": "San Francisco Bay Area (Santa Clara)",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 45,
+      "stage_key": "group_stage",
+      "group_label": "l",
+      "home_team": "England",
+      "away_team": "Ghana",
+      "kickoff_at_utc": "2026-06-23T20:00:00",
+      "venue": "Boston (Foxborough)",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 46,
+      "stage_key": "group_stage",
+      "group_label": "l",
+      "home_team": "Panama",
+      "away_team": "Croatia",
+      "kickoff_at_utc": "2026-06-23T23:00:00",
+      "venue": "Toronto",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 47,
+      "stage_key": "group_stage",
+      "group_label": "k",
+      "home_team": "Portugal",
+      "away_team": "Uzbekistan",
+      "kickoff_at_utc": "2026-06-23T17:00:00",
+      "venue": "Houston",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 48,
+      "stage_key": "group_stage",
+      "group_label": "k",
+      "home_team": "Colombia",
+      "away_team": "DR Congo",
+      "kickoff_at_utc": "2026-06-24T02:00:00",
+      "venue": "Guadalajara (Zapopan)",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 49,
+      "stage_key": "group_stage",
+      "group_label": "c",
+      "home_team": "Scotland",
+      "away_team": "Brazil",
+      "kickoff_at_utc": "2026-06-24T22:00:00",
+      "venue": "Miami (Miami Gardens)",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 50,
+      "stage_key": "group_stage",
+      "group_label": "c",
+      "home_team": "Morocco",
+      "away_team": "Haiti",
+      "kickoff_at_utc": "2026-06-24T22:00:00",
+      "venue": "Atlanta",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 51,
+      "stage_key": "group_stage",
+      "group_label": "b",
+      "home_team": "Switzerland",
+      "away_team": "Canada",
+      "kickoff_at_utc": "2026-06-24T19:00:00",
+      "venue": "Vancouver",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 52,
+      "stage_key": "group_stage",
+      "group_label": "b",
+      "home_team": "Bosnia and Herzegovina",
+      "away_team": "Qatar",
+      "kickoff_at_utc": "2026-06-24T19:00:00",
+      "venue": "Seattle",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 53,
+      "stage_key": "group_stage",
+      "group_label": "a",
+      "home_team": "Czechia",
+      "away_team": "Mexico",
+      "kickoff_at_utc": "2026-06-25T01:00:00",
+      "venue": "Mexico City",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 54,
+      "stage_key": "group_stage",
+      "group_label": "a",
+      "home_team": "South Africa",
+      "away_team": "South Korea",
+      "kickoff_at_utc": "2026-06-25T01:00:00",
+      "venue": "Monterrey (Guadalupe)",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 55,
+      "stage_key": "group_stage",
+      "group_label": "e",
+      "home_team": "Curaçao",
+      "away_team": "Ivory Coast",
+      "kickoff_at_utc": "2026-06-25T20:00:00",
+      "venue": "Philadelphia",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 56,
+      "stage_key": "group_stage",
+      "group_label": "e",
+      "home_team": "Ecuador",
+      "away_team": "Germany",
+      "kickoff_at_utc": "2026-06-25T20:00:00",
+      "venue": "New York/New Jersey (East Rutherford)",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 57,
+      "stage_key": "group_stage",
+      "group_label": "f",
+      "home_team": "Japan",
+      "away_team": "Sweden",
+      "kickoff_at_utc": "2026-06-25T23:00:00",
+      "venue": "Dallas (Arlington)",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 58,
+      "stage_key": "group_stage",
+      "group_label": "f",
+      "home_team": "Tunisia",
+      "away_team": "Netherlands",
+      "kickoff_at_utc": "2026-06-25T23:00:00",
+      "venue": "Kansas City",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 59,
+      "stage_key": "group_stage",
+      "group_label": "d",
+      "home_team": "Türkiye",
+      "away_team": "United States",
+      "kickoff_at_utc": "2026-06-26T02:00:00",
+      "venue": "Los Angeles (Inglewood)",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 60,
+      "stage_key": "group_stage",
+      "group_label": "d",
+      "home_team": "Paraguay",
+      "away_team": "Australia",
+      "kickoff_at_utc": "2026-06-26T02:00:00",
+      "venue": "San Francisco Bay Area (Santa Clara)",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 61,
+      "stage_key": "group_stage",
+      "group_label": "i",
+      "home_team": "Norway",
+      "away_team": "France",
+      "kickoff_at_utc": "2026-06-26T19:00:00",
+      "venue": "Boston (Foxborough)",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 62,
+      "stage_key": "group_stage",
+      "group_label": "i",
+      "home_team": "Senegal",
+      "away_team": "Iraq",
+      "kickoff_at_utc": "2026-06-26T19:00:00",
+      "venue": "Toronto",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 63,
+      "stage_key": "group_stage",
+      "group_label": "g",
+      "home_team": "Egypt",
+      "away_team": "Iran",
+      "kickoff_at_utc": "2026-06-27T03:00:00",
+      "venue": "Seattle",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 64,
+      "stage_key": "group_stage",
+      "group_label": "g",
+      "home_team": "New Zealand",
+      "away_team": "Belgium",
+      "kickoff_at_utc": "2026-06-27T03:00:00",
+      "venue": "Vancouver",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 65,
+      "stage_key": "group_stage",
+      "group_label": "h",
+      "home_team": "Cape Verde",
+      "away_team": "Saudi Arabia",
+      "kickoff_at_utc": "2026-06-27T00:00:00",
+      "venue": "Houston",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 66,
+      "stage_key": "group_stage",
+      "group_label": "h",
+      "home_team": "Uruguay",
+      "away_team": "Spain",
+      "kickoff_at_utc": "2026-06-27T00:00:00",
+      "venue": "Guadalajara (Zapopan)",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 67,
+      "stage_key": "group_stage",
+      "group_label": "l",
+      "home_team": "Panama",
+      "away_team": "England",
+      "kickoff_at_utc": "2026-06-27T21:00:00",
+      "venue": "New York/New Jersey (East Rutherford)",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 68,
+      "stage_key": "group_stage",
+      "group_label": "l",
+      "home_team": "Croatia",
+      "away_team": "Ghana",
+      "kickoff_at_utc": "2026-06-27T21:00:00",
+      "venue": "Philadelphia",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 69,
+      "stage_key": "group_stage",
+      "group_label": "j",
+      "home_team": "Algeria",
+      "away_team": "Austria",
+      "kickoff_at_utc": "2026-06-28T02:00:00",
+      "venue": "Kansas City",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 70,
+      "stage_key": "group_stage",
+      "group_label": "j",
+      "home_team": "Jordan",
+      "away_team": "Argentina",
+      "kickoff_at_utc": "2026-06-28T02:00:00",
+      "venue": "Dallas (Arlington)",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 71,
+      "stage_key": "group_stage",
+      "group_label": "k",
+      "home_team": "Colombia",
+      "away_team": "Portugal",
+      "kickoff_at_utc": "2026-06-27T23:30:00",
+      "venue": "Miami (Miami Gardens)",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 72,
+      "stage_key": "group_stage",
+      "group_label": "k",
+      "home_team": "DR Congo",
+      "away_team": "Uzbekistan",
+      "kickoff_at_utc": "2026-06-27T23:30:00",
+      "venue": "Atlanta",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 73,
+      "stage_key": "round_of_32",
+      "group_label": null,
+      "home_team": "South Africa",
+      "away_team": "Canada",
+      "kickoff_at_utc": "2026-06-28T19:00:00",
+      "venue": "Los Angeles (Inglewood)",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 74,
+      "stage_key": "round_of_32",
+      "group_label": null,
+      "home_team": "Germany",
+      "away_team": "Paraguay",
+      "kickoff_at_utc": "2026-06-29T20:30:00",
+      "venue": "Boston (Foxborough)",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 75,
+      "stage_key": "round_of_32",
+      "group_label": null,
+      "home_team": "Netherlands",
+      "away_team": "Morocco",
+      "kickoff_at_utc": "2026-06-30T01:00:00",
+      "venue": "Monterrey (Guadalupe)",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 76,
+      "stage_key": "round_of_32",
+      "group_label": null,
+      "home_team": "Brazil",
+      "away_team": "Japan",
+      "kickoff_at_utc": "2026-06-29T17:00:00",
+      "venue": "Houston",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 77,
+      "stage_key": "round_of_32",
+      "group_label": null,
+      "home_team": "France",
+      "away_team": "Sweden",
+      "kickoff_at_utc": "2026-06-30T21:00:00",
+      "venue": "New York/New Jersey (East Rutherford)",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 78,
+      "stage_key": "round_of_32",
+      "group_label": null,
+      "home_team": "Ivory Coast",
+      "away_team": "Norway",
+      "kickoff_at_utc": "2026-06-30T17:00:00",
+      "venue": "Dallas (Arlington)",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 79,
+      "stage_key": "round_of_32",
+      "group_label": null,
+      "home_team": "Mexico",
+      "away_team": "Ecuador",
+      "kickoff_at_utc": "2026-07-01T01:00:00",
+      "venue": "Mexico City",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 80,
+      "stage_key": "round_of_32",
+      "group_label": null,
+      "home_team": "England",
+      "away_team": "DR Congo",
+      "kickoff_at_utc": "2026-07-01T16:00:00",
+      "venue": "Atlanta",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 81,
+      "stage_key": "round_of_32",
+      "group_label": null,
+      "home_team": "United States",
+      "away_team": "Bosnia and Herzegovina",
+      "kickoff_at_utc": "2026-07-02T00:00:00",
+      "venue": "San Francisco Bay Area (Santa Clara)",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 82,
+      "stage_key": "round_of_32",
+      "group_label": null,
+      "home_team": "Belgium",
+      "away_team": "Senegal",
+      "kickoff_at_utc": "2026-07-01T20:00:00",
+      "venue": "Seattle",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 83,
+      "stage_key": "round_of_32",
+      "group_label": null,
+      "home_team": "Portugal",
+      "away_team": "Croatia",
+      "kickoff_at_utc": "2026-07-02T23:00:00",
+      "venue": "Toronto",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 84,
+      "stage_key": "round_of_32",
+      "group_label": null,
+      "home_team": "Spain",
+      "away_team": "Austria",
+      "kickoff_at_utc": "2026-07-02T19:00:00",
+      "venue": "Los Angeles (Inglewood)",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 85,
+      "stage_key": "round_of_32",
+      "group_label": null,
+      "home_team": "Switzerland",
+      "away_team": "Algeria",
+      "kickoff_at_utc": "2026-07-03T03:00:00",
+      "venue": "Vancouver",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 86,
+      "stage_key": "round_of_32",
+      "group_label": null,
+      "home_team": "Argentina",
+      "away_team": "Cape Verde",
+      "kickoff_at_utc": "2026-07-03T22:00:00",
+      "venue": "Miami (Miami Gardens)",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 87,
+      "stage_key": "round_of_32",
+      "group_label": null,
+      "home_team": "Colombia",
+      "away_team": "Ghana",
+      "kickoff_at_utc": "2026-07-04T01:30:00",
+      "venue": "Kansas City",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 88,
+      "stage_key": "round_of_32",
+      "group_label": null,
+      "home_team": "Australia",
+      "away_team": "Egypt",
+      "kickoff_at_utc": "2026-07-03T18:00:00",
+      "venue": "Dallas (Arlington)",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 89,
+      "stage_key": "round_of_16",
+      "group_label": null,
+      "home_team": "Paraguay",
+      "away_team": "France",
+      "kickoff_at_utc": "2026-07-04T21:00:00",
+      "venue": "Philadelphia",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 90,
+      "stage_key": "round_of_16",
+      "group_label": null,
+      "home_team": "Canada",
+      "away_team": "Morocco",
+      "kickoff_at_utc": "2026-07-04T17:00:00",
+      "venue": "Houston",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 91,
+      "stage_key": "round_of_16",
+      "group_label": null,
+      "home_team": "Brazil",
+      "away_team": "Norway",
+      "kickoff_at_utc": "2026-07-05T20:00:00",
+      "venue": "New York/New Jersey (East Rutherford)",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 92,
+      "stage_key": "round_of_16",
+      "group_label": null,
+      "home_team": "Mexico",
+      "away_team": "England",
+      "kickoff_at_utc": "2026-07-06T00:00:00",
+      "venue": "Mexico City",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 93,
+      "stage_key": "round_of_16",
+      "group_label": null,
+      "home_team": "Portugal",
+      "away_team": "Spain",
+      "kickoff_at_utc": "2026-07-06T19:00:00",
+      "venue": "Dallas (Arlington)",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 94,
+      "stage_key": "round_of_16",
+      "group_label": null,
+      "home_team": "United States",
+      "away_team": "Belgium",
+      "kickoff_at_utc": "2026-07-07T00:00:00",
+      "venue": "Seattle",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 95,
+      "stage_key": "round_of_16",
+      "group_label": null,
+      "home_team": "Argentina",
+      "away_team": "Egypt",
+      "kickoff_at_utc": "2026-07-07T16:00:00",
+      "venue": "Atlanta",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 96,
+      "stage_key": "round_of_16",
+      "group_label": null,
+      "home_team": "Switzerland",
+      "away_team": "Colombia",
+      "kickoff_at_utc": "2026-07-07T20:00:00",
+      "venue": "Vancouver",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 97,
+      "stage_key": "quarterfinal",
+      "group_label": null,
+      "home_team": "France",
+      "away_team": "Morocco",
+      "kickoff_at_utc": "2026-07-09T20:00:00",
+      "venue": "Boston (Foxborough)",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 98,
+      "stage_key": "quarterfinal",
+      "group_label": null,
+      "home_team": "Spain",
+      "away_team": "Belgium",
+      "kickoff_at_utc": "2026-07-10T19:00:00",
+      "venue": "Los Angeles (Inglewood)",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 99,
+      "stage_key": "quarterfinal",
+      "group_label": null,
+      "home_team": "Norway",
+      "away_team": "England",
+      "kickoff_at_utc": "2026-07-11T21:00:00",
+      "venue": "Miami (Miami Gardens)",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 100,
+      "stage_key": "quarterfinal",
+      "group_label": null,
+      "home_team": "Argentina",
+      "away_team": "Switzerland",
+      "kickoff_at_utc": "2026-07-12T01:00:00",
+      "venue": "Kansas City",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 101,
+      "stage_key": "semifinal",
+      "group_label": null,
+      "home_team": "France",
+      "away_team": "Spain",
+      "kickoff_at_utc": "2026-07-14T19:00:00",
+      "venue": "Dallas (Arlington)",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 102,
+      "stage_key": "semifinal",
+      "group_label": null,
+      "home_team": "England",
+      "away_team": "Argentina",
+      "kickoff_at_utc": "2026-07-15T19:00:00",
+      "venue": "Atlanta",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 103,
+      "stage_key": "third_place",
+      "group_label": null,
+      "home_team": "France",
+      "away_team": "England",
+      "kickoff_at_utc": "2026-07-18T21:00:00",
+      "venue": "Miami (Miami Gardens)",
+      "match_status": "completed"
+    },
+    {
+      "fifa_match_id": 104,
+      "stage_key": "final",
+      "group_label": null,
+      "home_team": "Spain",
+      "away_team": "Argentina",
+      "kickoff_at_utc": "2026-07-19T19:00:00",
+      "venue": "New York/New Jersey (East Rutherford)",
+      "match_status": "completed"
+    }
+  ]
+}

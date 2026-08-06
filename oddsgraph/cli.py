@@ -155,10 +155,19 @@ def build(
     minimum_confidence: Annotated[
         float, typer.Option(help="Minimum edge confidence threshold")
     ] = 0.0,
+    official_bracket: Annotated[
+        Optional[bool],
+        typer.Option(
+            "--official-bracket/--no-official-bracket",
+            help="Inject curated WC2026 stage ladder and official MATCH bracket",
+        ),
+    ] = None,
 ) -> None:
     """Resolve entities, build graph, validate, and export artifacts."""
     settings = _base_settings(ctx)
     settings.minimum_confidence = minimum_confidence
+    if official_bracket is not None:
+        settings.official_bracket = official_bracket
     result = run_build_and_export(settings)
     typer.echo(
         f"Exported {len(result.graph.nodes)} nodes and {len(result.graph.edges)} edges"
@@ -214,6 +223,13 @@ def run(
             help="Extract TEAM/MATCH/GROUP/STAGE topology without LLM when possible",
         ),
     ] = None,
+    official_bracket: Annotated[
+        Optional[bool],
+        typer.Option(
+            "--official-bracket/--no-official-bracket",
+            help="Inject curated WC2026 stage ladder and official MATCH bracket",
+        ),
+    ] = None,
 ) -> None:
     """Run the full pipeline: reduce → infer → build → validate."""
     settings = _apply_infer_options(
@@ -228,6 +244,8 @@ def run(
         deterministic_topology=deterministic_topology,
     )
     settings.minimum_confidence = minimum_confidence
+    if official_bracket is not None:
+        settings.official_bracket = official_bracket
     reduce_semantic_markets(settings)
     markets = load_markets_for_infer(settings)
     # Lazy LLM load inside infer_event_fragments only when residual chunks remain.

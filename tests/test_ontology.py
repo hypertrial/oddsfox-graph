@@ -6,6 +6,7 @@ def test_allowed_edge_patterns_include_spec_examples() -> None:
     assert is_allowed_edge(EdgeType.HAS_MARKET, NodeType.EVENT, NodeType.MARKET)
     assert is_allowed_edge(EdgeType.HAS_OUTCOME, NodeType.MARKET, NodeType.OUTCOME)
     assert is_allowed_edge(EdgeType.ADVANCES_TO, NodeType.MATCH, NodeType.MATCH)
+    assert is_allowed_edge(EdgeType.ADVANCES_TO, NodeType.STAGE, NodeType.STAGE)
     assert is_allowed_edge(EdgeType.PART_OF, NodeType.ROUND, NodeType.COMPETITION)
 
 

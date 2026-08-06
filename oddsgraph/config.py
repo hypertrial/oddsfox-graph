@@ -47,6 +47,7 @@ class Settings:
     server_request_timeout: float = 120.0
     llm_concurrency: int = 4
     deterministic_topology: bool = True
+    official_bracket: bool = True
     competition_label: str = "World Cup 2026"
     fuzzy_threshold: int = 92
     minimum_confidence: float = 0.0
