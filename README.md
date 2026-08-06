@@ -1,7 +1,9 @@
 # oddsgraph
 
+**Build prediction market logical knowledge graphs.**
+
 Local, open-source pipeline that converts Polymarket WC2026 hourly-odds parquet
-into an inferred logical graph of competitions, teams, stages, matches, markets,
+into a logical knowledge graph of competitions, teams, stages, matches, markets,
 outcomes, and relationships.
 
 ## Pipeline

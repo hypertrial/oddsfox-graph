@@ -1,7 +1,8 @@
 # Architecture
 
 OddsFox Graph is a local pipeline that turns Polymarket WC2026 hourly-odds
-parquet into validated graph artifacts.
+parquet into a validated logical knowledge graph, exported as
+`nodes.parquet` / `edges.parquet`.
 
 ## Stage diagram
 

@@ -1,5 +1,5 @@
 site_name: OddsFox Graph
-site_description: Public documentation for the OddsFox Graph local WC2026 Polymarket graph inference pipeline.
+site_description: Build prediction market logical knowledge graphs. Public documentation for OddsFox Graph's local WC2026 Polymarket pipeline.
 site_url: https://graph.oddsfox.io/
 repo_url: https://github.com/hypertrial/oddsfox-graph
 repo_name: hypertrial/oddsfox-graph

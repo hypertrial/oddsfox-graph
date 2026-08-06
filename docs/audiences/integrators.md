@@ -6,7 +6,7 @@ Use this hub when you consume OddsFox Graph exports in another system.
 
 ## Consumption contract
 
-Treat exported parquet as **inferred local graph artifacts**, not as:
+Treat exported parquet as **inferred local logical knowledge graph artifacts**, not as:
 
 - live market data
 - execution signals

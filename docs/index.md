@@ -8,11 +8,11 @@ hide:
 
 <div class="of-hero__copy" markdown>
 
-<span class="of-eyebrow">Local-first prediction-market graph inference</span>
+<span class="of-eyebrow">Build prediction market logical knowledge graphs</span>
 
 # OddsFox Graph
 
-Convert Polymarket WC2026 hourly-odds parquet into an inferred logical graph of
+Convert Polymarket WC2026 hourly-odds parquet into a logical knowledge graph of
 competitions, teams, stages, matches, markets, outcomes, and relationships.
 
 Hypertrial-owned MIT software. No hosted service or bundled production data.
