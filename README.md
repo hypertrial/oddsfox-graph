@@ -37,13 +37,16 @@ OHLC and market/event metadata.
 ## Setup
 
 ```bash
-uv sync --extra dev
+uv sync --frozen --extra dev
 ```
+
+`uv.lock` is committed for reproducible installs. CI uses the same lockfile and
+installs a prebuilt CPU wheel for `llama-cpp-python` (PyPI only ships an sdist).
 
 On Apple Silicon, install `llama-cpp-python` with Metal support:
 
 ```bash
-CMAKE_ARGS="-DGGML_METAL=on" uv sync --extra dev
+CMAKE_ARGS="-DGGML_METAL=on" uv sync --frozen --extra dev
 ```
 
 Download the local model (see `models/README.md`).
