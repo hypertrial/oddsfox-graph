@@ -45,12 +45,14 @@ def build_inference_report(
     events_processed = sum(1 for s in status.values() if s == "success")
     events_failed = sum(1 for s in status.values() if s == "failed")
     events_skipped = sum(1 for s in status.values() if s == "skipped")
+    events_deterministic = sum(1 for s in status.values() if s == "deterministic")
 
     return InferenceReport(
         model_path=model_path,
         events_processed=events_processed,
         events_failed=events_failed,
         events_skipped=events_skipped,
+        events_deterministic=events_deterministic,
         node_counts=dict(node_counts),
         edge_counts=dict(edge_counts),
         resolution_tiers=dict(resolution_state.tier_counts),

@@ -28,6 +28,9 @@ def test_cli_infer_backend_options_in_help() -> None:
     assert "--llm-backend" in help_result.output
     assert "--server-url" in help_result.output
     assert "--concurrency" in help_result.output
+    # Rich may truncate long dual flags in narrow terminals.
+    assert "deterministic-top" in help_result.output
+    assert "no-deterministic" in help_result.output
 
 
 def test_cli_build_and_validate_with_fixture(tmp_path: Path) -> None:

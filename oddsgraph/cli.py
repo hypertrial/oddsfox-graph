@@ -10,9 +10,9 @@ import typer
 
 from oddsgraph.config import Settings
 from oddsgraph.infer import infer_event_fragments, load_markets_for_infer
-from oddsgraph.llm import build_graph_llm
 from oddsgraph.pipeline import run_build_and_export, validate_exported_artifacts
 from oddsgraph.reduce import reduce_semantic_markets
+from oddsgraph.reporting import load_inference_report
 
 app = typer.Typer(
     name="oddsgraph",
@@ -34,6 +34,7 @@ def _apply_infer_options(
     llm_backend: Optional[str] = None,
     server_url: Optional[str] = None,
     concurrency: Optional[int] = None,
+    deterministic_topology: Optional[bool] = None,
 ) -> Settings:
     if model_path is not None:
         settings.model_path = model_path
@@ -48,6 +49,8 @@ def _apply_infer_options(
         settings.server_base_url = server_url
     if concurrency is not None:
         settings.llm_concurrency = concurrency
+    if deterministic_topology is not None:
+        settings.deterministic_topology = deterministic_topology
     return settings
 
 
@@ -114,6 +117,13 @@ def infer(
         Optional[int],
         typer.Option(help="Concurrent LLM requests (server backend only)"),
     ] = None,
+    deterministic_topology: Annotated[
+        Optional[bool],
+        typer.Option(
+            "--deterministic-topology/--no-deterministic-topology",
+            help="Extract TEAM/MATCH/GROUP/STAGE topology without LLM when possible",
+        ),
+    ] = None,
 ) -> None:
     """Infer graph fragments per event using local LLM."""
     settings = _apply_infer_options(
@@ -125,11 +135,18 @@ def infer(
         llm_backend=llm_backend,
         server_url=server_url,
         concurrency=concurrency,
+        deterministic_topology=deterministic_topology,
     )
     markets = load_markets_for_infer(settings)
-    llm = build_graph_llm(settings)
-    results = infer_event_fragments(settings, markets, llm=llm)
-    typer.echo(f"Inferred fragments for {len(results)} events")
+    results = infer_event_fragments(settings, markets)
+    report = load_inference_report(settings.inference_report_path)
+    deterministic = sum(
+        1 for status in report.per_event_status.values() if status == "deterministic"
+    )
+    typer.echo(
+        f"Inferred fragments for {len(results)} events"
+        + (f" ({deterministic} deterministic)" if deterministic else "")
+    )
 
 
 @app.command()
@@ -190,6 +207,13 @@ def run(
         Optional[int],
         typer.Option(help="Concurrent LLM requests (server backend only)"),
     ] = None,
+    deterministic_topology: Annotated[
+        Optional[bool],
+        typer.Option(
+            "--deterministic-topology/--no-deterministic-topology",
+            help="Extract TEAM/MATCH/GROUP/STAGE topology without LLM when possible",
+        ),
+    ] = None,
 ) -> None:
     """Run the full pipeline: reduce → infer → build → validate."""
     settings = _apply_infer_options(
@@ -201,11 +225,13 @@ def run(
         llm_backend=llm_backend,
         server_url=server_url,
         concurrency=concurrency,
+        deterministic_topology=deterministic_topology,
     )
     settings.minimum_confidence = minimum_confidence
     reduce_semantic_markets(settings)
     markets = load_markets_for_infer(settings)
-    infer_event_fragments(settings, markets, llm=build_graph_llm(settings))
+    # Lazy LLM load inside infer_event_fragments only when residual chunks remain.
+    infer_event_fragments(settings, markets)
     run_build_and_export(settings)
     errors = validate_exported_artifacts(settings)
     if errors:

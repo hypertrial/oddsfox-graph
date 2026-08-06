@@ -37,6 +37,39 @@ class GraphFragment(BaseModel):
     edges: list[Edge] = Field(default_factory=list)
 
 
+def merge_fragments(fragments: list[GraphFragment]) -> GraphFragment:
+    """Merge fragment nodes/edges, unioning evidence and aliases by local_id."""
+    nodes_by_id: dict[str, Node] = {}
+    edges_seen: set[tuple[str, str, str]] = set()
+    edges: list[Edge] = []
+
+    for fragment in fragments:
+        for node in fragment.nodes:
+            existing = nodes_by_id.get(node.local_id)
+            if existing is None:
+                nodes_by_id[node.local_id] = node
+            else:
+                merged_evidence = sorted(
+                    set(existing.evidence_market_ids) | set(node.evidence_market_ids)
+                )
+                merged_aliases = sorted(set(existing.aliases) | set(node.aliases))
+                nodes_by_id[node.local_id] = node.model_copy(
+                    update={
+                        "confidence": max(existing.confidence, node.confidence),
+                        "evidence_market_ids": merged_evidence,
+                        "aliases": merged_aliases,
+                    }
+                )
+        for edge in fragment.edges:
+            key = (edge.source, edge.target, edge.type.value)
+            if key in edges_seen:
+                continue
+            edges_seen.add(key)
+            edges.append(edge)
+
+    return GraphFragment(nodes=list(nodes_by_id.values()), edges=edges)
+
+
 class CanonicalNode(BaseModel):
     canonical_id: str
     type: NodeType
@@ -85,6 +118,7 @@ class InferenceReport(BaseModel):
     events_processed: int = 0
     events_failed: int = 0
     events_skipped: int = 0
+    events_deterministic: int = 0
     node_counts: dict[str, int] = Field(default_factory=dict)
     edge_counts: dict[str, int] = Field(default_factory=dict)
     resolution_tiers: dict[str, int] = Field(default_factory=dict)

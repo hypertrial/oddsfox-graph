@@ -6,7 +6,8 @@ from collections import defaultdict
 
 from oddsgraph import ids
 from oddsgraph.ontology import EdgeType, NodeType
-from oddsgraph.schema import Edge, GraphFragment, Node, SemanticMarket
+from oddsgraph.schema import Edge, GraphFragment, Node, SemanticMarket, merge_fragments
+from oddsgraph.topology import DEFAULT_COMPETITION_LABEL, classify_events
 
 
 def build_deterministic_fragment(markets: list[SemanticMarket]) -> GraphFragment:
@@ -81,12 +82,26 @@ def build_deterministic_fragment(markets: list[SemanticMarket]) -> GraphFragment
 
 def build_deterministic_fragments_by_event(
     markets: list[SemanticMarket],
+    *,
+    include_topology: bool = True,
+    competition_label: str = DEFAULT_COMPETITION_LABEL,
 ) -> dict[str, GraphFragment]:
     by_event: dict[str, list[SemanticMarket]] = defaultdict(list)
     for market in markets:
         by_event[market.event_id].append(market)
 
-    return {
-        event_id: build_deterministic_fragment(event_markets)
-        for event_id, event_markets in by_event.items()
-    }
+    topology_by_event = (
+        classify_events(markets, competition_label=competition_label)
+        if include_topology
+        else {}
+    )
+
+    results: dict[str, GraphFragment] = {}
+    for event_id, event_markets in by_event.items():
+        base = build_deterministic_fragment(event_markets)
+        topology = topology_by_event.get(event_id)
+        if topology is not None and topology.fragment.nodes:
+            results[event_id] = merge_fragments([base, topology.fragment])
+        else:
+            results[event_id] = base
+    return results

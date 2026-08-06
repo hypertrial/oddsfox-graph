@@ -31,7 +31,11 @@ def build_pipeline_from_markets(
     markets: list[SemanticMarket],
     inferred_fragments: dict[str, GraphFragment] | None = None,
 ) -> BuildPipelineResult:
-    deterministic = build_deterministic_fragments_by_event(markets)
+    deterministic = build_deterministic_fragments_by_event(
+        markets,
+        include_topology=settings.deterministic_topology,
+        competition_label=settings.competition_label,
+    )
     inferred = inferred_fragments or {}
     det_fragments = list(deterministic.values())
     inf_fragments = list(inferred.values())

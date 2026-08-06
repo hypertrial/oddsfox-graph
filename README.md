@@ -9,15 +9,20 @@ outcomes, and relationships.
 ```text
 Polymarket parquet
     → semantic market records
-    → local structured LLM extraction
+    → deterministic topology (match/group/stage templates)
+    → local structured LLM extraction (residual events only)
     → entity resolution
     → graph validation
     → nodes.parquet + edges.parquet
 ```
 
 **Performance note:** Local LLM inference (`infer`) dominates end-to-end wall-clock
-time. Python stages (reduce, resolve, build) are comparatively fast. Tune chunk
-settings below to reduce the number of LLM calls for large events.
+time. By default, oddsgraph extracts TEAM/MATCH/GROUP/STAGE topology
+deterministically from structured Polymarket fields for the vast majority of
+events (~91% on WC2026 data), and only sends unrecognized/ambiguous events
+through the LLM. Disable with `--no-deterministic-topology` if needed. Python
+stages (reduce, resolve, build) are comparatively fast. Tune chunk settings
+below to further reduce LLM calls for residual large events.
 
 ## Source data
 
@@ -68,6 +73,31 @@ Infer / run options:
 - `--llm-backend inprocess|server` — in-process `llama-cpp-python` or remote `llama-server`
 - `--server-url http://127.0.0.1:8080` — base URL when using `--llm-backend server`
 - `--concurrency N` — concurrent LLM requests (server backend only)
+- `--deterministic-topology / --no-deterministic-topology` — extract TEAM/MATCH/GROUP/STAGE topology without LLM when possible (default: on)
+
+### Deterministic topology (default on)
+
+`infer` / `run` classify each event from structured fields before any LLM call:
+
+| Template | Example `event_title` | Extracted topology |
+|----------|----------------------|--------------------|
+| Match | `Brazil vs. Morocco - Exact Score` | TEAM ×2, MATCH, PARTICIPATES_IN |
+| Group winner | `World Cup Group D Winner` | TEAM, GROUP, PARTICIPATES_IN |
+| Stage of elimination | `World Cup: Portugal Stage of Elimination` | TEAM, STAGE, QUALIFIES_FOR |
+| Tournament winner | `World Cup Winner` | TEAM, STAGE(Champion), QUALIFIES_FOR |
+
+Covered events are recorded as `deterministic` in `inference_report.json` and
+skip LLM chunking entirely. On the WC2026 dataset this covers ~91% of events and
+cuts estimated LLM chunk volume by ~15×. Player-prop markets (`soccer_player_*`)
+still get MARKET/OUTCOME nodes, but add no extra topology beyond the match
+pairing. Unrecognized events (e.g. Golden Ball, fun props) continue through the
+existing chunked LLM path.
+
+Escape hatch:
+
+```bash
+oddsgraph infer --no-deterministic-topology
+```
 
 Build / run options:
 
@@ -87,6 +117,8 @@ Configured in `Settings` defaults in `oddsgraph/config.py`:
 | `flash_attn` | true | Enable Metal flash attention (in-process backend) |
 | `n_batch` / `n_ubatch` | 1024 | llama.cpp batch sizes (in-process backend) |
 | `llm_concurrency` | 4 | Concurrent requests when `--llm-backend server` |
+| `deterministic_topology` | true | Skip LLM for template-covered events |
+| `competition_label` | World Cup 2026 | Label/slug for COMPETITION nodes |
 
 ### Faster infer with llama-server (optional)
 

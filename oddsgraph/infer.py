@@ -18,7 +18,8 @@ from oddsgraph.prompts import (
 )
 from oddsgraph.reduce import list_semantic_market_event_ids, load_semantic_markets, select_event_ids
 from oddsgraph.reporting import merge_per_event_status
-from oddsgraph.schema import Edge, GraphFragment, Node, SemanticMarket
+from oddsgraph.schema import GraphFragment, SemanticMarket, merge_fragments
+from oddsgraph.topology import covered_event_ids
 
 logger = logging.getLogger(__name__)
 
@@ -47,38 +48,6 @@ def _load_fragment(path: Path) -> GraphFragment:
 
 def _save_fragment(path: Path, fragment: GraphFragment) -> None:
     path.write_text(fragment.model_dump_json(indent=2), encoding="utf-8")
-
-
-def _merge_fragments(fragments: list[GraphFragment]) -> GraphFragment:
-    nodes_by_id: dict[str, Node] = {}
-    edges_seen: set[tuple[str, str, str]] = set()
-    edges: list = []
-
-    for fragment in fragments:
-        for node in fragment.nodes:
-            existing = nodes_by_id.get(node.local_id)
-            if existing is None:
-                nodes_by_id[node.local_id] = node
-            else:
-                merged_evidence = sorted(
-                    set(existing.evidence_market_ids) | set(node.evidence_market_ids)
-                )
-                merged_aliases = sorted(set(existing.aliases) | set(node.aliases))
-                nodes_by_id[node.local_id] = node.model_copy(
-                    update={
-                        "confidence": max(existing.confidence, node.confidence),
-                        "evidence_market_ids": merged_evidence,
-                        "aliases": merged_aliases,
-                    }
-                )
-        for edge in fragment.edges:
-            key = (edge.source, edge.target, edge.type.value)
-            if key in edges_seen:
-                continue
-            edges_seen.add(key)
-            edges.append(edge)
-
-    return GraphFragment(nodes=list(nodes_by_id.values()), edges=edges)
 
 
 def _chunk_max_tokens(settings: Settings, chunk_size: int) -> int:
@@ -122,7 +91,13 @@ def infer_event_fragments(
     if settings.limit_events is not None:
         event_ids = event_ids[: settings.limit_events]
 
-    llm = llm or build_graph_llm(settings)
+    covered: set[str] = set()
+    if settings.deterministic_topology:
+        covered = covered_event_ids(
+            [m for m in markets if m.event_id in set(event_ids)],
+            competition_label=settings.competition_label,
+        )
+
     results: dict[str, GraphFragment] = {}
     status: dict[str, str] = {}
 
@@ -130,6 +105,10 @@ def infer_event_fragments(
     pending_tasks: list[_InferTask] = []
 
     for event_id in event_ids:
+        if event_id in covered:
+            status[event_id] = "deterministic"
+            continue
+
         fragment_path = _fragment_path(settings, event_id)
         if settings.resume and fragment_path.exists():
             results[event_id] = _load_fragment(fragment_path)
@@ -168,6 +147,7 @@ def infer_event_fragments(
 
     failed_events: set[str] = set()
     if pending_tasks:
+        llm = llm or build_graph_llm(settings)
         concurrency = _effective_concurrency(settings)
         with ThreadPoolExecutor(max_workers=concurrency) as executor:
             future_to_task = {
@@ -189,6 +169,8 @@ def infer_event_fragments(
     for event_id in event_ids:
         if event_id in results:
             continue
+        if event_id in covered:
+            continue
         if event_id in failed_events:
             status[event_id] = "failed"
             continue
@@ -208,7 +190,7 @@ def infer_event_fragments(
             logger.error("Missing part fragments for event %s after inference", event_id)
             continue
 
-        merged = _merge_fragments(chunk_fragments)
+        merged = merge_fragments(chunk_fragments)
         fragment_path = _fragment_path(settings, event_id)
         _save_fragment(fragment_path, merged)
         results[event_id] = merged

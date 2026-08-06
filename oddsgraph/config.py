@@ -46,6 +46,8 @@ class Settings:
     server_base_url: str = "http://127.0.0.1:8080"
     server_request_timeout: float = 120.0
     llm_concurrency: int = 4
+    deterministic_topology: bool = True
+    competition_label: str = "World Cup 2026"
     fuzzy_threshold: int = 92
     minimum_confidence: float = 0.0
     resume: bool = True

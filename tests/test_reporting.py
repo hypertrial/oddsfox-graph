@@ -54,12 +54,14 @@ def test_infer_after_build_preserves_report_metrics(tmp_path: Path) -> None:
     )
 
     markets = [market for market in load_golden_markets() if market.event_id == "351746"]
+    # Match events are covered by deterministic topology by default, so no LLM
+    # resume path runs; status is recorded as deterministic.
     infer_event_fragments(settings, markets, llm=_NoOpLLM())
 
     loaded = load_inference_report(settings.inference_report_path)
     assert loaded.model_path == "models/test.gguf"
     assert loaded.node_counts == report.node_counts
-    assert loaded.per_event_status.get("351746") == "skipped"
+    assert loaded.per_event_status.get("351746") == "deterministic"
 
 
 class _NoOpLLM:
@@ -70,3 +72,21 @@ class _NoOpLLM:
         max_tokens_override: int | None = None,
     ) -> GraphFragment:
         return GraphFragment()
+
+
+def test_events_deterministic_counted_in_report() -> None:
+    report = build_inference_report(
+        ResolutionState(),
+        GraphBuildResult(),
+        per_event_status={
+            "1": "success",
+            "2": "deterministic",
+            "3": "deterministic",
+            "4": "skipped",
+            "5": "failed",
+        },
+    )
+    assert report.events_processed == 1
+    assert report.events_deterministic == 2
+    assert report.events_skipped == 1
+    assert report.events_failed == 1
