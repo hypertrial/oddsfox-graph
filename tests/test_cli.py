@@ -1,3 +1,4 @@
+import re
 import shutil
 from pathlib import Path
 
@@ -11,26 +12,33 @@ from tests.helpers import GOLDEN_MARKETS_PATH, load_fixture_fragment
 runner = CliRunner()
 
 
+def _plain_output(text: str) -> str:
+    text = re.sub(r"\x1b\[[0-9;]*m", "", text)
+    return re.sub(r"\s+", " ", text)
+
+
 def test_cli_help() -> None:
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    assert "Usage: oddsgraph" in result.output
-    assert "reduce" in result.output
-    assert "infer" in result.output
-    assert "build" in result.output
-    assert "validate" in result.output
-    assert "run" in result.output
+    output = _plain_output(result.output)
+    assert "Usage: oddsgraph" in output
+    assert "reduce" in output
+    assert "infer" in output
+    assert "build" in output
+    assert "validate" in output
+    assert "run" in output
 
 
 def test_cli_infer_backend_options_in_help() -> None:
     help_result = runner.invoke(app, ["infer", "--help"])
     assert help_result.exit_code == 0
-    assert "--llm-backend" in help_result.output
-    assert "--server-url" in help_result.output
-    assert "--concurrency" in help_result.output
+    output = _plain_output(help_result.output)
+    assert "--llm-backend" in output
+    assert "--server-url" in output
+    assert "--concurrency" in output
     # Rich may truncate long dual flags in narrow terminals.
-    assert "deterministic-top" in help_result.output
-    assert "no-deterministic" in help_result.output
+    assert "deterministic-top" in output
+    assert "no-deterministic" in output
 
 
 def test_cli_build_and_validate_with_fixture(tmp_path: Path) -> None:
