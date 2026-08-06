@@ -9,7 +9,6 @@ import pytest
 
 from oddsgraph.config import Settings
 from oddsgraph.llm_remote import RemoteGraphLLM, _SERVER_START_HINT
-from oddsgraph.schema import GraphFragment
 
 
 def _valid_response_content() -> str:

@@ -8,12 +8,11 @@ import rustworkx as rx
 
 from oddsgraph.config import Settings
 from oddsgraph.ontology import (
-    EdgeType,
     is_allowed_edge,
     PROGRESSION_EDGE_TYPES,
 )
 from oddsgraph.resolution import ResolutionState
-from oddsgraph.schema import CanonicalEdge, CanonicalNode, Edge, GraphFragment, RejectedEdge
+from oddsgraph.schema import CanonicalEdge, CanonicalNode, GraphFragment, RejectedEdge
 
 
 @dataclass

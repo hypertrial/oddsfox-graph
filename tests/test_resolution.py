@@ -1,7 +1,8 @@
 from oddsgraph.config import Settings
+from oddsgraph.deterministic import build_deterministic_fragments_by_event
 from oddsgraph.ontology import NodeType
 from oddsgraph.resolution import resolve_fragments
-from oddsgraph.schema import GraphFragment, Node
+from oddsgraph.schema import GraphFragment, Node, SemanticMarket
 
 from tests.helpers import load_fixture_fragment
 
@@ -67,3 +68,89 @@ def test_deterministic_and_llm_fragments_merge_same_canonical_id() -> None:
     assert canonical.confidence == 0.9
     assert sorted(canonical.evidence_market_ids) == ["m1", "m2"]
     assert "Shared" in canonical.aliases
+
+
+def test_kor_alias_does_not_merge_south_korea_into_curacao() -> None:
+    cura = build_deterministic_fragments_by_event(
+        [
+            SemanticMarket(
+                market_id="c1",
+                event_id="c",
+                event_title="Germany vs. Curaçao",
+                event_slug="fifwc-ger-kor-2026-06-14",
+                outcomes=["Yes", "No"],
+                sports_market_type="moneyline",
+            )
+        ]
+    )["c"]
+    korea = GraphFragment(
+        nodes=[
+            Node(
+                local_id="team:south-korea",
+                type=NodeType.TEAM,
+                label="South Korea",
+                aliases=["KOR"],
+                confidence=0.9,
+                evidence_market_ids=["llm1"],
+            )
+        ]
+    )
+    state = resolve_fragments(
+        [cura, korea],
+        Settings(),
+        inference_methods=["deterministic", "llm"],
+    )
+    teams = sorted(
+        n.label for n in state.canonical_nodes.values() if n.type == NodeType.TEAM
+    )
+    assert "Curaçao" in teams
+    assert "South Korea" in teams
+    assert state.local_to_canonical["team:south-korea"] == "team:south-korea"
+
+
+def test_merged_aliases_are_usable_by_later_nodes() -> None:
+    markets = [
+        SemanticMarket(
+            market_id="g1",
+            event_id="g1",
+            event_title="World Cup Group G Winner",
+            group_item_title="Iran",
+            question="q",
+            outcomes=["Yes", "No"],
+        ),
+        SemanticMarket(
+            market_id="m1",
+            event_id="m1",
+            event_title="IR Iran vs. New Zealand",
+            event_slug="fifwc-irn-nzl-2026-06-15",
+            question="q",
+            outcomes=["Yes", "No"],
+            sports_market_type="moneyline",
+        ),
+    ]
+    det = list(build_deterministic_fragments_by_event(markets).values())
+    llm = GraphFragment(
+        nodes=[
+            Node(
+                local_id="team:ir-iran",
+                type=NodeType.TEAM,
+                label="IR Iran",
+                aliases=[],
+                confidence=0.9,
+                evidence_market_ids=["llm1"],
+            )
+        ]
+    )
+    state = resolve_fragments(
+        det + [llm],
+        Settings(),
+        inference_methods=["deterministic"] * len(det) + ["llm"],
+    )
+    iran_teams = [
+        n
+        for n in state.canonical_nodes.values()
+        if n.type == NodeType.TEAM and "iran" in n.label.casefold()
+    ]
+    assert len(iran_teams) == 1
+    assert iran_teams[0].canonical_id == "team:iran"
+    assert state.local_to_canonical["team:ir-iran"] == "team:iran"

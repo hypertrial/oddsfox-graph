@@ -74,8 +74,24 @@ class Settings:
 
     def resolve_input_glob(self) -> str:
         data_glob = self.input_glob.replace("data/", "")
-        if list((self.repo_root / "data").glob(data_glob)):
-            return str(self.repo_root / self.input_glob)
-        if list(self.repo_root.glob(self.fallback_glob)):
-            return str(self.repo_root / self.fallback_glob)
-        return str(self.repo_root / self.input_glob)
+        default_data_dir = self.repo_root / "data"
+
+        # Explicit --data-dir: search only there (do not silently fall back).
+        if self.data_dir != default_data_dir:
+            if list(self.data_dir.glob(data_glob)):
+                return str(self.data_dir / data_glob)
+            if list(self.data_dir.glob(self.fallback_glob)):
+                return str(self.data_dir / self.fallback_glob)
+            return str(self.data_dir / data_glob)
+
+        search_roots: list[Path] = []
+        for root in (default_data_dir, self.repo_root):
+            if root not in search_roots:
+                search_roots.append(root)
+
+        for root in search_roots:
+            if list(root.glob(data_glob)):
+                return str(root / data_glob)
+            if list(root.glob(self.fallback_glob)):
+                return str(root / self.fallback_glob)
+        return str(default_data_dir / data_glob)

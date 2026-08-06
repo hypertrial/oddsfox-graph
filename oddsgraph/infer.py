@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from oddsgraph.config import Settings
-from oddsgraph.llm import BaseGraphLLM, LLMInferenceError, build_graph_llm
+from oddsgraph.llm import BaseGraphLLM, build_graph_llm
 from oddsgraph.prompts import (
     build_event_prompt,
     chunk_markets_for_prompt,
@@ -41,6 +41,10 @@ def _part_fragment_path(settings: Settings, event_id: str, part: int) -> Path:
     return settings.fragments_dir / f"{event_id}__part{part}.json"
 
 
+def _chunk_manifest_path(settings: Settings, event_id: str) -> Path:
+    return settings.fragments_dir / f"{event_id}__chunk_manifest.json"
+
+
 def _load_fragment(path: Path) -> GraphFragment:
     data = json.loads(path.read_text(encoding="utf-8"))
     return GraphFragment.model_validate(data)
@@ -48,6 +52,57 @@ def _load_fragment(path: Path) -> GraphFragment:
 
 def _save_fragment(path: Path, fragment: GraphFragment) -> None:
     path.write_text(fragment.model_dump_json(indent=2), encoding="utf-8")
+
+
+def _build_chunk_manifest(
+    settings: Settings,
+    chunks: list[list[SemanticMarket]],
+) -> dict:
+    return {
+        "chunk_count": len(chunks),
+        "chunks": [[market.market_id for market in chunk] for chunk in chunks],
+        "max_markets_per_chunk": settings.max_markets_per_chunk,
+        "chunk_token_budget": settings.chunk_token_budget,
+        "chunk_output_token_budget": settings.chunk_output_token_budget,
+        "max_text_field_chars": settings.max_text_field_chars,
+        "n_ctx": settings.n_ctx,
+        "chunk_context_safety_margin": settings.chunk_context_safety_margin,
+    }
+
+
+def _chunk_manifest_matches(
+    settings: Settings,
+    event_id: str,
+    chunks: list[list[SemanticMarket]],
+) -> bool:
+    path = _chunk_manifest_path(settings, event_id)
+    if not path.exists():
+        return False
+    try:
+        saved = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return False
+    return saved == _build_chunk_manifest(settings, chunks)
+
+
+def _save_chunk_manifest(
+    settings: Settings,
+    event_id: str,
+    chunks: list[list[SemanticMarket]],
+) -> None:
+    path = _chunk_manifest_path(settings, event_id)
+    path.write_text(
+        json.dumps(_build_chunk_manifest(settings, chunks), indent=2),
+        encoding="utf-8",
+    )
+
+
+def _clear_part_fragments(settings: Settings, event_id: str) -> None:
+    for path in settings.fragments_dir.glob(f"{event_id}__part*.json"):
+        path.unlink()
+    manifest_path = _chunk_manifest_path(settings, event_id)
+    if manifest_path.exists():
+        manifest_path.unlink()
 
 
 def _chunk_max_tokens(settings: Settings, chunk_size: int) -> int:
@@ -128,6 +183,9 @@ def infer_event_fragments(
         )
         event_chunks[event_id] = chunks
 
+        if settings.resume and not _chunk_manifest_matches(settings, event_id, chunks):
+            _clear_part_fragments(settings, event_id)
+
         for idx, chunk in enumerate(chunks):
             part_path = _part_fragment_path(settings, event_id, idx)
             if settings.resume and part_path.exists():
@@ -158,9 +216,9 @@ def infer_event_fragments(
                 task = future_to_task[future]
                 try:
                     future.result()
-                except LLMInferenceError:
+                except Exception:
                     failed_events.add(task.event_id)
-                    logger.error(
+                    logger.exception(
                         "Inference failed for event %s chunk %d",
                         task.event_id,
                         task.chunk_index,
@@ -193,6 +251,7 @@ def infer_event_fragments(
         merged = merge_fragments(chunk_fragments)
         fragment_path = _fragment_path(settings, event_id)
         _save_fragment(fragment_path, merged)
+        _save_chunk_manifest(settings, event_id, chunks)
         results[event_id] = merged
         status[event_id] = "success"
 
@@ -219,7 +278,7 @@ def load_all_fragments(settings: Settings) -> dict[str, GraphFragment]:
     for path in sorted(settings.fragments_dir.glob("*.json")):
         if path.name.startswith("_"):
             continue
-        if "__part" in path.name:
+        if "__part" in path.name or "__chunk_manifest" in path.name:
             continue
         event_id = path.stem
         fragments[event_id] = _load_fragment(path)

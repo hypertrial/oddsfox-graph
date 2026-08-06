@@ -65,7 +65,7 @@ oddsgraph run             # full pipeline
 Global options (all commands):
 
 - `--build-dir <path>` — output directory for build artifacts
-- `--data-dir <path>` — directory containing source parquet files
+- `--data-dir <path>` — directory containing source parquet files (exclusive when set; no repo-root fallback)
 - `--verbose` / `-v` — enable INFO logging
 
 Infer / run options:
@@ -73,7 +73,9 @@ Infer / run options:
 - `--limit-events N`
 - `--event-id <id>` (repeatable)
 - `--model-path models/qwen3-4b-q4_k_m.gguf`
-- `--resume / --no-resume`
+- `--resume / --no-resume` — reuse completed event fragments and matching chunk
+  parts (default: on). Changing chunk settings clears stale `__part*.json` files
+  via a per-event chunk manifest
 - `--llm-backend inprocess|server` — in-process `llama-cpp-python` or remote `llama-server`
 - `--server-url http://127.0.0.1:8080` — base URL when using `--llm-backend server`
 - `--concurrency N` — concurrent LLM requests (server backend only)

@@ -112,12 +112,59 @@ def _register_tier(state: ResolutionState, tier: str) -> None:
     state.tier_counts[tier] = state.tier_counts.get(tier, 0) + 1
 
 
-def _merge_canonical(existing: CanonicalNode, node: Node, method: str) -> CanonicalNode:
+def _prepare_team_node(node: Node) -> Node:
+    """Canonicalize TEAM display names and retain the raw label as an alias."""
+    if node.type != NodeType.TEAM:
+        return node
+    canonical = ids.canonical_team_name(node.label)
+    if canonical == node.label:
+        return node
+    aliases = sorted({*node.aliases, node.label})
+    return node.model_copy(update={"label": canonical, "aliases": aliases})
+
+
+def _team_code_maps_to_label(code: str, label: str) -> bool:
+    mapped = ids.load_team_codes().get(code.lower())
+    if not mapped:
+        return False
+    return ids.normalize_label(ids.canonical_team_name(mapped)) == ids.normalize_label(
+        label
+    )
+
+
+def _team_alias_compatible(alias: str, node_label: str, existing_label: str) -> bool:
+    """Reject overloaded short codes that map to a different team than both sides."""
+    if alias.lower() not in ids.load_team_codes():
+        return True
+    return _team_code_maps_to_label(alias, node_label) and _team_code_maps_to_label(
+        alias, existing_label
+    )
+
+
+def _index_aliases(
+    canonical: CanonicalNode,
+    aliases: list[str],
+    by_alias: dict[tuple[NodeType, str], CanonicalNode],
+) -> None:
+    for alias in aliases:
+        by_alias[(canonical.type, ids.normalize_label(alias))] = canonical
+
+
+def _merge_canonical(
+    existing: CanonicalNode,
+    node: Node,
+    method: str,
+    by_slug: dict[tuple[NodeType, str], CanonicalNode],
+    by_label: dict[tuple[NodeType, str], CanonicalNode],
+    by_alias: dict[tuple[NodeType, str], CanonicalNode],
+    fuzzy_index: _FuzzyIndex,
+) -> CanonicalNode:
     merged_evidence = sorted(
         set(existing.evidence_market_ids) | set(node.evidence_market_ids)
     )
+    previous_aliases = set(existing.aliases) | {existing.label}
     merged_aliases = sorted(set(existing.aliases) | set(node.aliases) | {node.label})
-    return existing.model_copy(
+    merged = existing.model_copy(
         update={
             "confidence": max(existing.confidence, node.confidence),
             "evidence_market_ids": merged_evidence,
@@ -125,6 +172,13 @@ def _merge_canonical(existing: CanonicalNode, node: Node, method: str) -> Canoni
             "resolution_method": method,
         }
     )
+    by_slug[(merged.type, ids.slugify(merged.label))] = merged
+    by_label[(merged.type, ids.normalize_label(merged.label))] = merged
+    # Re-point all alias keys at the refreshed CanonicalNode, including newly merged ones.
+    _index_aliases(merged, merged_aliases + [merged.label], by_alias)
+    if node.label not in previous_aliases:
+        fuzzy_index.add(merged.type, node.label, merged.canonical_id)
+    return merged
 
 
 def _register_canonical(
@@ -152,10 +206,7 @@ def _register_canonical(
     state.local_to_canonical[node.local_id] = canonical_id
     by_slug[(node.type, ids.slugify(node.label))] = canonical
     by_label[(node.type, ids.normalize_label(node.label))] = canonical
-    for alias in node.aliases:
-        by_alias[(node.type, ids.normalize_label(alias))] = canonical
-    for alias in [node.label]:
-        by_alias[(node.type, ids.normalize_label(alias))] = canonical
+    _index_aliases(canonical, list(node.aliases) + [node.label], by_alias)
     fuzzy_index.add(node.type, node.label, canonical_id)
 
 
@@ -175,7 +226,7 @@ def resolve_fragments(
             else inference_method
         )
         for node in fragment.nodes:
-            all_nodes.append((node, method))
+            all_nodes.append((_prepare_team_node(node), method))
 
     competition_slug = _competition_slug_from_fragments(fragments)
     by_slug: dict[tuple[NodeType, str], CanonicalNode] = {}
@@ -191,7 +242,13 @@ def resolve_fragments(
             if polymarket_id in state.canonical_nodes:
                 existing = state.canonical_nodes[polymarket_id]
                 state.canonical_nodes[polymarket_id] = _merge_canonical(
-                    existing, node, "exact_id"
+                    existing,
+                    node,
+                    "exact_id",
+                    by_slug,
+                    by_label,
+                    by_alias,
+                    fuzzy_index,
                 )
                 state.local_to_canonical[node.local_id] = polymarket_id
                 _register_tier(state, "exact_id")
@@ -215,7 +272,13 @@ def resolve_fragments(
         if slug_key in by_slug:
             existing = by_slug[slug_key]
             state.canonical_nodes[existing.canonical_id] = _merge_canonical(
-                existing, node, "exact_slug"
+                existing,
+                node,
+                "exact_slug",
+                by_slug,
+                by_label,
+                by_alias,
+                fuzzy_index,
             )
             state.local_to_canonical[node.local_id] = existing.canonical_id
             _register_tier(state, "exact_slug")
@@ -226,7 +289,13 @@ def resolve_fragments(
         if label_key in by_label:
             existing = by_label[label_key]
             state.canonical_nodes[existing.canonical_id] = _merge_canonical(
-                existing, node, "exact_label"
+                existing,
+                node,
+                "exact_label",
+                by_slug,
+                by_label,
+                by_alias,
+                fuzzy_index,
             )
             state.local_to_canonical[node.local_id] = existing.canonical_id
             _register_tier(state, "exact_label")
@@ -238,20 +307,39 @@ def resolve_fragments(
             alias_key = (node.type, ids.normalize_label(alias))
             if alias_key in by_alias:
                 existing = by_alias[alias_key]
-                state.canonical_nodes[existing.canonical_id] = _merge_canonical(
-                    existing, node, "alias"
-                )
-                state.local_to_canonical[node.local_id] = existing.canonical_id
-                _register_tier(state, "alias")
-                alias_matched = True
-                break
+                if node.type != NodeType.TEAM or _team_alias_compatible(
+                    alias, node.label, existing.label
+                ):
+                    state.canonical_nodes[existing.canonical_id] = _merge_canonical(
+                        existing,
+                        node,
+                        "alias",
+                        by_slug,
+                        by_label,
+                        by_alias,
+                        fuzzy_index,
+                    )
+                    state.local_to_canonical[node.local_id] = existing.canonical_id
+                    _register_tier(state, "alias")
+                    alias_matched = True
+                    break
             if node.type == NodeType.TEAM:
+                # Only expand codes that belong to this team's mapped identity
+                # (Polymarket reuses FIFA-looking codes such as kor→Curaçao).
+                if not _team_code_maps_to_label(alias, node.label):
+                    continue
                 for code_alias in ids.team_aliases_from_code(alias):
                     code_key = (node.type, ids.normalize_label(code_alias))
                     if code_key in by_alias:
                         existing = by_alias[code_key]
                         state.canonical_nodes[existing.canonical_id] = _merge_canonical(
-                            existing, node, "alias"
+                            existing,
+                            node,
+                            "alias",
+                            by_slug,
+                            by_label,
+                            by_alias,
+                            fuzzy_index,
                         )
                         state.local_to_canonical[node.local_id] = existing.canonical_id
                         _register_tier(state, "alias")
@@ -271,7 +359,13 @@ def resolve_fragments(
         if best_canonical_id is not None:
             best_canonical = state.canonical_nodes[best_canonical_id]
             state.canonical_nodes[best_canonical_id] = _merge_canonical(
-                best_canonical, node, "fuzzy"
+                best_canonical,
+                node,
+                "fuzzy",
+                by_slug,
+                by_label,
+                by_alias,
+                fuzzy_index,
             )
             state.local_to_canonical[node.local_id] = best_canonical_id
             _register_tier(state, "fuzzy")
@@ -281,7 +375,15 @@ def resolve_fragments(
         new_id = _suggested_canonical_id(node, competition_slug)
         if new_id in state.canonical_nodes:
             existing = state.canonical_nodes[new_id]
-            state.canonical_nodes[new_id] = _merge_canonical(existing, node, "new_entity")
+            state.canonical_nodes[new_id] = _merge_canonical(
+                existing,
+                node,
+                "new_entity",
+                by_slug,
+                by_label,
+                by_alias,
+                fuzzy_index,
+            )
             state.local_to_canonical[node.local_id] = new_id
             _register_tier(state, "new_entity")
         else:

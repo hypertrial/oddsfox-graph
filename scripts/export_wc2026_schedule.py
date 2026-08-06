@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
-"""One-time export of the FIFA-reviewed WC2026 schedule into oddsgraph/data.
+"""Export FIFA-reviewed WC2026 fixtures from oddsfox-pipeline DuckDB.
 
-Reads oddsfox-pipeline's local DuckDB warehouse and writes
-``oddsgraph/data/wc2026_schedule.json``. Not used at runtime by oddsgraph.
+Writes ``oddsgraph/data/wc2026_schedule.json`` for ``oddsgraph.bracket``.
 """
 
 from __future__ import annotations

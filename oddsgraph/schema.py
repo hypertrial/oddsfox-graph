@@ -38,10 +38,9 @@ class GraphFragment(BaseModel):
 
 
 def merge_fragments(fragments: list[GraphFragment]) -> GraphFragment:
-    """Merge fragment nodes/edges, unioning evidence and aliases by local_id."""
+    """Merge fragment nodes/edges, unioning evidence and taking max confidence."""
     nodes_by_id: dict[str, Node] = {}
-    edges_seen: set[tuple[str, str, str]] = set()
-    edges: list[Edge] = []
+    edges_by_key: dict[tuple[str, str, str], Edge] = {}
 
     for fragment in fragments:
         for node in fragment.nodes:
@@ -62,12 +61,27 @@ def merge_fragments(fragments: list[GraphFragment]) -> GraphFragment:
                 )
         for edge in fragment.edges:
             key = (edge.source, edge.target, edge.type.value)
-            if key in edges_seen:
+            existing = edges_by_key.get(key)
+            if existing is None:
+                edges_by_key[key] = edge
                 continue
-            edges_seen.add(key)
-            edges.append(edge)
+            primary = existing if existing.confidence >= edge.confidence else edge
+            secondary = edge if primary is existing else existing
+            merged_evidence = sorted(
+                set(existing.evidence_market_ids) | set(edge.evidence_market_ids)
+            )
+            edges_by_key[key] = primary.model_copy(
+                update={
+                    "confidence": max(existing.confidence, edge.confidence),
+                    "evidence_market_ids": merged_evidence,
+                    "evidence_text": primary.evidence_text or secondary.evidence_text,
+                }
+            )
 
-    return GraphFragment(nodes=list(nodes_by_id.values()), edges=edges)
+    return GraphFragment(
+        nodes=list(nodes_by_id.values()),
+        edges=list(edges_by_key.values()),
+    )
 
 
 class CanonicalNode(BaseModel):

@@ -9,7 +9,7 @@ from oddsgraph.config import Settings
 from oddsgraph.infer import infer_event_fragments
 from oddsgraph.llm import BaseGraphLLM
 from oddsgraph.prompts import chunk_markets_for_prompt
-from oddsgraph.schema import GraphFragment, SemanticMarket
+from oddsgraph.schema import SemanticMarket
 
 
 class _RecordingGraphLLM(BaseGraphLLM):
