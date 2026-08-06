@@ -101,7 +101,12 @@ def main() -> None:
         type=Path,
         default=Path("build/finetune"),
     )
-    parser.add_argument("--val-ratio", type=float, default=0.1)
+    parser.add_argument(
+        "--val-ratio",
+        type=float,
+        default=0.1,
+        help="Fraction of rows for validation; must be in [0, 1)",
+    )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument(
         "--format",
@@ -153,11 +158,18 @@ def main() -> None:
 
     if not rows:
         raise SystemExit("No training rows produced (need fragments + matching markets)")
+    if not 0.0 <= args.val_ratio < 1.0:
+        raise SystemExit("--val-ratio must be in [0, 1)")
 
     random.Random(args.seed).shuffle(rows)
-    val_count = max(1, int(len(rows) * args.val_ratio)) if len(rows) > 1 else 0
+    if len(rows) > 1 and args.val_ratio > 0:
+        val_count = max(1, int(len(rows) * args.val_ratio))
+        # Always leave at least one training row.
+        val_count = min(val_count, len(rows) - 1)
+    else:
+        val_count = 0
     val_rows = rows[:val_count]
-    train_rows = rows[val_count:] or rows
+    train_rows = rows[val_count:]
 
     train_path = args.output_dir / "train.jsonl"
     val_path = args.output_dir / "valid.jsonl"

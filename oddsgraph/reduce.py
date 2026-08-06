@@ -17,6 +17,16 @@ from oddsgraph.schema import SemanticMarket
 logger = logging.getLogger(__name__)
 
 
+def quote_sql_literal(value: str) -> str:
+    """Escape a string for safe inclusion in a DuckDB single-quoted literal."""
+    return value.replace("'", "''")
+
+
+def quote_path(path: Path | str) -> str:
+    """Escape a filesystem path for DuckDB ``read_parquet('...')`` literals."""
+    return quote_sql_literal(str(path))
+
+
 def _parse_json_list(value: Any) -> list[str] | None:
     if value is None:
         return None
@@ -48,7 +58,8 @@ def _rows_to_semantic_markets(rows: list[dict[str, Any]]) -> list[SemanticMarket
 def list_semantic_market_event_ids(path: Path) -> list[str]:
     con = duckdb.connect()
     rows = con.execute(
-        f"SELECT DISTINCT event_id FROM read_parquet('{path}') ORDER BY event_id"
+        f"SELECT DISTINCT event_id FROM read_parquet('{quote_path(path)}') "
+        "ORDER BY event_id"
     ).fetchall()
     con.close()
     return [str(row[0]) for row in rows]
@@ -90,7 +101,7 @@ def reduce_semantic_markets(settings: Settings) -> Path:
             any_value(event_tags) AS event_tags,
             any_value(game_start_time) AS game_start_time,
             any_value(end_time) AS end_time
-        FROM read_parquet('{input_glob}')
+        FROM read_parquet('{quote_path(input_glob)}')
         GROUP BY market_id
     """
     con = duckdb.connect()
@@ -116,10 +127,12 @@ def load_semantic_markets(
         if not event_ids:
             return []
         con = duckdb.connect()
-        placeholders = ", ".join(f"'{event_id}'" for event_id in event_ids)
+        placeholders = ", ".join(
+            f"'{quote_sql_literal(str(event_id))}'" for event_id in event_ids
+        )
         query = f"""
             SELECT *
-            FROM read_parquet('{path}')
+            FROM read_parquet('{quote_path(path)}')
             WHERE event_id IN ({placeholders})
         """
         arrow_result = con.execute(query).arrow()

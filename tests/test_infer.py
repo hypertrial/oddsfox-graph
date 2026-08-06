@@ -5,10 +5,19 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from oddsgraph.config import Settings
-from oddsgraph.infer import infer_event_fragments
+from oddsgraph.infer import (
+    _chunk_manifest_path,
+    _fragment_path,
+    _part_fragment_path,
+    _verified_fragment_path,
+    infer_event_fragments,
+)
 from oddsgraph.llm import BaseGraphLLM
 from oddsgraph.ontology import NodeType
+from oddsgraph.paths import sanitize_event_id_for_path
 from oddsgraph.reporting import load_inference_report
 from oddsgraph.schema import GraphFragment, Node, SemanticMarket
 
@@ -217,3 +226,40 @@ def test_verify_deterministic_marks_verified_and_corrected(tmp_path: Path) -> No
         "deterministic_verified",
     }
     assert (settings.fragments_dir / "match-evt__verified.json").exists()
+
+
+@pytest.mark.parametrize(
+    "event_id",
+    [
+        "../escape",
+        "nested/path",
+        "nested\\path",
+        "",
+        ".",
+        "..",
+        "has space",
+        "O'Brien",
+    ],
+)
+def test_fragment_paths_reject_unsafe_event_ids(
+    tmp_path: Path, event_id: str
+) -> None:
+    settings = _settings(tmp_path)
+    with pytest.raises(ValueError, match="Unsafe event_id"):
+        _fragment_path(settings, event_id)
+    with pytest.raises(ValueError, match="Unsafe event_id"):
+        _part_fragment_path(settings, event_id, 0)
+    with pytest.raises(ValueError, match="Unsafe event_id"):
+        _chunk_manifest_path(settings, event_id)
+    with pytest.raises(ValueError, match="Unsafe event_id"):
+        _verified_fragment_path(settings, event_id)
+
+
+def test_fragment_paths_stay_under_fragments_dir(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    event_id = "12345"
+    assert sanitize_event_id_for_path(event_id) == event_id
+    path = _fragment_path(settings, event_id)
+    assert path.parent == settings.fragments_dir
+    assert path.name == "12345.json"
+    assert path.resolve().is_relative_to(settings.fragments_dir.resolve())

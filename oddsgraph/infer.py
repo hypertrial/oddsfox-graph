@@ -11,6 +11,7 @@ from pathlib import Path
 
 from oddsgraph.config import Settings
 from oddsgraph.llm import BaseGraphLLM, build_graph_llm
+from oddsgraph.paths import event_artifact_path, sanitize_event_id_for_path
 from oddsgraph.prompts import (
     build_event_prompt,
     build_verification_prompt,
@@ -43,19 +44,25 @@ class _VerifyTask:
 
 
 def _fragment_path(settings: Settings, event_id: str) -> Path:
-    return settings.fragments_dir / f"{event_id}.json"
+    return event_artifact_path(settings.fragments_dir, event_id, ".json")
 
 
 def _part_fragment_path(settings: Settings, event_id: str, part: int) -> Path:
-    return settings.fragments_dir / f"{event_id}__part{part}.json"
+    return event_artifact_path(
+        settings.fragments_dir, event_id, f"__part{part}.json"
+    )
 
 
 def _chunk_manifest_path(settings: Settings, event_id: str) -> Path:
-    return settings.fragments_dir / f"{event_id}__chunk_manifest.json"
+    return event_artifact_path(
+        settings.fragments_dir, event_id, "__chunk_manifest.json"
+    )
 
 
 def _verified_fragment_path(settings: Settings, event_id: str) -> Path:
-    return settings.fragments_dir / f"{event_id}__verified.json"
+    return event_artifact_path(
+        settings.fragments_dir, event_id, "__verified.json"
+    )
 
 
 def _load_fragment(path: Path) -> GraphFragment:
@@ -111,9 +118,10 @@ def _save_chunk_manifest(
 
 
 def _clear_part_fragments(settings: Settings, event_id: str) -> None:
-    for path in settings.fragments_dir.glob(f"{event_id}__part*.json"):
+    safe = sanitize_event_id_for_path(event_id)
+    for path in settings.fragments_dir.glob(f"{safe}__part*.json"):
         path.unlink()
-    manifest_path = _chunk_manifest_path(settings, event_id)
+    manifest_path = _chunk_manifest_path(settings, safe)
     if manifest_path.exists():
         manifest_path.unlink()
 

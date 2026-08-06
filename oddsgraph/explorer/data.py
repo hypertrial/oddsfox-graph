@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any
 
 import duckdb
@@ -16,6 +15,7 @@ from oddsgraph.explorer.presentation import (
     short_match_label,
     stage_rank,
 )
+from oddsgraph.reduce import quote_path
 
 
 @dataclass
@@ -27,10 +27,6 @@ class GraphSlice:
 
     def to_elements(self) -> list[dict[str, Any]]:
         return [*self.nodes, *self.edges]
-
-
-def _quote_path(path: Path) -> str:
-    return str(path).replace("'", "''")
 
 
 def _connect() -> duckdb.DuckDBPyConnection:
@@ -91,8 +87,8 @@ def _fetch_dicts(conn: duckdb.DuckDBPyConnection, sql: str, params: list[Any] | 
 
 def topology_elements(settings: Settings) -> GraphSlice:
     """Return the competition/stage/group/round/match/team subgraph."""
-    nodes_path = _quote_path(settings.nodes_path)
-    edges_path = _quote_path(settings.edges_path)
+    nodes_path = quote_path(settings.nodes_path)
+    edges_path = quote_path(settings.edges_path)
     topology_types = sorted(TOPOLOGY_NODE_TYPES)
     placeholders = ", ".join(["?"] * len(topology_types))
 
@@ -135,8 +131,8 @@ def bracket_elements(settings: Settings) -> GraphSlice:
     Each MATCH node is enriched with ``stage``, ``stage_rank``, ``short_label``,
     and a deterministic left-to-right ``position`` for the preset bracket layout.
     """
-    nodes_path = _quote_path(settings.nodes_path)
-    edges_path = _quote_path(settings.edges_path)
+    nodes_path = quote_path(settings.nodes_path)
+    edges_path = quote_path(settings.edges_path)
     stage_labels = sorted(KNOCKOUT_STAGE_LABELS)
     placeholders = ", ".join(["?"] * len(stage_labels))
 
@@ -201,7 +197,7 @@ def search_nodes(settings: Settings, query: str, limit: int = 25) -> list[dict[s
     if limit < 1:
         return []
 
-    nodes_path = _quote_path(settings.nodes_path)
+    nodes_path = quote_path(settings.nodes_path)
     pattern = f"%{_escape_like(cleaned)}%"
     with _connect() as conn:
         rows = _fetch_dicts(
@@ -254,8 +250,8 @@ def node_neighbors(settings: Settings, node_id: str, limit: int = 300) -> GraphS
     if limit < 1:
         return GraphSlice()
 
-    nodes_path = _quote_path(settings.nodes_path)
-    edges_path = _quote_path(settings.edges_path)
+    nodes_path = quote_path(settings.nodes_path)
+    edges_path = quote_path(settings.edges_path)
 
     with _connect() as conn:
         edges = _fetch_dicts(
@@ -299,7 +295,7 @@ def get_node(settings: Settings, node_id: str) -> dict[str, Any] | None:
     """Return a single node row, or None if missing."""
     if not node_id:
         return None
-    nodes_path = _quote_path(settings.nodes_path)
+    nodes_path = quote_path(settings.nodes_path)
     with _connect() as conn:
         rows = _fetch_dicts(
             conn,
@@ -323,7 +319,7 @@ def get_edge(
     """Return a single edge row, or None if missing."""
     if not source_id or not target_id or not edge_type:
         return None
-    edges_path = _quote_path(settings.edges_path)
+    edges_path = quote_path(settings.edges_path)
     with _connect() as conn:
         rows = _fetch_dicts(
             conn,
@@ -359,8 +355,8 @@ def graph_counts(settings: Settings) -> dict[str, Any]:
         except (OSError, json.JSONDecodeError, TypeError, ValueError):
             pass
 
-    nodes_path = _quote_path(settings.nodes_path)
-    edges_path = _quote_path(settings.edges_path)
+    nodes_path = quote_path(settings.nodes_path)
+    edges_path = quote_path(settings.edges_path)
     with _connect() as conn:
         node_rows = _fetch_dicts(
             conn,

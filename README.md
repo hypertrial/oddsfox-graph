@@ -284,6 +284,7 @@ uv run python scripts/export_finetune_dataset.py \
   --markets build/semantic_markets.parquet \
   --fragments-dir build/fragments \
   --output-dir build/finetune
+# --val-ratio must be in [0, 1); default 0.1
 
 # 2) Train LoRA adapter (Apple Silicon + --extra mlx)
 uv run python scripts/finetune_lora.py \

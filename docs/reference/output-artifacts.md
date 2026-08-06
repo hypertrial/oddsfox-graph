@@ -65,6 +65,10 @@ Schema from `InferenceReport`:
 | `semantic_markets.parquet` | Reduced market records |
 | `fragments/<event_id>.json` | Per-event graph fragments |
 
+Fragment filenames use a single path-safe `event_id` segment matching
+`[A-Za-z0-9._-]+`. IDs with path separators, spaces, or `..` are rejected so
+writes cannot escape `build/fragments/` (or nest under unexpected directories).
+
 ## See also
 
 - [Ontology](ontology.md)

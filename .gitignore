@@ -9,6 +9,8 @@ dist/
 .pytest_cache/
 .ruff_cache/
 .DS_Store
+.venv-vercel/
+.venv-vercel-test/
 
 # WC2026 hourly-odds source data (large, not versioned)
 /polymarket_wc2026_market_hourly_odds_*.parquet

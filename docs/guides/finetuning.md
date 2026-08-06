@@ -19,6 +19,10 @@ uv run python scripts/finetune_lora.py
 uv run python scripts/eval_finetuned_model.py
 ```
 
+`export_finetune_dataset.py` accepts `--val-ratio` in `[0, 1)` (default `0.1`).
+Values of `1.0` or higher are rejected, and the split always keeps at least one
+training row so `train.jsonl` and `valid.jsonl` never become identical.
+
 Exact flags and paths evolve with the residual pipeline; prefer `--help` on each
 script and keep fine-tuned weights out of git.
 

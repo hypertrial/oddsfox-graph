@@ -10,6 +10,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from oddsgraph.config import Settings
+from oddsgraph.paths import event_artifact_path
 from oddsgraph.prompts import ALLOWED_EDGE_TYPES, ALLOWED_NODE_TYPES
 from oddsgraph.schema import CompactGraphFragment, GraphFragment
 
@@ -98,7 +99,17 @@ class BaseGraphLLM(ABC):
         error: Exception | None,
     ) -> None:
         self.settings.failed_fragments_dir.mkdir(parents=True, exist_ok=True)
-        path = self.settings.failed_fragments_dir / f"{event_id}.txt"
+        try:
+            path = event_artifact_path(
+                self.settings.failed_fragments_dir, event_id, ".txt"
+            )
+        except ValueError as exc:
+            logger.warning(
+                "Skipping failed-output dump for unsafe event_id %r: %s",
+                event_id,
+                exc,
+            )
+            return
         path.write_text(
             f"error: {error}\n\nraw_output:\n{raw_output}",
             encoding="utf-8",

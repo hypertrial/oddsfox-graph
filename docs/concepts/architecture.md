@@ -25,7 +25,7 @@ flowchart LR
 2. **infer** — For each event:
    - apply deterministic topology templates when possible
    - otherwise chunk markets and run structured local LLM extraction
-   - write `build/fragments/<event_id>.json`
+   - write `build/fragments/<event_id>.json` (path-safe `event_id` only)
 3. **build** — Optionally inject the official WC2026 bracket, resolve fragment
    nodes into canonical IDs, validate ontology patterns, apply confidence
    filters, and export parquet / JSON.

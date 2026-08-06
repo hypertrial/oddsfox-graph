@@ -88,6 +88,18 @@ def test_generate_fragment_raises_after_retries(tmp_path) -> None:
     assert failed.exists()
 
 
+def test_write_failed_output_rejects_path_escape(tmp_path) -> None:
+    settings = Settings()
+    settings.build_dir = tmp_path
+    settings.failed_fragments_dir = tmp_path / "failed"
+    settings.max_retries = 0
+    llm = _StubGraphLLM(settings, ["not-json"])
+    with pytest.raises(LLMInferenceError):
+        llm.generate_fragment("prompt", "../escape")
+    assert not (tmp_path / "escape.txt").exists()
+    assert list(tmp_path.glob("**/*.txt")) == []
+
+
 def test_filter_llm_fragment_removes_disallowed_types(tmp_path) -> None:
     settings = Settings()
     fragment = GraphFragment.model_validate(

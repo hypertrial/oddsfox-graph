@@ -167,7 +167,6 @@ def build_event_prompt(
 ) -> str:
     event_title = markets[0].event_title if markets else event_id
     event_slug = markets[0].event_slug if markets else None
-    question = markets[0].question if markets else None
     payload = {
         "event_id": event_id,
         "event_title": event_title,
