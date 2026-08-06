@@ -19,11 +19,14 @@ dependencies = [
     "rapidfuzz>=3.10",
     "rustworkx>=0.15",
     "typer>=0.15",
+    "outlines>=1.3.3",
+    "numba>=0.66.0",
 ]
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
 explore = ["dash>=2.18", "dash-cytoscape>=1.0"]
+mlx = ["mlx-lm>=0.22", "outlines>=1.0"]
 
 [project.scripts]
 oddsgraph = "oddsgraph.cli:app"

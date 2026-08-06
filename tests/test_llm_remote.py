@@ -12,7 +12,7 @@ from oddsgraph.llm_remote import RemoteGraphLLM, _SERVER_START_HINT
 
 
 def _valid_response_content() -> str:
-    return json.dumps({"nodes": [], "edges": []})
+    return json.dumps({"n": [], "g": []})
 
 
 def test_remote_graph_llm_posts_grammar_and_messages(tmp_path) -> None:
@@ -47,7 +47,8 @@ def test_remote_graph_llm_posts_grammar_and_messages(tmp_path) -> None:
     assert body["max_tokens"] == 256
     assert "grammar" in body
     assert len(body["grammar"]) > 100
-    assert body["messages"][1]["content"] == "user prompt"
+    assert body["messages"][1]["content"] == "user prompt\n/no_think"
+    assert "/no_think" in body["messages"][0]["content"]
 
 
 def test_remote_graph_llm_health_failure_raises_with_hint(tmp_path) -> None:

@@ -74,13 +74,19 @@ Infer / run options:
 - `--limit-events N`
 - `--event-id <id>` (repeatable)
 - `--model-path models/qwen3-4b-q4_k_m.gguf`
+- `--mlx-model-path models/qwen3-4b-mlx` — MLX model directory when `--llm-backend mlx`
 - `--resume / --no-resume` — reuse completed event fragments and matching chunk
   parts (default: on). Changing chunk settings clears stale `__part*.json` files
   via a per-event chunk manifest
-- `--llm-backend inprocess|server` — in-process `llama-cpp-python` or remote `llama-server`
+- `--llm-backend inprocess|server|mlx` — in-process llama.cpp+outlines (default),
+  remote `llama-server`, or Apple Silicon `mlx-lm`+outlines
 - `--server-url http://127.0.0.1:8080` — base URL when using `--llm-backend server`
-- `--concurrency N` — concurrent LLM requests (server backend only; prefer this for full-dataset runs)
+- `--concurrency N` — concurrent LLM requests (server backend only)
 - `--deterministic-topology / --no-deterministic-topology` — extract TEAM/MATCH/GROUP/STAGE topology without LLM when possible (default: on)
+- `--verify-deterministic / --no-verify-deterministic` — opt-in LLM confirm/patch
+  pass over deterministic topology (default: **off**)
+- `--few-shot / --no-few-shot` — include rapidfuzz-ranked curated exemplars in
+  residual LLM prompts (default: on)
 
 ### Deterministic topology (default on)
 
@@ -111,6 +117,27 @@ Escape hatch:
 ```bash
 oddsgraph infer --no-deterministic-topology
 ```
+
+### LLM verification tier (opt-in, default off)
+
+When enabled, every deterministic-covered event gets a cheap LLM confirm/patch
+pass instead of trusting the template mapping alone:
+
+```bash
+oddsgraph infer --verify-deterministic
+```
+
+Statuses in `inference_report.json`:
+
+- `deterministic_verified` — LLM returned the same topology
+- `deterministic_corrected` — LLM returned a patched fragment (saved as
+  `build/fragments/<event_id>__verified.json`)
+
+### Few-shot exemplars (default on)
+
+Residual LLM prompts include up to `few_shot_top_k` curated examples from
+`oddsgraph/data/llm_exemplars.json`, ranked with `rapidfuzz` against the current
+event title/question. Disable with `--no-few-shot`.
 
 ### Official WC2026 bracket (default on)
 
@@ -150,37 +177,113 @@ Configured in `Settings` defaults in `oddsgraph/config.py`:
 
 | Setting | Default | Purpose |
 |---------|---------|---------|
-| `n_ctx` | 12288 | Model context window (input + output per chunk) |
-| `chunk_token_budget` | 7000 | Max estimated input tokens per LLM chunk |
+| `n_ctx` | 8192 | Model context window (input + output per chunk) |
+| `chunk_token_budget` | 5000 | Max estimated input tokens per LLM chunk |
 | `chunk_output_token_budget` | 4096 | Max estimated output tokens per chunk |
 | `max_markets_per_chunk` | 24 | Hard cap on markets per chunk |
 | `max_text_field_chars` | 500 | Truncate long description fields in prompts |
 | `flash_attn` | true | Enable Metal flash attention (in-process backend) |
 | `n_batch` / `n_ubatch` | 1024 | llama.cpp batch sizes (in-process backend) |
-| `llm_concurrency` | 4 | Concurrent requests when `--llm-backend server` |
-| `deterministic_topology` | true | Skip LLM for template-covered events |
+| `llm_concurrency` | 2 | Concurrent requests when `--llm-backend server` |
+| `deterministic_topology` | true | Skip full extraction for template-covered events |
+| `verify_deterministic` | false | Opt-in LLM confirm/patch over deterministic events |
+| `use_few_shot_exemplars` | true | Inject curated few-shot examples into residual prompts |
+| `few_shot_top_k` | 2 | How many exemplars to include |
 | `official_bracket` | true | Inject curated FIFA schedule bracket on build |
 | `competition_label` | World Cup 2026 | Label/slug for COMPETITION nodes |
 
-### Faster infer with llama-server (optional)
+### Faster inference: outlines-constrained decoding
 
-For large full-dataset runs on Apple Silicon, start `llama-server` with continuous
-batching and point oddsgraph at it:
+Raw llama.cpp JSON-schema GBNF grammars are slow on large-vocab models (Qwen3
+~152k tokens): the sampler walks the vocab on CPU every decode step. oddsgraph
+now uses [`outlines`](https://github.com/dottxt-ai/outlines) FSM constrained
+decoding for the `inprocess` and `mlx` backends, plus a compact wire schema
+(`CompactGraphFragment` with short keys) to shrink required output tokens.
+Qwen3 thinking mode is disabled via `/no_think` so decode budget goes to JSON.
+
+Measured on Apple M4 (32GB) with `qwen3-4b-q4_k_m.gguf`, warm inprocess decode:
+
+| Backend | Constraint | Approx tok/s |
+|---------|------------|--------------|
+| `server` (prior) | llama.cpp GBNF | ~3.7–5.2 |
+| `inprocess` (now) | outlines FSM + compact JSON | ~8.7–14.5 |
+
+**Recommended local paths:** `--llm-backend inprocess` (default) or `mlx`.
+The `server` backend still uses GBNF over HTTP and is mainly for out-of-process
+pipelining — expect it to be slower per token.
+
+Benchmark locally:
 
 ```bash
-llama-server -m models/qwen3-4b-q4_k_m.gguf -ngl -1 -c 12288 -np 4 -cb -fa on \
+uv run python scripts/benchmark_infer.py \
+  --markets build/semantic_markets.parquet \
+  --backends inprocess --limit 1 --n-ctx 4096,8192 \
+  --event-id <residual-event-id>
+```
+
+Results write to `build/benchmark_report.json` (includes a Markdown table).
+
+### MLX backend (Apple Silicon)
+
+```bash
+uv sync --frozen --extra mlx
+# Convert an instruct checkpoint (example):
+uv run python -m mlx_lm.convert \
+  --hf-path Qwen/Qwen3-4B \
+  --mlx-path models/qwen3-4b-mlx -q
+
+oddsgraph infer --llm-backend mlx --mlx-model-path models/qwen3-4b-mlx
+```
+
+Live MLX integration test:
+
+```bash
+ODDSGRAPH_LIVE_MLX_TEST=1 uv run pytest -m integration -k mlx
+```
+
+### Faster infer with llama-server (optional)
+
+For out-of-process pipelining on Apple Silicon, start `llama-server`:
+
+```bash
+llama-server -m models/qwen3-4b-q4_k_m.gguf -ngl -1 -c 8192 -np 2 -cb -fa on \
   --host 127.0.0.1 --port 8080
 ```
 
-Then run infer (or the full pipeline) against the server:
+Then:
 
 ```bash
-oddsgraph run --llm-backend server --concurrency 4
+oddsgraph run --llm-backend server --concurrency 2
 ```
 
-Install `llama-server` via Homebrew: `brew install llama.cpp`. The default
-in-process backend (`--llm-backend inprocess`) remains the default and does not
-require a separate server process.
+Install `llama-server` via Homebrew: `brew install llama.cpp`. Prefer
+`inprocess`/`mlx` for single-machine speed.
+
+### Fine-tuning / self-distillation (MLX LoRA)
+
+Use deterministic/verified fragments as teacher labels:
+
+```bash
+# 1) Export chat JSONL from fragments + markets
+uv run python scripts/export_finetune_dataset.py \
+  --markets build/semantic_markets.parquet \
+  --fragments-dir build/fragments \
+  --output-dir build/finetune
+
+# 2) Train LoRA adapter (Apple Silicon + --extra mlx)
+uv run python scripts/finetune_lora.py \
+  --model models/qwen3-4b-mlx \
+  --data build/finetune \
+  --iters 200
+
+# 3) Evaluate node/edge F1 on the held-out split
+uv run python scripts/eval_finetuned_model.py \
+  --model models/qwen3-4b-mlx \
+  --adapter-path build/finetune/adapters \
+  --valid build/finetune/valid.jsonl
+```
+
+Point `--mlx-model-path` at a fused/adapted model once eval F1 looks good.
 
 ## Output artifacts
 
@@ -223,9 +326,11 @@ to explore the market layer independently.
 - `duckdb` — query and reduce parquet
 - `httpx` — optional `llama-server` HTTP client
 - `llama-cpp-python` — local Metal-accelerated inference
-- `Qwen3-4B-Q4_K_M` — initial local model
+- `outlines` — FSM constrained decoding for structured JSON
+- `mlx-lm` — optional Apple Silicon backend (`--extra mlx`)
+- `Qwen3-4B-Q4_K_M` — initial local GGUF model
 - `pydantic` — constrained graph output schema
-- `rapidfuzz` — entity and alias matching
+- `rapidfuzz` — entity, alias, and few-shot exemplar matching
 - `rustworkx` — graph construction and validation
 - `typer` — CLI
 - `dash` / `dash-cytoscape` — optional local graph explorer (`--extra explore`)
@@ -247,4 +352,10 @@ Live server integration tests (optional, requires running `llama-server`):
 
 ```bash
 ODDSGRAPH_LIVE_SERVER_TEST=1 uv run pytest -m integration
+```
+
+Live MLX integration tests (optional, Apple Silicon + converted MLX model):
+
+```bash
+ODDSGRAPH_LIVE_MLX_TEST=1 uv run pytest -m integration -k mlx
 ```

@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
 from oddsgraph.ontology import EdgeType, NodeType
+
+
+LLMNodeType = Literal["COMPETITION", "STAGE", "GROUP", "ROUND", "MATCH", "TEAM"]
+LLMEdgeType = Literal["PART_OF", "PARTICIPATES_IN", "QUALIFIES_FOR", "ADVANCES_TO"]
 
 
 class Node(BaseModel):
@@ -35,6 +39,109 @@ class Edge(BaseModel):
 class GraphFragment(BaseModel):
     nodes: list[Node] = Field(default_factory=list)
     edges: list[Edge] = Field(default_factory=list)
+
+
+class CompactNode(BaseModel):
+    """Short-key wire format for LLM structured output (fewer decode tokens)."""
+
+    id: str
+    t: LLMNodeType
+    l: str
+    a: list[str] = Field(default_factory=list)
+    c: float = Field(ge=0.0, le=1.0)
+    e: list[str] = Field(min_length=1)
+
+    def to_node(self) -> Node:
+        return Node(
+            local_id=self.id,
+            type=NodeType(self.t),
+            label=self.l,
+            aliases=self.a,
+            confidence=self.c,
+            evidence_market_ids=self.e,
+        )
+
+    @classmethod
+    def from_node(cls, node: Node) -> CompactNode:
+        return cls(
+            id=node.local_id,
+            t=node.type.value,  # type: ignore[arg-type]
+            l=node.label,
+            a=list(node.aliases),
+            c=node.confidence,
+            e=list(node.evidence_market_ids),
+        )
+
+
+class CompactEdge(BaseModel):
+    s: str
+    d: str
+    t: LLMEdgeType
+    c: float = Field(ge=0.0, le=1.0)
+    e: list[str] = Field(min_length=1)
+    x: str = ""
+
+    def to_edge(self) -> Edge:
+        return Edge(
+            source=self.s,
+            target=self.d,
+            type=EdgeType(self.t),
+            confidence=self.c,
+            evidence_market_ids=self.e,
+            evidence_text=self.x,
+        )
+
+    @classmethod
+    def from_edge(cls, edge: Edge) -> CompactEdge:
+        return cls(
+            s=edge.source,
+            d=edge.target,
+            t=edge.type.value,  # type: ignore[arg-type]
+            c=edge.confidence,
+            e=list(edge.evidence_market_ids),
+            x=edge.evidence_text,
+        )
+
+
+class CompactGraphFragment(BaseModel):
+    n: list[CompactNode] = Field(default_factory=list)
+    g: list[CompactEdge] = Field(default_factory=list)
+
+    def to_graph_fragment(self) -> GraphFragment:
+        return GraphFragment(
+            nodes=[node.to_node() for node in self.n],
+            edges=[edge.to_edge() for edge in self.g],
+        )
+
+    @classmethod
+    def from_graph_fragment(cls, fragment: GraphFragment) -> CompactGraphFragment:
+        allowed_nodes = {
+            "COMPETITION",
+            "STAGE",
+            "GROUP",
+            "ROUND",
+            "MATCH",
+            "TEAM",
+        }
+        allowed_edges = {
+            "PART_OF",
+            "PARTICIPATES_IN",
+            "QUALIFIES_FOR",
+            "ADVANCES_TO",
+        }
+        nodes = [n for n in fragment.nodes if n.type.value in allowed_nodes]
+        node_ids = {n.local_id for n in nodes}
+        edges = [
+            e
+            for e in fragment.edges
+            if e.type.value in allowed_edges
+            and e.source in node_ids
+            and e.target in node_ids
+        ]
+        return cls(
+            n=[CompactNode.from_node(node) for node in nodes],
+            g=[CompactEdge.from_edge(edge) for edge in edges],
+        )
 
 
 def merge_fragments(fragments: list[GraphFragment]) -> GraphFragment:
@@ -133,6 +240,8 @@ class InferenceReport(BaseModel):
     events_failed: int = 0
     events_skipped: int = 0
     events_deterministic: int = 0
+    events_deterministic_verified: int = 0
+    events_deterministic_corrected: int = 0
     node_counts: dict[str, int] = Field(default_factory=dict)
     edge_counts: dict[str, int] = Field(default_factory=dict)
     resolution_tiers: dict[str, int] = Field(default_factory=dict)

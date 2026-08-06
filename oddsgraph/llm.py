@@ -11,7 +11,7 @@ from pydantic import ValidationError
 
 from oddsgraph.config import Settings
 from oddsgraph.prompts import ALLOWED_EDGE_TYPES, ALLOWED_NODE_TYPES
-from oddsgraph.schema import GraphFragment
+from oddsgraph.schema import CompactGraphFragment, GraphFragment
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +36,14 @@ class BaseGraphLLM(ABC):
         ]
         return GraphFragment(nodes=nodes, edges=edges)
 
+    def _parse_fragment(self, raw_output: str) -> GraphFragment:
+        """Parse LLM JSON as CompactGraphFragment or legacy GraphFragment."""
+        parsed = json.loads(raw_output)
+        if isinstance(parsed, dict) and ("n" in parsed or "g" in parsed):
+            compact = CompactGraphFragment.model_validate(parsed)
+            return compact.to_graph_fragment()
+        return GraphFragment.model_validate(parsed)
+
     def generate_fragment(
         self,
         prompt: str,
@@ -44,7 +52,11 @@ class BaseGraphLLM(ABC):
     ) -> GraphFragment:
         last_error: Exception | None = None
         raw_output = ""
-        max_tokens = max_tokens_override if max_tokens_override is not None else self.settings.max_tokens
+        max_tokens = (
+            max_tokens_override
+            if max_tokens_override is not None
+            else self.settings.max_tokens
+        )
 
         for attempt in range(self.settings.max_retries + 1):
             attempt_prompt = prompt
@@ -59,8 +71,7 @@ class BaseGraphLLM(ABC):
                     max_tokens=max_tokens,
                     temperature=self.settings.temperature,
                 )
-                parsed = json.loads(raw_output)
-                fragment = GraphFragment.model_validate(parsed)
+                fragment = self._parse_fragment(raw_output)
                 return self._filter_llm_fragment(fragment)
             except (json.JSONDecodeError, ValidationError, KeyError, TypeError) as exc:
                 last_error = exc
@@ -72,7 +83,9 @@ class BaseGraphLLM(ABC):
                 )
 
         self._write_failed_output(event_id, raw_output, last_error)
-        raise LLMInferenceError(f"LLM inference failed for event {event_id}: {last_error}")
+        raise LLMInferenceError(
+            f"LLM inference failed for event {event_id}: {last_error}"
+        )
 
     def _write_failed_output(
         self,
@@ -110,15 +123,18 @@ def _resolve_ggml_type(name: str | None) -> int | None:
 
 
 class LocalGraphLLM(BaseGraphLLM):
+    """In-process llama-cpp-python backend with outlines FSM constrained decoding."""
+
     def __init__(self, settings: Settings) -> None:
         super().__init__(settings)
         self._llama: Any = None
-        self._grammar: Any = None
+        self._outlines_model: Any = None
 
     def _ensure_loaded(self) -> None:
-        if self._llama is not None:
+        if self._outlines_model is not None:
             return
-        from llama_cpp import Llama, LlamaGrammar, LlamaRAMCache
+        from llama_cpp import Llama, LlamaRAMCache
+        import outlines
 
         model_path = self.settings.model_path
         if not model_path.exists():
@@ -140,11 +156,9 @@ class LocalGraphLLM(BaseGraphLLM):
         if type_v is not None:
             llama_kwargs["type_v"] = type_v
 
-        self._grammar = LlamaGrammar.from_json_schema(
-            json.dumps(GraphFragment.model_json_schema())
-        )
         self._llama = Llama(**llama_kwargs)
         self._llama.set_cache(LlamaRAMCache())
+        self._outlines_model = outlines.from_llamacpp(self._llama, chat_mode=True)
 
     def _complete(
         self,
@@ -153,16 +167,33 @@ class LocalGraphLLM(BaseGraphLLM):
         temperature: float,
     ) -> str:
         self._ensure_loaded()
-        response = self._llama.create_chat_completion(
+        from outlines.inputs import Chat
+
+        # Qwen3 defaults to a <think> channel that can consume the entire
+        # max_tokens budget before any JSON is emitted. Force no-think.
+        chat = Chat(
             messages=[
-                {"role": "system", "content": "You are a structured graph extractor."},
-                {"role": "user", "content": user_prompt},
-            ],
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a structured graph extractor. "
+                        "Return valid compact JSON only. /no_think"
+                    ),
+                },
+                {"role": "user", "content": user_prompt + "\n/no_think"},
+            ]
+        )
+        result = self._outlines_model(
+            chat,
+            CompactGraphFragment,
             max_tokens=max_tokens,
             temperature=temperature,
-            grammar=self._grammar,
         )
-        return response["choices"][0]["message"]["content"]
+        if isinstance(result, CompactGraphFragment):
+            return result.model_dump_json()
+        if isinstance(result, str):
+            return result
+        return json.dumps(result)
 
 
 def build_graph_llm(settings: Settings) -> BaseGraphLLM:
@@ -170,4 +201,8 @@ def build_graph_llm(settings: Settings) -> BaseGraphLLM:
         from oddsgraph.llm_remote import RemoteGraphLLM
 
         return RemoteGraphLLM(settings)
+    if settings.llm_backend == "mlx":
+        from oddsgraph.llm_mlx import MLXGraphLLM
+
+        return MLXGraphLLM(settings)
     return LocalGraphLLM(settings)

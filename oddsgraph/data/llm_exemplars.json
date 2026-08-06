@@ -1,0 +1,202 @@
+[
+  {
+    "event_title": "World Cup Golden Ball Winner",
+    "question": "Will Brazil win the Golden Ball?",
+    "event_slug": "wc-golden-ball",
+    "fragment": {
+      "n": [
+        {
+          "id": "competition:world-cup-2026",
+          "t": "COMPETITION",
+          "l": "World Cup 2026",
+          "a": ["world-cup-2026"],
+          "c": 0.9,
+          "e": ["gb1"]
+        },
+        {
+          "id": "team:brazil",
+          "t": "TEAM",
+          "l": "Brazil",
+          "a": [],
+          "c": 0.9,
+          "e": ["gb1"]
+        }
+      ],
+      "g": []
+    }
+  },
+  {
+    "event_title": "World Cup Goals H2H: Messi vs. Ronaldo",
+    "question": "Will Messi score more World Cup goals than Ronaldo?",
+    "event_slug": "wc-goals-h2h-messi-ronaldo",
+    "fragment": {
+      "n": [
+        {
+          "id": "competition:world-cup-2026",
+          "t": "COMPETITION",
+          "l": "World Cup 2026",
+          "a": [],
+          "c": 0.9,
+          "e": ["h2h1"]
+        }
+      ],
+      "g": []
+    }
+  },
+  {
+    "event_title": "World Cup Group D Winner",
+    "question": "Will France win Group D?",
+    "event_slug": "wc-group-d-winner",
+    "fragment": {
+      "n": [
+        {
+          "id": "team:france",
+          "t": "TEAM",
+          "l": "France",
+          "a": [],
+          "c": 0.95,
+          "e": ["gd1"]
+        },
+        {
+          "id": "group:world-cup-2026:d",
+          "t": "GROUP",
+          "l": "Group D",
+          "a": ["d"],
+          "c": 0.95,
+          "e": ["gd1"]
+        }
+      ],
+      "g": [
+        {
+          "s": "team:france",
+          "d": "group:world-cup-2026:d",
+          "t": "PARTICIPATES_IN",
+          "c": 0.95,
+          "e": ["gd1"],
+          "x": "Will France win Group D?"
+        }
+      ]
+    }
+  },
+  {
+    "event_title": "Brazil vs. Morocco - Exact Score",
+    "question": "Brazil vs. Morocco: Exact Score",
+    "event_slug": "fifwc-bra-mar-2026-06-14",
+    "fragment": {
+      "n": [
+        {
+          "id": "team:brazil",
+          "t": "TEAM",
+          "l": "Brazil",
+          "a": ["bra"],
+          "c": 0.95,
+          "e": ["m1"]
+        },
+        {
+          "id": "team:morocco",
+          "t": "TEAM",
+          "l": "Morocco",
+          "a": ["mar"],
+          "c": 0.95,
+          "e": ["m1"]
+        },
+        {
+          "id": "match:brazil-vs-morocco-2026-06-14",
+          "t": "MATCH",
+          "l": "Brazil vs. Morocco",
+          "a": ["fifwc-bra-mar-2026-06-14"],
+          "c": 0.95,
+          "e": ["m1"]
+        }
+      ],
+      "g": [
+        {
+          "s": "team:brazil",
+          "d": "match:brazil-vs-morocco-2026-06-14",
+          "t": "PARTICIPATES_IN",
+          "c": 0.95,
+          "e": ["m1"],
+          "x": "Brazil vs. Morocco"
+        },
+        {
+          "s": "team:morocco",
+          "d": "match:brazil-vs-morocco-2026-06-14",
+          "t": "PARTICIPATES_IN",
+          "c": 0.95,
+          "e": ["m1"],
+          "x": "Brazil vs. Morocco"
+        }
+      ]
+    }
+  },
+  {
+    "event_title": "World Cup: Portugal Stage of Elimination",
+    "question": "Will Portugal be eliminated in the Round of 16?",
+    "event_slug": "wc-portugal-stage-of-elimination",
+    "fragment": {
+      "n": [
+        {
+          "id": "team:portugal",
+          "t": "TEAM",
+          "l": "Portugal",
+          "a": [],
+          "c": 0.9,
+          "e": ["soe1"]
+        },
+        {
+          "id": "stage:world-cup-2026:round-of-16",
+          "t": "STAGE",
+          "l": "Round of 16",
+          "a": [],
+          "c": 0.9,
+          "e": ["soe1"]
+        }
+      ],
+      "g": [
+        {
+          "s": "team:portugal",
+          "d": "stage:world-cup-2026:round-of-16",
+          "t": "QUALIFIES_FOR",
+          "c": 0.85,
+          "e": ["soe1"],
+          "x": "Stage of Elimination: Round of 16"
+        }
+      ]
+    }
+  },
+  {
+    "event_title": "World Cup Winner",
+    "question": "Will Argentina win the World Cup?",
+    "event_slug": "wc-winner",
+    "fragment": {
+      "n": [
+        {
+          "id": "team:argentina",
+          "t": "TEAM",
+          "l": "Argentina",
+          "a": [],
+          "c": 0.95,
+          "e": ["w1"]
+        },
+        {
+          "id": "stage:world-cup-2026:champion",
+          "t": "STAGE",
+          "l": "Champion",
+          "a": [],
+          "c": 0.95,
+          "e": ["w1"]
+        }
+      ],
+      "g": [
+        {
+          "s": "team:argentina",
+          "d": "stage:world-cup-2026:champion",
+          "t": "QUALIFIES_FOR",
+          "c": 0.95,
+          "e": ["w1"],
+          "x": "Will Argentina win the World Cup?"
+        }
+      ]
+    }
+  }
+]

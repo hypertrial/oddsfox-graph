@@ -83,9 +83,13 @@ def test_events_deterministic_counted_in_report() -> None:
             "3": "deterministic",
             "4": "skipped",
             "5": "failed",
+            "6": "deterministic_verified",
+            "7": "deterministic_corrected",
         },
     )
     assert report.events_processed == 1
     assert report.events_deterministic == 2
+    assert report.events_deterministic_verified == 1
+    assert report.events_deterministic_corrected == 1
     assert report.events_skipped == 1
     assert report.events_failed == 1

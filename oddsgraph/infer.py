@@ -13,13 +13,15 @@ from oddsgraph.config import Settings
 from oddsgraph.llm import BaseGraphLLM, build_graph_llm
 from oddsgraph.prompts import (
     build_event_prompt,
+    build_verification_prompt,
     chunk_markets_for_prompt,
     estimate_output_tokens,
+    select_exemplars,
 )
 from oddsgraph.reduce import list_semantic_market_event_ids, load_semantic_markets, select_event_ids
 from oddsgraph.reporting import merge_per_event_status
 from oddsgraph.schema import GraphFragment, SemanticMarket, merge_fragments
-from oddsgraph.topology import covered_event_ids
+from oddsgraph.topology import classify_events, covered_event_ids
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +35,13 @@ class _InferTask:
     part_path: Path
 
 
+@dataclass(frozen=True)
+class _VerifyTask:
+    event_id: str
+    prompt: str
+    candidate: GraphFragment
+
+
 def _fragment_path(settings: Settings, event_id: str) -> Path:
     return settings.fragments_dir / f"{event_id}.json"
 
@@ -43,6 +52,10 @@ def _part_fragment_path(settings: Settings, event_id: str, part: int) -> Path:
 
 def _chunk_manifest_path(settings: Settings, event_id: str) -> Path:
     return settings.fragments_dir / f"{event_id}__chunk_manifest.json"
+
+
+def _verified_fragment_path(settings: Settings, event_id: str) -> Path:
+    return settings.fragments_dir / f"{event_id}__verified.json"
 
 
 def _load_fragment(path: Path) -> GraphFragment:
@@ -111,14 +124,30 @@ def _chunk_max_tokens(settings: Settings, chunk_size: int) -> int:
 
 
 def _effective_concurrency(settings: Settings) -> int:
-    if settings.llm_backend == "server":
-        return max(1, settings.llm_concurrency)
+    if settings.llm_backend in {"server", "mlx"}:
+        return max(1, settings.llm_concurrency) if settings.llm_backend == "server" else 1
     if settings.llm_concurrency > 1:
         logger.warning(
             "llm_concurrency=%d ignored for inprocess backend; using 1",
             settings.llm_concurrency,
         )
     return 1
+
+
+def _fragments_equal(a: GraphFragment, b: GraphFragment) -> bool:
+    a_nodes = {
+        (n.local_id, n.type.value, n.label) for n in a.nodes
+    }
+    b_nodes = {
+        (n.local_id, n.type.value, n.label) for n in b.nodes
+    }
+    a_edges = {
+        (e.source, e.target, e.type.value) for e in a.edges
+    }
+    b_edges = {
+        (e.source, e.target, e.type.value) for e in b.edges
+    }
+    return a_nodes == b_nodes and a_edges == b_edges
 
 
 def _run_infer_task(llm: BaseGraphLLM, task: _InferTask) -> None:
@@ -128,6 +157,65 @@ def _run_infer_task(llm: BaseGraphLLM, task: _InferTask) -> None:
         max_tokens_override=task.max_tokens,
     )
     _save_fragment(task.part_path, fragment)
+
+
+def verify_deterministic_fragments(
+    settings: Settings,
+    by_event: dict[str, list[SemanticMarket]],
+    covered: set[str],
+    llm: BaseGraphLLM,
+) -> tuple[dict[str, GraphFragment], dict[str, str]]:
+    """LLM confirm/patch pass over deterministic topology (opt-in)."""
+    if not settings.verify_deterministic or not covered:
+        return {}, {}
+
+    classified = classify_events(
+        [m for eid in covered for m in by_event.get(eid, [])],
+        competition_label=settings.competition_label,
+    )
+    tasks: list[_VerifyTask] = []
+    for event_id in sorted(covered):
+        topology = classified.get(event_id)
+        if topology is None or not topology.fragment.nodes:
+            continue
+        markets = by_event[event_id]
+        prompt = build_verification_prompt(
+            event_id,
+            markets,
+            topology.fragment,
+            settings.max_text_field_chars,
+        )
+        tasks.append(
+            _VerifyTask(event_id=event_id, prompt=prompt, candidate=topology.fragment)
+        )
+
+    verified: dict[str, GraphFragment] = {}
+    status: dict[str, str] = {}
+    concurrency = _effective_concurrency(settings)
+
+    def _run_verify(task: _VerifyTask) -> tuple[str, GraphFragment, str]:
+        fragment = llm.generate_fragment(
+            task.prompt,
+            task.event_id,
+            max_tokens_override=settings.verify_max_tokens,
+        )
+        if _fragments_equal(fragment, task.candidate):
+            return task.event_id, task.candidate, "deterministic_verified"
+        return task.event_id, fragment, "deterministic_corrected"
+
+    with ThreadPoolExecutor(max_workers=concurrency) as executor:
+        futures = [executor.submit(_run_verify, task) for task in tasks]
+        for future in as_completed(futures):
+            try:
+                event_id, fragment, event_status = future.result()
+            except Exception:
+                logger.exception("Verification failed for deterministic event")
+                continue
+            verified[event_id] = fragment
+            status[event_id] = event_status
+            _save_fragment(_verified_fragment_path(settings, event_id), fragment)
+
+    return verified, status
 
 
 def infer_event_fragments(
@@ -156,12 +244,21 @@ def infer_event_fragments(
     results: dict[str, GraphFragment] = {}
     status: dict[str, str] = {}
 
+    # Opt-in LLM verify/patch over deterministic topology.
+    needs_llm = bool(
+        settings.verify_deterministic and covered
+    ) or any(eid not in covered for eid in event_ids)
+    if needs_llm and llm is None:
+        # Defer construction until we know residual/verify work remains.
+        pass
+
     event_chunks: dict[str, list[list[SemanticMarket]]] = {}
     pending_tasks: list[_InferTask] = []
 
     for event_id in event_ids:
         if event_id in covered:
-            status[event_id] = "deterministic"
+            if not settings.verify_deterministic:
+                status[event_id] = "deterministic"
             continue
 
         fragment_path = _fragment_path(settings, event_id)
@@ -186,12 +283,23 @@ def infer_event_fragments(
         if settings.resume and not _chunk_manifest_matches(settings, event_id, chunks):
             _clear_part_fragments(settings, event_id)
 
+        few_shot: list[dict] = []
+        if settings.use_few_shot_exemplars:
+            few_shot = select_exemplars(
+                event_markets[0].event_title if event_markets else None,
+                event_markets[0].question if event_markets else None,
+                top_k=settings.few_shot_top_k,
+            )
+
         for idx, chunk in enumerate(chunks):
             part_path = _part_fragment_path(settings, event_id, idx)
             if settings.resume and part_path.exists():
                 continue
             prompt = build_event_prompt(
-                event_id, chunk, settings.max_text_field_chars
+                event_id,
+                chunk,
+                settings.max_text_field_chars,
+                few_shot_exemplars=few_shot,
             )
             pending_tasks.append(
                 _InferTask(
@@ -204,8 +312,20 @@ def infer_event_fragments(
             )
 
     failed_events: set[str] = set()
-    if pending_tasks:
+    if pending_tasks or (settings.verify_deterministic and covered):
         llm = llm or build_graph_llm(settings)
+
+    if settings.verify_deterministic and covered and llm is not None:
+        verified, verify_status = verify_deterministic_fragments(
+            settings, by_event, covered, llm
+        )
+        results.update(verified)
+        status.update(verify_status)
+        for event_id in covered:
+            status.setdefault(event_id, "deterministic")
+
+    if pending_tasks:
+        assert llm is not None
         concurrency = _effective_concurrency(settings)
         with ThreadPoolExecutor(max_workers=concurrency) as executor:
             future_to_task = {
@@ -280,6 +400,12 @@ def load_all_fragments(settings: Settings) -> dict[str, GraphFragment]:
             continue
         if "__part" in path.name or "__chunk_manifest" in path.name:
             continue
+        if path.name.endswith("__verified.json"):
+            # Prefer verified topology fragments when present.
+            event_id = path.name[: -len("__verified.json")]
+            fragments[event_id] = _load_fragment(path)
+            continue
         event_id = path.stem
-        fragments[event_id] = _load_fragment(path)
+        if event_id not in fragments:
+            fragments[event_id] = _load_fragment(path)
     return fragments

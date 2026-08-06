@@ -121,3 +121,45 @@ def test_filter_llm_fragment_removes_disallowed_types(tmp_path) -> None:
     assert len(filtered.nodes) == 1
     assert filtered.nodes[0].type.value == "TEAM"
     assert filtered.edges == []
+
+
+def test_parse_compact_fragment_json(tmp_path) -> None:
+    settings = Settings()
+    settings.build_dir = tmp_path
+    settings.failed_fragments_dir = tmp_path / "failed"
+    compact = json.dumps(
+        {
+            "n": [
+                {
+                    "id": "team:brazil",
+                    "t": "TEAM",
+                    "l": "Brazil",
+                    "a": [],
+                    "c": 0.9,
+                    "e": ["m1"],
+                }
+            ],
+            "g": [],
+        }
+    )
+    llm = _StubGraphLLM(settings, [compact])
+    fragment = llm.generate_fragment("prompt", "evt1")
+    assert fragment.nodes[0].local_id == "team:brazil"
+    assert fragment.nodes[0].label == "Brazil"
+
+
+def test_build_graph_llm_dispatches_mlx(monkeypatch) -> None:
+    from oddsgraph import llm as llm_mod
+    import oddsgraph.llm_mlx as mlx_mod
+
+    class FakeMLX(llm_mod.BaseGraphLLM):
+        def _complete(
+            self, user_prompt: str, max_tokens: int, temperature: float
+        ) -> str:
+            return "{}"
+
+    monkeypatch.setattr(mlx_mod, "MLXGraphLLM", FakeMLX)
+    settings = Settings()
+    settings.llm_backend = "mlx"
+    built = llm_mod.build_graph_llm(settings)
+    assert isinstance(built, FakeMLX)

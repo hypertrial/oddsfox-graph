@@ -27,12 +27,13 @@ class Settings:
     inference_report_path: Path = build_dir / "inference_report.json"
 
     model_path: Path = models_dir / "qwen3-4b-q4_k_m.gguf"
-    n_ctx: int = 12288
+    mlx_model_path: Path = models_dir / "qwen3-4b-mlx"
+    n_ctx: int = 8192
     n_gpu_layers: int = -1
     max_tokens: int = 4096
     temperature: float = 0.1  # conservative for structured extraction
     max_retries: int = 2
-    chunk_token_budget: int = 7000
+    chunk_token_budget: int = 5000
     chunk_output_token_budget: int = 4096
     max_markets_per_chunk: int = 24
     chunk_context_safety_margin: int = 64
@@ -45,9 +46,13 @@ class Settings:
     llm_backend: str = "inprocess"
     server_base_url: str = "http://127.0.0.1:8080"
     server_request_timeout: float = 120.0
-    llm_concurrency: int = 4
+    llm_concurrency: int = 2
     deterministic_topology: bool = True
     official_bracket: bool = True
+    verify_deterministic: bool = False
+    verify_max_tokens: int = 300
+    use_few_shot_exemplars: bool = True
+    few_shot_top_k: int = 2
     competition_label: str = "World Cup 2026"
     fuzzy_threshold: int = 92
     minimum_confidence: float = 0.0
@@ -81,6 +86,8 @@ class Settings:
             self.models_dir = repo_root / "models"
             if self.model_path == previous_models / "qwen3-4b-q4_k_m.gguf":
                 self.model_path = self.models_dir / "qwen3-4b-q4_k_m.gguf"
+            if self.mlx_model_path == previous_models / "qwen3-4b-mlx":
+                self.mlx_model_path = self.models_dir / "qwen3-4b-mlx"
 
     def ensure_dirs(self) -> None:
         self.build_dir.mkdir(parents=True, exist_ok=True)

@@ -28,6 +28,7 @@ def _base_settings(ctx: typer.Context) -> Settings:
 def _apply_infer_options(
     settings: Settings,
     model_path: Optional[Path] = None,
+    mlx_model_path: Optional[Path] = None,
     limit_events: Optional[int] = None,
     event_id: list[str] = [],
     resume: bool = True,
@@ -35,9 +36,13 @@ def _apply_infer_options(
     server_url: Optional[str] = None,
     concurrency: Optional[int] = None,
     deterministic_topology: Optional[bool] = None,
+    verify_deterministic: Optional[bool] = None,
+    few_shot: Optional[bool] = None,
 ) -> Settings:
     if model_path is not None:
         settings.model_path = model_path
+    if mlx_model_path is not None:
+        settings.mlx_model_path = mlx_model_path
     if limit_events is not None:
         settings.limit_events = limit_events
     if event_id:
@@ -51,6 +56,10 @@ def _apply_infer_options(
         settings.llm_concurrency = concurrency
     if deterministic_topology is not None:
         settings.deterministic_topology = deterministic_topology
+    if verify_deterministic is not None:
+        settings.verify_deterministic = verify_deterministic
+    if few_shot is not None:
+        settings.use_few_shot_exemplars = few_shot
     return settings
 
 
@@ -115,6 +124,9 @@ def infer(
     model_path: Annotated[
         Optional[Path], typer.Option(help="Path to GGUF model file")
     ] = None,
+    mlx_model_path: Annotated[
+        Optional[Path], typer.Option(help="Path to MLX model directory")
+    ] = None,
     limit_events: Annotated[
         Optional[int], typer.Option(help="Limit number of events to infer")
     ] = None,
@@ -124,7 +136,7 @@ def infer(
     resume: Annotated[bool, typer.Option(help="Skip events with existing fragments")] = True,
     llm_backend: Annotated[
         Optional[str],
-        typer.Option(help="LLM backend: inprocess or server"),
+        typer.Option(help="LLM backend: inprocess, server, or mlx"),
     ] = None,
     server_url: Annotated[
         Optional[str],
@@ -141,11 +153,26 @@ def infer(
             help="Extract TEAM/MATCH/GROUP/STAGE topology without LLM when possible",
         ),
     ] = None,
+    verify_deterministic: Annotated[
+        Optional[bool],
+        typer.Option(
+            "--verify-deterministic/--no-verify-deterministic",
+            help="LLM confirm/patch pass over deterministic topology (default: off)",
+        ),
+    ] = None,
+    few_shot: Annotated[
+        Optional[bool],
+        typer.Option(
+            "--few-shot/--no-few-shot",
+            help="Include rapidfuzz-ranked few-shot exemplars in residual prompts",
+        ),
+    ] = None,
 ) -> None:
     """Infer graph fragments per event using local LLM."""
     settings = _apply_infer_options(
         _base_settings(ctx),
         model_path=model_path,
+        mlx_model_path=mlx_model_path,
         limit_events=limit_events,
         event_id=event_id,
         resume=resume,
@@ -153,12 +180,17 @@ def infer(
         server_url=server_url,
         concurrency=concurrency,
         deterministic_topology=deterministic_topology,
+        verify_deterministic=verify_deterministic,
+        few_shot=few_shot,
     )
     markets = load_markets_for_infer(settings)
     results = infer_event_fragments(settings, markets)
     report = load_inference_report(settings.inference_report_path)
     deterministic = sum(
-        1 for status in report.per_event_status.values() if status == "deterministic"
+        1
+        for status in report.per_event_status.values()
+        if status
+        in {"deterministic", "deterministic_verified", "deterministic_corrected"}
     )
     typer.echo(
         f"Inferred fragments for {len(results)} events"
@@ -233,7 +265,7 @@ def explore(
     except ImportError as exc:
         typer.echo(
             "Explorer dependencies are missing. Install with:\n"
-            "  uv sync --extra explore\n"
+            "  uv sync --frozen --extra explore\n"
             f"Import error: {exc}"
         )
         raise typer.Exit(code=1) from exc
@@ -248,6 +280,9 @@ def run(
     model_path: Annotated[
         Optional[Path], typer.Option(help="Path to GGUF model file")
     ] = None,
+    mlx_model_path: Annotated[
+        Optional[Path], typer.Option(help="Path to MLX model directory")
+    ] = None,
     limit_events: Annotated[
         Optional[int], typer.Option(help="Limit number of events to infer")
     ] = None,
@@ -260,7 +295,7 @@ def run(
     ] = 0.0,
     llm_backend: Annotated[
         Optional[str],
-        typer.Option(help="LLM backend: inprocess or server"),
+        typer.Option(help="LLM backend: inprocess, server, or mlx"),
     ] = None,
     server_url: Annotated[
         Optional[str],
@@ -277,6 +312,20 @@ def run(
             help="Extract TEAM/MATCH/GROUP/STAGE topology without LLM when possible",
         ),
     ] = None,
+    verify_deterministic: Annotated[
+        Optional[bool],
+        typer.Option(
+            "--verify-deterministic/--no-verify-deterministic",
+            help="LLM confirm/patch pass over deterministic topology (default: off)",
+        ),
+    ] = None,
+    few_shot: Annotated[
+        Optional[bool],
+        typer.Option(
+            "--few-shot/--no-few-shot",
+            help="Include rapidfuzz-ranked few-shot exemplars in residual prompts",
+        ),
+    ] = None,
     official_bracket: Annotated[
         Optional[bool],
         typer.Option(
@@ -290,6 +339,7 @@ def run(
         _apply_infer_options(
             _base_settings(ctx),
             model_path=model_path,
+            mlx_model_path=mlx_model_path,
             limit_events=limit_events,
             event_id=event_id,
             resume=resume,
@@ -297,6 +347,8 @@ def run(
             server_url=server_url,
             concurrency=concurrency,
             deterministic_topology=deterministic_topology,
+            verify_deterministic=verify_deterministic,
+            few_shot=few_shot,
         ),
         minimum_confidence=minimum_confidence,
         official_bracket=official_bracket,

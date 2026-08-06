@@ -10,7 +10,7 @@ from llama_cpp.llama_grammar import json_schema_to_gbnf
 
 from oddsgraph.config import Settings
 from oddsgraph.llm import BaseGraphLLM
-from oddsgraph.schema import GraphFragment
+from oddsgraph.schema import CompactGraphFragment
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +25,7 @@ class RemoteGraphLLM(BaseGraphLLM):
     def __init__(self, settings: Settings) -> None:
         super().__init__(settings)
         self._grammar = json_schema_to_gbnf(
-            json.dumps(GraphFragment.model_json_schema())
+            json.dumps(CompactGraphFragment.model_json_schema())
         )
         self._client = httpx.Client(
             base_url=settings.server_base_url.rstrip("/"),
@@ -59,8 +59,14 @@ class RemoteGraphLLM(BaseGraphLLM):
         self._ensure_server_ready()
         payload = {
             "messages": [
-                {"role": "system", "content": "You are a structured graph extractor."},
-                {"role": "user", "content": user_prompt},
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a structured graph extractor. "
+                        "Return valid compact JSON only. /no_think"
+                    ),
+                },
+                {"role": "user", "content": user_prompt + "\n/no_think"},
             ],
             "max_tokens": max_tokens,
             "temperature": temperature,

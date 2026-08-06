@@ -46,6 +46,12 @@ def build_inference_report(
     events_failed = sum(1 for s in status.values() if s == "failed")
     events_skipped = sum(1 for s in status.values() if s == "skipped")
     events_deterministic = sum(1 for s in status.values() if s == "deterministic")
+    events_deterministic_verified = sum(
+        1 for s in status.values() if s == "deterministic_verified"
+    )
+    events_deterministic_corrected = sum(
+        1 for s in status.values() if s == "deterministic_corrected"
+    )
 
     return InferenceReport(
         model_path=model_path,
@@ -53,6 +59,8 @@ def build_inference_report(
         events_failed=events_failed,
         events_skipped=events_skipped,
         events_deterministic=events_deterministic,
+        events_deterministic_verified=events_deterministic_verified,
+        events_deterministic_corrected=events_deterministic_corrected,
         node_counts=dict(node_counts),
         edge_counts=dict(edge_counts),
         resolution_tiers=dict(resolution_state.tier_counts),

@@ -65,6 +65,9 @@ def test_cli_run_help_includes_infer_and_build_options() -> None:
     assert "--concurrency" in output
     assert "official-bracket" in output
     assert "--minimum-confidence" in output
+    assert "verify-deterministic" in output or "verify-determini" in output
+    assert "few-shot" in output
+    assert "mlx" in output.lower() or "--mlx-model-path" in output
 
 
 def test_cli_build_and_validate_with_fixture(tmp_path: Path) -> None:

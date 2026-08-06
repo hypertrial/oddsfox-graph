@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import json
+from functools import lru_cache
+from pathlib import Path
+
+from rapidfuzz import fuzz, process
 
 from oddsgraph.ontology import EdgeType, NodeType
-from oddsgraph.schema import SemanticMarket
+from oddsgraph.schema import CompactGraphFragment, GraphFragment, SemanticMarket
 
 SYSTEM_RULES = """
 You extract a typed logical graph from Polymarket WC2026 market metadata.
@@ -21,9 +25,28 @@ Rules:
 - Edge direction matters: TEAM PARTICIPATES_IN MATCH (not MATCH PARTICIPATES_IN TEAM).
 - TEAM QUALIFIES_FOR applies to STAGE, ROUND, or GROUP only — not other teams or matches.
 - Do not create edges between two teams.
-- Every node MUST include evidence_market_ids from the supplied records.
-- confidence must be between 0 and 1.
-- Return JSON matching the GraphFragment schema with nodes and edges arrays.
+- Every node MUST include evidence market ids from the supplied records.
+- confidence (field c) must be between 0 and 1.
+- Return compact JSON with short keys:
+  nodes array key "n": each node uses id,t,l,a,c,e
+    (local_id, type, label, aliases, confidence, evidence_market_ids)
+  edges array key "g": each edge uses s,d,t,c,e,x
+    (source, target, type, confidence, evidence_market_ids, evidence_text)
+""".strip()
+
+VERIFICATION_RULES = """
+You verify a candidate topology fragment against Polymarket WC2026 market metadata.
+
+Rules:
+- Use ONLY the supplied Polymarket records and the candidate fragment.
+- If the candidate is correct, return it unchanged in compact JSON.
+- If it is wrong or incomplete, return a corrected compact fragment.
+- Emit ONLY these node types: COMPETITION, STAGE, GROUP, ROUND, MATCH, TEAM.
+- Emit ONLY these edge types: PART_OF, PARTICIPATES_IN, QUALIFIES_FOR, ADVANCES_TO.
+- Do not invent topology unsupported by the records.
+- Return compact JSON with short keys:
+  nodes array key "n": each node uses id,t,l,a,c,e
+  edges array key "g": each edge uses s,d,t,c,e,x
 """.strip()
 
 ALLOWED_NODE_TYPES = {
@@ -42,7 +65,8 @@ ALLOWED_EDGE_TYPES = {
     EdgeType.ADVANCES_TO,
 }
 
-_PROMPT_FOOTER = "\n\nReturn a GraphFragment JSON object."
+_PROMPT_FOOTER = "\n\nReturn a CompactGraphFragment JSON object."
+_EXEMPLARS_PATH = Path(__file__).resolve().parent / "data" / "llm_exemplars.json"
 
 
 def _truncate_text(text: str | None, max_chars: int) -> str | None:
@@ -72,22 +96,115 @@ def _serialize_market(market: SemanticMarket, max_text_field_chars: int = 500) -
     }
 
 
+@lru_cache(maxsize=1)
+def load_exemplars() -> list[dict]:
+    if not _EXEMPLARS_PATH.exists():
+        return []
+    data = json.loads(_EXEMPLARS_PATH.read_text(encoding="utf-8"))
+    if isinstance(data, list):
+        return data
+    return list(data.get("exemplars", []))
+
+
+def select_exemplars(
+    event_title: str | None,
+    question: str | None,
+    exemplars: list[dict] | None = None,
+    top_k: int = 2,
+) -> list[dict]:
+    """Rank curated exemplars by rapidfuzz similarity to the current event text."""
+    pool = exemplars if exemplars is not None else load_exemplars()
+    if not pool or top_k <= 0:
+        return []
+    query = " ".join(part for part in [event_title or "", question or ""] if part).strip()
+    if not query:
+        return pool[:top_k]
+
+    choices = {
+        str(idx): " ".join(
+            part
+            for part in [
+                item.get("event_title") or "",
+                item.get("question") or "",
+                item.get("event_slug") or "",
+            ]
+            if part
+        )
+        for idx, item in enumerate(pool)
+    }
+    matches = process.extract(
+        query,
+        choices,
+        scorer=fuzz.token_sort_ratio,
+        limit=min(top_k, len(pool)),
+    )
+    selected: list[dict] = []
+    for _label, _score, key in matches:
+        selected.append(pool[int(key)])
+    return selected
+
+
+def _format_exemplars_block(exemplars: list[dict]) -> str:
+    if not exemplars:
+        return ""
+    blocks: list[str] = ["\n\nFew-shot examples (follow this compact JSON style):"]
+    for idx, exemplar in enumerate(exemplars, start=1):
+        fragment = exemplar.get("fragment") or {"n": [], "g": []}
+        blocks.append(
+            f"\nExample {idx}:\n"
+            f"event_title: {exemplar.get('event_title')}\n"
+            f"question: {exemplar.get('question')}\n"
+            f"output:\n{json.dumps(fragment, ensure_ascii=False)}"
+        )
+    return "".join(blocks)
+
+
 def build_event_prompt(
     event_id: str,
     markets: list[SemanticMarket],
     max_text_field_chars: int = 500,
+    few_shot_exemplars: list[dict] | None = None,
 ) -> str:
     event_title = markets[0].event_title if markets else event_id
     event_slug = markets[0].event_slug if markets else None
+    question = markets[0].question if markets else None
     payload = {
         "event_id": event_id,
         "event_title": event_title,
         "event_slug": event_slug,
         "markets": [_serialize_market(m, max_text_field_chars) for m in markets],
     }
+    exemplars = few_shot_exemplars
+    if exemplars is None:
+        exemplars = []
     return (
         SYSTEM_RULES
+        + _format_exemplars_block(exemplars)
         + "\n\nPolymarket records:\n"
+        + json.dumps(payload, indent=2, ensure_ascii=False)
+        + _PROMPT_FOOTER
+    )
+
+
+def build_verification_prompt(
+    event_id: str,
+    markets: list[SemanticMarket],
+    candidate_fragment: GraphFragment,
+    max_text_field_chars: int = 500,
+) -> str:
+    event_title = markets[0].event_title if markets else event_id
+    event_slug = markets[0].event_slug if markets else None
+    compact = CompactGraphFragment.from_graph_fragment(candidate_fragment)
+    payload = {
+        "event_id": event_id,
+        "event_title": event_title,
+        "event_slug": event_slug,
+        "markets": [_serialize_market(m, max_text_field_chars) for m in markets],
+        "candidate_fragment": json.loads(compact.model_dump_json()),
+    }
+    return (
+        VERIFICATION_RULES
+        + "\n\nPolymarket records and candidate:\n"
         + json.dumps(payload, indent=2, ensure_ascii=False)
         + _PROMPT_FOOTER
     )
@@ -98,8 +215,8 @@ def estimate_prompt_tokens(prompt: str) -> int:
 
 
 def estimate_output_tokens(market_count: int) -> int:
-    # Conservative estimate for nodes + edges JSON per market
-    return max(1, market_count * 200)
+    # Compact wire format: fewer tokens per market than the full schema.
+    return max(1, market_count * 120)
 
 
 def _market_prompt_tokens(market: SemanticMarket, max_text_field_chars: int) -> int:
@@ -182,7 +299,7 @@ def chunk_markets_for_prompt(
     output_token_budget: int = 4096,
     max_markets_per_chunk: int = 24,
     max_text_field_chars: int = 500,
-    n_ctx: int = 12288,
+    n_ctx: int = 8192,
     context_safety_margin: int = 64,
 ) -> list[list[SemanticMarket]]:
     if not markets:

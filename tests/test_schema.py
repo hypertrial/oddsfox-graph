@@ -2,7 +2,15 @@ import pytest
 from pydantic import ValidationError
 
 from oddsgraph.ontology import EdgeType, NodeType
-from oddsgraph.schema import Edge, GraphFragment, Node, merge_fragments
+from oddsgraph.schema import (
+    CompactEdge,
+    CompactGraphFragment,
+    CompactNode,
+    Edge,
+    GraphFragment,
+    Node,
+    merge_fragments,
+)
 
 
 def test_graph_fragment_validates() -> None:
@@ -113,7 +121,68 @@ def test_merge_fragments_uses_max_confidence_for_duplicate_edges() -> None:
     assert team.confidence == 0.9
     assert sorted(team.evidence_market_ids) == ["1", "2"]
 
-    # Higher confidence first, then lower: still keep the stronger evidence_text.
     merged_rev = merge_fragments([fragment_high, fragment_low])
     assert merged_rev.edges[0].confidence == 0.9
     assert merged_rev.edges[0].evidence_text == "high"
+
+
+def test_compact_graph_fragment_round_trip() -> None:
+    fragment = GraphFragment(
+        nodes=[
+            Node(
+                local_id="team:brazil",
+                type=NodeType.TEAM,
+                label="Brazil",
+                aliases=["bra"],
+                confidence=0.9,
+                evidence_market_ids=["m1"],
+            ),
+            Node(
+                local_id="match:m",
+                type=NodeType.MATCH,
+                label="Match",
+                confidence=0.9,
+                evidence_market_ids=["m1"],
+            ),
+        ],
+        edges=[
+            Edge(
+                source="team:brazil",
+                target="match:m",
+                type=EdgeType.PARTICIPATES_IN,
+                confidence=0.8,
+                evidence_market_ids=["m1"],
+                evidence_text="Brazil plays",
+            )
+        ],
+    )
+    compact = CompactGraphFragment.from_graph_fragment(fragment)
+    assert compact.n[0].id == "team:brazil"
+    assert compact.g[0].s == "team:brazil"
+    restored = compact.to_graph_fragment()
+    assert restored.nodes[0].local_id == "team:brazil"
+    assert restored.nodes[0].aliases == ["bra"]
+    assert restored.edges[0].evidence_text == "Brazil plays"
+
+
+def test_compact_node_and_edge_helpers() -> None:
+    node = CompactNode(
+        id="team:a",
+        t=NodeType.TEAM,
+        l="A",
+        a=[],
+        c=0.5,
+        e=["1"],
+    ).to_node()
+    assert node.local_id == "team:a"
+    edge = CompactEdge(
+        s="team:a",
+        d="match:m",
+        t=EdgeType.PARTICIPATES_IN,
+        c=0.5,
+        e=["1"],
+        x="x",
+    ).to_edge()
+    assert edge.source == "team:a"
+    assert CompactNode.from_node(node).id == "team:a"
+    assert CompactEdge.from_edge(edge).x == "x"

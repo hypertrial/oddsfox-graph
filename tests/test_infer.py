@@ -19,12 +19,13 @@ def _settings(tmp_path: Path) -> Settings:
     settings.ensure_dirs()
     settings.resume = False
     settings.deterministic_topology = False
+    settings.use_few_shot_exemplars = False
     settings.llm_backend = "server"
     settings.llm_concurrency = 2
-    settings.chunk_token_budget = 500
-    settings.chunk_output_token_budget = 500
+    settings.chunk_token_budget = 2000
+    settings.chunk_output_token_budget = 2000
     settings.max_markets_per_chunk = 1
-    settings.n_ctx = 2000
+    settings.n_ctx = 8000
     return settings
 
 
@@ -134,3 +135,85 @@ def test_infer_clears_stale_part_fragments_when_manifest_mismatches(
     assert sorted(n.label for n in second["e1"].nodes) == ["A0", "A1"]
     assert not list(settings.fragments_dir.glob("e1__part2.json"))
     assert not list(settings.fragments_dir.glob("e1__part3.json"))
+
+
+def test_verify_deterministic_disabled_by_default(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    settings.deterministic_topology = True
+    settings.verify_deterministic = False
+    markets = [
+        SemanticMarket(
+            market_id="m1",
+            event_id="match-evt",
+            event_title="Brazil vs. Morocco - Exact Score",
+            event_slug="fifwc-bra-mar-2026-06-14",
+            question="Winner?",
+            outcomes=["Brazil", "Morocco"],
+            sports_market_type="soccer_match",
+        )
+    ]
+
+    class ShouldNotCall(BaseGraphLLM):
+        def _complete(self, user_prompt: str, max_tokens: int, temperature: float) -> str:
+            raise AssertionError("LLM should not be called when verify is off")
+
+    results = infer_event_fragments(settings, markets, llm=ShouldNotCall(settings))
+    assert results == {}
+    report = load_inference_report(settings.inference_report_path)
+    assert report.per_event_status["match-evt"] == "deterministic"
+
+
+def test_verify_deterministic_marks_verified_and_corrected(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    settings.deterministic_topology = True
+    settings.verify_deterministic = True
+    settings.llm_backend = "inprocess"
+    markets = [
+        SemanticMarket(
+            market_id="m1",
+            event_id="match-evt",
+            event_title="Brazil vs. Morocco - Exact Score",
+            event_slug="fifwc-bra-mar-2026-06-14",
+            question="Winner?",
+            outcomes=["Brazil", "Morocco"],
+            sports_market_type="soccer_match",
+        )
+    ]
+
+    class EchoVerifyLLM(BaseGraphLLM):
+        def __init__(self, settings: Settings, *, mutate: bool) -> None:
+            super().__init__(settings)
+            self.mutate = mutate
+
+        def _complete(
+            self, user_prompt: str, max_tokens: int, temperature: float
+        ) -> str:
+            # Return a minimal TEAM node; mutate path adds an extra alias-like label.
+            label = "BrazilX" if self.mutate else "Brazil"
+            return json.dumps(
+                {
+                    "n": [
+                        {
+                            "id": f"team:{label.lower()}",
+                            "t": "TEAM",
+                            "l": label,
+                            "a": [],
+                            "c": 0.9,
+                            "e": ["m1"],
+                        }
+                    ],
+                    "g": [],
+                }
+            )
+
+    # Corrected path: LLM returns a different fragment than deterministic topology.
+    results = infer_event_fragments(
+        settings, markets, llm=EchoVerifyLLM(settings, mutate=True)
+    )
+    assert "match-evt" in results
+    report = load_inference_report(settings.inference_report_path)
+    assert report.per_event_status["match-evt"] in {
+        "deterministic_corrected",
+        "deterministic_verified",
+    }
+    assert (settings.fragments_dir / "match-evt__verified.json").exists()
