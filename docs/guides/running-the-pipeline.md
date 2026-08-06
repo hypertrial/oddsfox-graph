@@ -1,3 +1,7 @@
+---
+description: Stage-by-stage oddsgraph CLI walkthrough for reduce, infer, build, validate, explore, and run.
+---
+
 # Running the pipeline
 
 OddsFox Graph exposes a Typer CLI named `oddsgraph`. Every command shares
@@ -72,5 +76,6 @@ build/ontology.json
 
 - [Deterministic topology](deterministic-topology.md)
 - [Official bracket](official-bracket.md)
+- [Inference backends](inference-backends.md)
 - [llama-server](llama-server.md)
 - [CLI](../reference/cli.md)

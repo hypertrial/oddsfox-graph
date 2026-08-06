@@ -1,3 +1,7 @@
+---
+description: Polymarket WC2026 hourly-odds parquet grain and column schema required as OddsFox Graph input.
+---
+
 # Source data schema
 
 Pipeline golden mart export used as the primary input for oddsgraph.

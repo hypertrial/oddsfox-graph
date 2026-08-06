@@ -1,3 +1,7 @@
+---
+description: Fix common OddsFox Graph install, reduce, infer, build, explorer, and docs problems by stage.
+---
+
 # Troubleshooting
 
 Common problems and fixes, grouped by stage.

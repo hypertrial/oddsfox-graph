@@ -1,3 +1,7 @@
+---
+description: Extract TEAM, MATCH, GROUP, and STAGE topology from Polymarket fields without an LLM for most WC2026 events.
+---
+
 # Deterministic topology
 
 By default, `infer` / `run` classify each event from structured Polymarket

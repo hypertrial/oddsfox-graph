@@ -1,3 +1,7 @@
+---
+description: Install OddsFox Graph, place a Polymarket WC2026 export, download a local model, and run the pipeline once.
+---
+
 # Quickstart
 
 Install OddsFox Graph, place a Polymarket WC2026 hourly-odds export, download a

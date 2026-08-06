@@ -1,3 +1,7 @@
+---
+description: How OddsFox Graph merges fragment-local nodes into canonical IDs via exact, alias, and fuzzy resolution tiers.
+---
+
 # Entity resolution
 
 After per-event fragments are written, `build` merges them into canonical nodes

@@ -1,0 +1,27 @@
+#############################
+### SCOPE                 ###
+#############################
+
+# Local preview / example bind addresses used throughout the docs.
+exclude = [
+  '^https?://127\\.0\\.0\\.1',
+  '^https?://localhost',
+  '^https?://0\\.0\\.0\\.0',
+]
+
+#############################
+### CACHE                 ###
+#############################
+
+cache = true
+max_cache_age = "2d"
+
+#############################
+### RUNTIME               ###
+#############################
+
+max_concurrency = 8
+timeout = 20
+max_retries = 3
+retry_wait_time = 2
+accept = ["200..=299", "403"]

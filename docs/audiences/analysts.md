@@ -1,3 +1,7 @@
+---
+description: Inspect OddsFox Graph exports with DuckDB or the local explorer without running the inference pipeline.
+---
+
 # Analysts
 
 Use this hub when you want to inspect OddsFox Graph output, not operate the
@@ -60,9 +64,4 @@ independently.
 | Column contracts | [Output artifacts](../reference/output-artifacts.md) |
 | Allowed node/edge types | [Ontology](../reference/ontology.md) |
 | Input parquet grain | [Source data schema](../reference/source-data-schema.md) |
-
-## See also
-
-- [Explorer](../guides/explorer.md)
-- [Output artifacts](../reference/output-artifacts.md)
-- [FAQ](../concepts/faq.md)
+| Common questions | [FAQ](../concepts/faq.md) |

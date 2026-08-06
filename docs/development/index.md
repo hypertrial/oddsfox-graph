@@ -1,3 +1,7 @@
+---
+description: Develop OddsFox Graph with uv extras, pytest, optional live model tests, and strict MkDocs builds.
+---
+
 # Development guide
 
 ## Setup

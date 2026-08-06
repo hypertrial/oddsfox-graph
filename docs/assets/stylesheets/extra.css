@@ -244,12 +244,6 @@
   background: rgb(196 181 253 / 10%);
 }
 
-.of-see-also {
-  margin-top: 2rem;
-  padding-top: 1rem;
-  border-top: 0.05rem solid var(--md-default-fg-color--lightest);
-}
-
 @media screen and (max-width: 60em) {
   .of-hero {
     grid-template-columns: minmax(0, 1fr) minmax(10rem, 0.45fr);

@@ -1,3 +1,7 @@
+---
+description: Complete oddsgraph CLI reference for reduce, infer, build, validate, explore, and run flags.
+---
+
 # CLI
 
 Entry point: `oddsgraph` (Typer). Shared options apply to every command.

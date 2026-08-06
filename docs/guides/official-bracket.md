@@ -1,3 +1,7 @@
+---
+description: Inject the curated FIFA WC2026 stage ladder and knockout MATCH bracket during oddsgraph build.
+---
+
 # Official bracket
 
 By default, `build` / `run` inject a curated fragment from

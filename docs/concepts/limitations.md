@@ -1,3 +1,7 @@
+---
+description: Known OddsFox Graph caveats including disconnected topology and market layers and WC2026-only scope.
+---
+
 # Known limitations
 
 A single place for caveats that are otherwise scattered across guides and

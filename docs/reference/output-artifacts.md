@@ -1,3 +1,7 @@
+---
+description: Column contracts for nodes, edges, rejected edges, ontology.json, and inference_report.json exports.
+---
+
 # Output artifacts
 
 Default export directory: `build/`.

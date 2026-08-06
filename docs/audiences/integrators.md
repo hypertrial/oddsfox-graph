@@ -1,3 +1,7 @@
+---
+description: Consume OddsFox Graph parquet exports safely—confidence, inference methods, ontology boundaries, and anti-patterns.
+---
+
 # Integrators
 
 Use this hub when you consume OddsFox Graph exports in another system.
@@ -50,10 +54,5 @@ and validation path.
 | Allowed patterns | [Ontology](../reference/ontology.md) |
 | How IDs merge | [Entity resolution](../concepts/entity-resolution.md) |
 | Input grain | [Source data schema](../reference/source-data-schema.md) |
-
-## See also
-
-- [Output artifacts](../reference/output-artifacts.md)
-- [Ontology](../reference/ontology.md)
-- [Known limitations](../concepts/limitations.md)
-- [Architecture](../concepts/architecture.md)
+| Caveats | [Known limitations](../concepts/limitations.md) |
+| Compiler stages | [Architecture](../concepts/architecture.md) |

@@ -1,3 +1,7 @@
+---
+description: Definitions for OddsFox Graph terms including fragments, residual events, confidence, and inference methods.
+---
+
 # Glossary
 
 Short definitions for OddsFox Graph terminology. Each term links to its

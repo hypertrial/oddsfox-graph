@@ -1,3 +1,7 @@
+---
+description: Allowed node types, edge types, and source-target patterns in the OddsFox Graph ontology.
+---
+
 # Ontology
 
 Canonical node types, edge types, and allowed `(source, target)` patterns live

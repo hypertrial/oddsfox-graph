@@ -52,3 +52,9 @@ introduces them.
   diagram that separates residual LLM and official-bracket paths.
 - Add Concepts glossary for core terms (fragment, residual event, resolution
   tier, inference method, and related).
+- De-duplicate `README.md` against the docs site; migrate MLX and outlines
+  content into a new [Inference backends](docs/guides/inference-backends.md)
+  guide.
+- Add per-page SEO `description:` front matter across all MkDocs pages.
+- Vendor `mermaid@11.15.0` locally under `docs/assets/javascripts/` (no CDN).
+- Add a scheduled/non-blocking lychee external link-checker workflow.

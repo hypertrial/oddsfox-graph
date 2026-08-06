@@ -1,3 +1,7 @@
+---
+description: Change OddsFox Graph code, tests, or docs with the repository layout, test commands, and PR checklist.
+---
+
 # Contributors
 
 Use this hub when you change OddsFox Graph code, tests, or docs. See
@@ -18,55 +22,17 @@ for notable changes.
 | `docs/` | This documentation site |
 | `models/` | Local GGUF / MLX weight instructions |
 
-## Run tests
-
-```bash
-uv sync --frozen --extra dev
-uv run pytest
-```
-
-Optional live model integration:
-
-```bash
-ODDSGRAPH_LIVE_MODEL_TEST=1 uv run pytest -m integration
-```
-
-Optional live server integration (requires running `llama-server`):
-
-```bash
-ODDSGRAPH_LIVE_SERVER_TEST=1 uv run pytest -m integration
-```
-
-## Docs workflow
-
-```bash
-uv sync --extra docs
-uv run mkdocs serve -a 127.0.0.1:8000
-uv run mkdocs build --strict
-uv run pytest tests/docs -q
-```
-
-## Fine-tuning scripts
-
-Experimental residual-path fine-tuning lives under `scripts/`:
-
-- `export_finetune_dataset.py`
-- `finetune_lora.py`
-- `eval_finetuned_model.py`
-
-See [Fine-tuning](../guides/finetuning.md).
+Setup, tests, extras, and docs workflow live in
+[Development](../development/index.md). Experimental residual-path LoRA scripts
+are covered in [Fine-tuning](../guides/finetuning.md).
 
 ## Next pages
 
 | Goal | Page |
 | --- | --- |
+| Setup / tests / docs | [Development](../development/index.md) |
 | Architecture | [Architecture](../concepts/architecture.md) |
-| Development guide | [Development](../development/index.md) |
+| Entity resolution | [Entity resolution](../concepts/entity-resolution.md) |
 | Ontology contract | [Ontology](../reference/ontology.md) |
 | CLI surface | [CLI](../reference/cli.md) |
-
-## See also
-
-- [Development](../development/index.md)
-- [Entity resolution](../concepts/entity-resolution.md)
-- [Fine-tuning](../guides/finetuning.md)
+| Fine-tuning scripts | [Fine-tuning](../guides/finetuning.md) |

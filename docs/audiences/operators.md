@@ -1,3 +1,7 @@
+---
+description: Install OddsFox Graph, place source data, choose an LLM backend, and run the pipeline end to end.
+---
+
 # Operators
 
 Use this hub when you install OddsFox Graph, keep a local model available, and
@@ -43,7 +47,8 @@ Put a Pipeline golden mart export at the repository root or under `data/`:
 oddsgraph run
 ```
 
-Prefer the server backend for large full-dataset runs:
+Prefer the server backend when you want concurrent residual inference on a
+large full-dataset run:
 
 ```bash
 llama-server -m models/qwen3-4b-q4_k_m.gguf -ngl -1 -c 12288 -np 4 -cb -fa on \
@@ -53,11 +58,9 @@ oddsgraph run --llm-backend server --concurrency 4
 
 ## Backend choices
 
-| Backend | When to use |
-| --- | --- |
-| `inprocess` (default) | Single-machine runs without a separate server |
-| `server` | Full-dataset runs with concurrent `llama-server` requests |
-| `mlx` | Apple Silicon MLX checkpoints (`--extra mlx`) |
+Prefer `inprocess` (default) or `mlx` for single-machine decode; use `server`
+for concurrent pipelining. Full comparison, outlines notes, and MLX setup:
+[Inference backends](../guides/inference-backends.md).
 
 ## Next pages
 
@@ -65,13 +68,10 @@ oddsgraph run --llm-backend server --concurrency 4
 | --- | --- |
 | First successful run | [Quickstart](../getting-started/index.md) |
 | Stage-by-stage CLI | [Running the pipeline](../guides/running-the-pipeline.md) |
-| Faster infer | [llama-server](../guides/llama-server.md) |
+| Backend choice / MLX | [Inference backends](../guides/inference-backends.md) |
+| Faster infer (server) | [llama-server](../guides/llama-server.md) |
 | Settings defaults | [Configuration](../reference/configuration.md) |
-
-## See also
-
-- [Quickstart](../getting-started/index.md)
-- [Deterministic topology](../guides/deterministic-topology.md)
-- [Official bracket](../guides/official-bracket.md)
-- [Troubleshooting](../concepts/troubleshooting.md)
-- [FAQ](../concepts/faq.md)
+| Deterministic coverage | [Deterministic topology](../guides/deterministic-topology.md) |
+| Official bracket | [Official bracket](../guides/official-bracket.md) |
+| Common failures | [Troubleshooting](../concepts/troubleshooting.md) |
+| Common questions | [FAQ](../concepts/faq.md) |

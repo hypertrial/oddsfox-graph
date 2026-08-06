@@ -1,4 +1,5 @@
 ---
+description: Build prediction market logical knowledge graphs with OddsFox Graph, a local Logical Knowledge Graph Compiler for Polymarket WC2026.
 hide:
   - navigation
   - toc

@@ -1,3 +1,7 @@
+---
+description: Run residual OddsFox Graph inference against a local llama-server with continuous batching and concurrency.
+---
+
 # llama-server
 
 For large full-dataset runs on Apple Silicon, start `llama-server` with
@@ -32,6 +36,7 @@ oddsgraph infer --llm-backend server --server-url http://127.0.0.1:8080 --concur
 
 ## See also
 
+- [Inference backends](inference-backends.md)
 - [Running the pipeline](running-the-pipeline.md)
 - [Configuration](../reference/configuration.md)
 - [FAQ](../concepts/faq.md)

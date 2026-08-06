@@ -1,13 +1,12 @@
+---
+description: OddsFox Graph Settings defaults from oddsgraph/config.py for paths, LLM backends, and pipeline behavior.
+---
+
 # Configuration
 
 Runtime settings live in the `Settings` dataclass in `oddsgraph/config.py`.
 CLI flags override selected fields at runtime; the table below is the code
 default source of truth.
-
-!!! note
-
-    Some older README tables listed different `n_ctx` / concurrency defaults.
-    Prefer this page (and `oddsgraph/config.py`) when values disagree.
 
 ## Paths
 
@@ -72,4 +71,5 @@ default source of truth.
 
 - [CLI](cli.md)
 - [Running the pipeline](../guides/running-the-pipeline.md)
+- [Inference backends](../guides/inference-backends.md)
 - [llama-server](../guides/llama-server.md)

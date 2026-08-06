@@ -1,3 +1,7 @@
+---
+description: Launch the local Dash and Cytoscape explorer over OddsFox Graph nodes and edges parquet exports.
+---
+
 # Explorer
 
 Launch a local, read-only Dash + Cytoscape explorer over exported graph

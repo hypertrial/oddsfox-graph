@@ -1,3 +1,7 @@
+---
+description: Install llama-cpp-python from a prebuilt CPU wheel on Linux or any machine without Metal GPU support.
+---
+
 # Linux / CPU-only setup
 
 Every other install snippet in these docs assumes Apple Silicon with Metal.

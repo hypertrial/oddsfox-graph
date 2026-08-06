@@ -56,7 +56,7 @@ def test_material_theme_uses_native_navigation_and_dark_palette():
     assert config["theme"]["font"] is False
     assert config["extra_css"] == ["assets/stylesheets/extra.css"]
     assert config["extra_javascript"] == [
-        "https://cdn.jsdelivr.net/npm/mermaid@11.15.0/dist/mermaid.min.js",
+        "assets/javascripts/mermaid.min.js",
         "assets/javascripts/mermaid.js",
     ]
     assert "navigation.expand" not in features
@@ -96,6 +96,18 @@ def test_every_page_starts_with_a_visible_h1():
         assert re.search(r"^# [^#]", text, re.MULTILINE), path.relative_to(DOCS_DIR)
 
 
+def test_every_page_has_a_description_front_matter_field():
+    for path in DOCS_DIR.rglob("*.md"):
+        text = path.read_text()
+        assert text.startswith("---\n"), path.relative_to(DOCS_DIR)
+        front_matter = text.split("---\n", 2)[1]
+        meta = yaml.safe_load(front_matter) or {}
+        description = meta.get("description")
+        assert isinstance(description, str) and description.strip(), path.relative_to(
+            DOCS_DIR
+        )
+
+
 def test_homepage_uses_parsed_markdown_and_audience_actions():
     homepage = (DOCS_DIR / "index.md").read_text()
 
@@ -116,6 +128,8 @@ def test_brand_assets_and_compact_styles_exist():
         "assets/fonts/inter-latin-variable.woff2",
         "assets/fonts/jetbrains-mono-latin-variable.woff2",
         "assets/stylesheets/extra.css",
+        "assets/javascripts/mermaid.min.js",
+        "assets/javascripts/MERMAID-LICENSE.txt",
         "assets/javascripts/mermaid.js",
     ]
 

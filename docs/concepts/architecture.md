@@ -1,3 +1,7 @@
+---
+description: How OddsFox Graph maps reduce, infer, and build stages to Logical Knowledge Graph Compiler phases.
+---
+
 # Architecture
 
 OddsFox Graph is a local **Logical Knowledge Graph Compiler** for prediction
@@ -79,15 +83,15 @@ flowchart LR
 
 Local LLM inference dominates end-to-end wall-clock time. Deterministic
 topology covers most WC2026 events; residual LLM work is the expensive path.
-
-**Backend choice:**
-- Single-machine decode speed: prefer `--llm-backend inprocess` (default) or `mlx`.
-- Concurrent request pipelining across processes: use `--llm-backend server --concurrency N`.
+Backend choice (`inprocess` / `server` / `mlx`), outlines constrained decoding,
+and MLX setup are documented in
+[Inference backends](../guides/inference-backends.md).
 
 ## See also
 
 - [Glossary](glossary.md)
 - [Deterministic topology](../guides/deterministic-topology.md)
 - [Official bracket](../guides/official-bracket.md)
+- [Inference backends](../guides/inference-backends.md)
 - [Entity resolution](entity-resolution.md)
 - [Running the pipeline](../guides/running-the-pipeline.md)

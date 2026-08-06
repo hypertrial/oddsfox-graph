@@ -1,3 +1,7 @@
+---
+description: Answers about hosted data, inference speed, Metal, topology-market disconnect, and configuration defaults.
+---
+
 # FAQ
 
 ## Does OddsFox Graph host data?
@@ -10,7 +14,9 @@ model weights.
 
 LLM inference dominates wall-clock time. Deterministic topology skips the LLM
 for template-covered events (~91% on WC2026). For residual events, prefer
-`--llm-backend server --concurrency N` on Apple Silicon.
+`--llm-backend inprocess` (default) or `mlx` for single-machine decode speed;
+use `--llm-backend server --concurrency N` when you want concurrent request
+pipelining. See [Inference backends](../guides/inference-backends.md).
 
 ## Do I need Metal?
 
@@ -35,5 +41,6 @@ page mirrors those code defaults.
 - [Glossary](glossary.md)
 - [Known limitations](limitations.md)
 - [Troubleshooting](troubleshooting.md)
+- [Inference backends](../guides/inference-backends.md)
 - [Explorer](../guides/explorer.md)
 - [Quickstart](../getting-started/index.md)

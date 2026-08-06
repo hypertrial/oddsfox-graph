@@ -54,7 +54,7 @@ extra_css:
   - assets/stylesheets/extra.css
 
 extra_javascript:
-  - https://cdn.jsdelivr.net/npm/mermaid@11.15.0/dist/mermaid.min.js
+  - assets/javascripts/mermaid.min.js
   - assets/javascripts/mermaid.js
 
 extra:
@@ -82,6 +82,7 @@ nav:
       - Running the pipeline: guides/running-the-pipeline.md
       - Deterministic topology: guides/deterministic-topology.md
       - Official bracket: guides/official-bracket.md
+      - Inference backends: guides/inference-backends.md
       - llama-server: guides/llama-server.md
       - Linux / CPU-only setup: guides/linux-cpu-setup.md
       - Explorer: guides/explorer.md
