@@ -1,4 +1,4 @@
-# OddsFox Graph
+# oddsgraph
 
 Local, open-source pipeline that converts Polymarket WC2026 hourly-odds parquet
 into an inferred logical graph of competitions, teams, stages, matches, markets,
@@ -46,11 +46,11 @@ Download the local model (see `models/README.md`).
 ## CLI
 
 ```bash
-oddsfox-graph reduce          # reduce parquet to semantic markets
-oddsfox-graph infer           # infer graph fragments per event
-oddsfox-graph build           # resolve, validate, export graph
-oddsfox-graph validate        # validate exported artifacts
-oddsfox-graph run             # full pipeline
+oddsgraph reduce          # reduce parquet to semantic markets
+oddsgraph infer           # infer graph fragments per event
+oddsgraph build           # resolve, validate, export graph
+oddsgraph validate        # validate exported artifacts
+oddsgraph run             # full pipeline
 ```
 
 Global options (all commands):
@@ -72,7 +72,7 @@ Build / run options:
 
 ### Chunking settings (infer)
 
-Configured in `Settings` defaults in `oddsfox_graph/config.py`:
+Configured in `Settings` defaults in `oddsgraph/config.py`:
 
 | Setting | Default | Purpose |
 |---------|---------|---------|
@@ -113,5 +113,5 @@ uv run pytest
 Live model integration tests (optional):
 
 ```bash
-OF_LIVE_MODEL_TEST=1 uv run pytest -m integration
+ODDSGRAPH_LIVE_MODEL_TEST=1 uv run pytest -m integration
 ```

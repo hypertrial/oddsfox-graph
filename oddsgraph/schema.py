@@ -6,7 +6,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
-from oddsfox_graph.ontology import EdgeType, NodeType
+from oddsgraph.ontology import EdgeType, NodeType
 
 
 class Node(BaseModel):

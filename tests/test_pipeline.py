@@ -1,9 +1,9 @@
 import shutil
 from pathlib import Path
 
-from oddsfox_graph.config import Settings
-from oddsfox_graph.pipeline import build_pipeline_from_markets, run_build_and_export
-from oddsfox_graph.reduce import load_semantic_markets, select_event_ids
+from oddsgraph.config import Settings
+from oddsgraph.pipeline import build_pipeline_from_markets, run_build_and_export
+from oddsgraph.reduce import load_semantic_markets, select_event_ids
 
 from tests.helpers import GOLDEN_MARKETS_PATH, load_fixture_fragment, load_golden_markets
 

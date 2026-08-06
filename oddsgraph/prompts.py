@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import json
 
-from oddsfox_graph.ontology import EdgeType, NodeType
-from oddsfox_graph.schema import SemanticMarket
+from oddsgraph.ontology import EdgeType, NodeType
+from oddsgraph.schema import SemanticMarket
 
 SYSTEM_RULES = """
 You extract a typed logical graph from Polymarket WC2026 market metadata.

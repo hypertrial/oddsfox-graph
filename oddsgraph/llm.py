@@ -8,9 +8,9 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from oddsfox_graph.config import Settings
-from oddsfox_graph.prompts import ALLOWED_EDGE_TYPES, ALLOWED_NODE_TYPES
-from oddsfox_graph.schema import GraphFragment
+from oddsgraph.config import Settings
+from oddsgraph.prompts import ALLOWED_EDGE_TYPES, ALLOWED_NODE_TYPES
+from oddsgraph.schema import GraphFragment
 
 logger = logging.getLogger(__name__)
 

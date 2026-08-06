@@ -1,12 +1,12 @@
 import duckdb
 import pyarrow.parquet as pq
 
-from oddsfox_graph.config import Settings
-from oddsfox_graph.export import export_graph_artifacts
-from oddsfox_graph.graphbuild import build_graph_from_fragments
-from oddsfox_graph.reporting import build_inference_report
-from oddsfox_graph.resolution import resolve_fragments
-from oddsfox_graph.schema import InferenceReport
+from oddsgraph.config import Settings
+from oddsgraph.export import export_graph_artifacts
+from oddsgraph.graphbuild import build_graph_from_fragments
+from oddsgraph.reporting import build_inference_report
+from oddsgraph.resolution import resolve_fragments
+from oddsgraph.schema import InferenceReport
 
 from tests.helpers import load_fixture_fragment
 

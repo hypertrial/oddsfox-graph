@@ -1,8 +1,8 @@
 from pathlib import Path
 
-from oddsfox_graph.config import Settings
-from oddsfox_graph.export import export_graph_artifacts
-from oddsfox_graph.pipeline import build_pipeline_from_markets, validate_exported_artifacts
+from oddsgraph.config import Settings
+from oddsgraph.export import export_graph_artifacts
+from oddsgraph.pipeline import build_pipeline_from_markets, validate_exported_artifacts
 
 from tests.helpers import load_fixture_fragment, load_golden_markets
 

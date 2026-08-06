@@ -7,16 +7,16 @@ from pathlib import Path
 
 import pyarrow.parquet as pq
 
-from oddsfox_graph.config import Settings
-from oddsfox_graph.deterministic import build_deterministic_fragments_by_event
-from oddsfox_graph.export import export_graph_artifacts
-from oddsfox_graph.graphbuild import GraphBuildResult, build_graph_from_fragments, validate_exported_graph
-from oddsfox_graph.infer import load_all_fragments
-from oddsfox_graph.ontology import EdgeType
-from oddsfox_graph.reduce import load_semantic_markets
-from oddsfox_graph.reporting import build_inference_report, load_inference_report
-from oddsfox_graph.resolution import ResolutionState, resolve_fragments
-from oddsfox_graph.schema import CanonicalEdge, CanonicalNode, GraphFragment, InferenceReport, SemanticMarket
+from oddsgraph.config import Settings
+from oddsgraph.deterministic import build_deterministic_fragments_by_event
+from oddsgraph.export import export_graph_artifacts
+from oddsgraph.graphbuild import GraphBuildResult, build_graph_from_fragments, validate_exported_graph
+from oddsgraph.infer import load_all_fragments
+from oddsgraph.ontology import EdgeType
+from oddsgraph.reduce import load_semantic_markets
+from oddsgraph.reporting import build_inference_report, load_inference_report
+from oddsgraph.resolution import ResolutionState, resolve_fragments
+from oddsgraph.schema import CanonicalEdge, CanonicalNode, GraphFragment, InferenceReport, SemanticMarket
 
 
 @dataclass

@@ -1,10 +1,10 @@
-from oddsfox_graph.prompts import (
+from oddsgraph.prompts import (
     _chunk_exceeds_budget,
     _serialize_market,
     chunk_markets_for_prompt,
     estimate_output_tokens,
 )
-from oddsfox_graph.schema import SemanticMarket
+from oddsgraph.schema import SemanticMarket
 
 
 def _market(market_id: str, description: str | None = None) -> SemanticMarket:

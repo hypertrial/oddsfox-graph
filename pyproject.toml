@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "oddsfox-graph"
+name = "oddsgraph"
 version = "0.1.0"
 description = "Local WC2026 Polymarket graph inference pipeline."
 readme = "README.md"
@@ -24,16 +24,16 @@ dependencies = [
 dev = ["pytest>=8.0"]
 
 [project.scripts]
-oddsfox-graph = "oddsfox_graph.cli:app"
+oddsgraph = "oddsgraph.cli:app"
 
 [project.urls]
 Repository = "https://github.com/hypertrial/oddsfox-graph"
 
 [tool.setuptools.packages.find]
-include = ["oddsfox_graph*"]
+include = ["oddsgraph*"]
 
 [tool.setuptools.package-data]
-oddsfox_graph = ["data/*.json"]
+oddsgraph = ["data/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

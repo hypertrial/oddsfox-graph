@@ -11,8 +11,8 @@ import duckdb
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from oddsfox_graph.config import Settings
-from oddsfox_graph.schema import SemanticMarket
+from oddsgraph.config import Settings
+from oddsgraph.schema import SemanticMarket
 
 logger = logging.getLogger(__name__)
 

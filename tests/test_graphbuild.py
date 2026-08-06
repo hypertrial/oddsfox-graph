@@ -1,12 +1,12 @@
-from oddsfox_graph.config import Settings
-from oddsfox_graph.graphbuild import (
+from oddsgraph.config import Settings
+from oddsgraph.graphbuild import (
     _has_progression_cycle,
     build_graph_from_fragments,
     validate_exported_graph,
 )
-from oddsfox_graph.ontology import EdgeType, NodeType
-from oddsfox_graph.resolution import resolve_fragments
-from oddsfox_graph.schema import CanonicalEdge, Edge, GraphFragment, Node
+from oddsgraph.ontology import EdgeType, NodeType
+from oddsgraph.resolution import resolve_fragments
+from oddsgraph.schema import CanonicalEdge, Edge, GraphFragment, Node
 
 from tests.helpers import load_fixture_fragment
 

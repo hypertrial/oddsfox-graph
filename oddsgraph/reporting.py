@@ -8,9 +8,9 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from oddsfox_graph.graphbuild import GraphBuildResult
-from oddsfox_graph.resolution import ResolutionState
-from oddsfox_graph.schema import InferenceReport
+from oddsgraph.graphbuild import GraphBuildResult
+from oddsgraph.resolution import ResolutionState
+from oddsgraph.schema import InferenceReport
 
 
 def load_inference_report(path: Path) -> InferenceReport:

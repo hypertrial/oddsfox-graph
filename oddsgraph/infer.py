@@ -7,12 +7,12 @@ import logging
 from collections import defaultdict
 from pathlib import Path
 
-from oddsfox_graph.config import Settings
-from oddsfox_graph.llm import LLMInferenceError, LocalGraphLLM
-from oddsfox_graph.prompts import build_event_prompt, chunk_markets_for_prompt
-from oddsfox_graph.reduce import list_semantic_market_event_ids, load_semantic_markets, select_event_ids
-from oddsfox_graph.reporting import merge_per_event_status
-from oddsfox_graph.schema import Edge, GraphFragment, Node, SemanticMarket
+from oddsgraph.config import Settings
+from oddsgraph.llm import LLMInferenceError, LocalGraphLLM
+from oddsgraph.prompts import build_event_prompt, chunk_markets_for_prompt
+from oddsgraph.reduce import list_semantic_market_event_ids, load_semantic_markets, select_event_ids
+from oddsgraph.reporting import merge_per_event_status
+from oddsgraph.schema import Edge, GraphFragment, Node, SemanticMarket
 
 logger = logging.getLogger(__name__)
 

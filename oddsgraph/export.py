@@ -9,8 +9,8 @@ from typing import Any
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from oddsfox_graph.ontology import dump_ontology_json
-from oddsfox_graph.schema import CanonicalEdge, CanonicalNode, InferenceReport, RejectedEdge
+from oddsgraph.ontology import dump_ontology_json
+from oddsgraph.schema import CanonicalEdge, CanonicalNode, InferenceReport, RejectedEdge
 
 
 def _table_with_schema(rows: list[dict], template_row: dict[str, Any]) -> pa.Table:

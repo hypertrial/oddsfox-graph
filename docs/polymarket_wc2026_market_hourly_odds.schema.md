@@ -1,6 +1,6 @@
 # Polymarket WC2026 market hourly odds — parquet schema
 
-Pipeline golden mart export used as the primary input for OddsFox Graph.
+Pipeline golden mart export used as the primary input for oddsgraph.
 
 | Property | Value |
 | --- | --- |

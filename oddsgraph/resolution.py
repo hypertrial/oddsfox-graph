@@ -7,10 +7,10 @@ from dataclasses import dataclass, field
 
 from rapidfuzz import fuzz, process
 
-from oddsfox_graph import ids
-from oddsfox_graph.config import Settings
-from oddsfox_graph.ontology import NodeType
-from oddsfox_graph.schema import CanonicalNode, GraphFragment, Node
+from oddsgraph import ids
+from oddsgraph.config import Settings
+from oddsgraph.ontology import NodeType
+from oddsgraph.schema import CanonicalNode, GraphFragment, Node
 
 DEFAULT_COMPETITION_SLUG = "world-cup-2026"
 

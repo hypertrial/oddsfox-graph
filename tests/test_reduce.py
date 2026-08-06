@@ -2,8 +2,8 @@ from pathlib import Path
 
 import pyarrow.parquet as pq
 
-from oddsfox_graph.config import Settings
-from oddsfox_graph.reduce import reduce_semantic_markets
+from oddsgraph.config import Settings
+from oddsgraph.reduce import reduce_semantic_markets
 
 
 def test_reduce_writes_semantic_markets(tmp_path: Path) -> None:

@@ -3,8 +3,8 @@ from pathlib import Path
 
 from typer.testing import CliRunner
 
-from oddsfox_graph.cli import app
-from oddsfox_graph.config import Settings
+from oddsgraph.cli import app
+from oddsgraph.config import Settings
 
 from tests.helpers import GOLDEN_MARKETS_PATH, load_fixture_fragment
 
@@ -14,6 +14,7 @@ runner = CliRunner()
 def test_cli_help() -> None:
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
+    assert "Usage: oddsgraph" in result.output
     assert "reduce" in result.output
     assert "infer" in result.output
     assert "build" in result.output

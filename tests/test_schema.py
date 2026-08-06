@@ -1,8 +1,8 @@
 import pytest
 from pydantic import ValidationError
 
-from oddsfox_graph.ontology import EdgeType, NodeType
-from oddsfox_graph.schema import Edge, GraphFragment, Node
+from oddsgraph.ontology import EdgeType, NodeType
+from oddsgraph.schema import Edge, GraphFragment, Node
 
 
 def test_graph_fragment_validates() -> None:

@@ -1,4 +1,4 @@
-"""Typer CLI for the OddsFox graph inference pipeline."""
+"""Typer CLI for the oddsgraph inference pipeline."""
 
 from __future__ import annotations
 
@@ -8,14 +8,14 @@ from typing import Annotated, Optional
 
 import typer
 
-from oddsfox_graph.config import Settings
-from oddsfox_graph.infer import infer_event_fragments, load_markets_for_infer
-from oddsfox_graph.llm import LocalGraphLLM
-from oddsfox_graph.pipeline import run_build_and_export, validate_exported_artifacts
-from oddsfox_graph.reduce import reduce_semantic_markets
+from oddsgraph.config import Settings
+from oddsgraph.infer import infer_event_fragments, load_markets_for_infer
+from oddsgraph.llm import LocalGraphLLM
+from oddsgraph.pipeline import run_build_and_export, validate_exported_artifacts
+from oddsgraph.reduce import reduce_semantic_markets
 
 app = typer.Typer(
-    name="oddsfox-graph",
+    name="oddsgraph",
     help="Local WC2026 Polymarket graph inference pipeline.",
     no_args_is_help=True,
 )

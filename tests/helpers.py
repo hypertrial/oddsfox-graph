@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from oddsfox_graph.schema import GraphFragment, SemanticMarket
+from oddsgraph.schema import GraphFragment, SemanticMarket
 
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
 GOLDEN_MARKETS_PATH = FIXTURES_DIR / "golden_semantic_markets.parquet"
@@ -13,7 +13,7 @@ FRAGMENTS_DIR = FIXTURES_DIR / "fragments"
 
 
 def load_golden_markets() -> list[SemanticMarket]:
-    from oddsfox_graph.reduce import load_semantic_markets
+    from oddsgraph.reduce import load_semantic_markets
 
     return load_semantic_markets(GOLDEN_MARKETS_PATH)
 

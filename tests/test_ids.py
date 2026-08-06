@@ -1,4 +1,4 @@
-from oddsfox_graph import ids
+from oddsgraph import ids
 
 
 def test_canonical_ids_are_deterministic() -> None:

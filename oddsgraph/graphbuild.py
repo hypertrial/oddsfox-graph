@@ -6,14 +6,14 @@ from dataclasses import dataclass, field
 
 import rustworkx as rx
 
-from oddsfox_graph.config import Settings
-from oddsfox_graph.ontology import (
+from oddsgraph.config import Settings
+from oddsgraph.ontology import (
     EdgeType,
     is_allowed_edge,
     PROGRESSION_EDGE_TYPES,
 )
-from oddsfox_graph.resolution import ResolutionState
-from oddsfox_graph.schema import CanonicalEdge, CanonicalNode, Edge, GraphFragment, RejectedEdge
+from oddsgraph.resolution import ResolutionState
+from oddsgraph.schema import CanonicalEdge, CanonicalNode, Edge, GraphFragment, RejectedEdge
 
 
 @dataclass

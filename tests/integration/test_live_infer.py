@@ -3,18 +3,18 @@ from pathlib import Path
 
 import pytest
 
-from oddsfox_graph.config import Settings
-from oddsfox_graph.infer import infer_event_fragments
-from oddsfox_graph.llm import LocalGraphLLM
-from oddsfox_graph.reduce import load_semantic_markets
+from oddsgraph.config import Settings
+from oddsgraph.infer import infer_event_fragments
+from oddsgraph.llm import LocalGraphLLM
+from oddsgraph.reduce import load_semantic_markets
 
 from tests.helpers import GOLDEN_MARKETS_PATH
 
 
 @pytest.mark.integration
 @pytest.mark.skipif(
-    os.environ.get("OF_LIVE_MODEL_TEST") != "1",
-    reason="Set OF_LIVE_MODEL_TEST=1 to run live model tests",
+    os.environ.get("ODDSGRAPH_LIVE_MODEL_TEST") != "1",
+    reason="Set ODDSGRAPH_LIVE_MODEL_TEST=1 to run live model tests",
 )
 @pytest.mark.skipif(
     not Path("models/qwen3-4b-q4_k_m.gguf").exists(),

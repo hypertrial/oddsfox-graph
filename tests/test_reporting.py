@@ -1,16 +1,16 @@
 import json
 from pathlib import Path
 
-from oddsfox_graph.config import Settings
-from oddsfox_graph.graphbuild import GraphBuildResult
-from oddsfox_graph.infer import infer_event_fragments
-from oddsfox_graph.reporting import (
+from oddsgraph.config import Settings
+from oddsgraph.graphbuild import GraphBuildResult
+from oddsgraph.infer import infer_event_fragments
+from oddsgraph.reporting import (
     build_inference_report,
     load_inference_report,
     merge_per_event_status,
 )
-from oddsfox_graph.resolution import ResolutionState
-from oddsfox_graph.schema import GraphFragment, InferenceReport
+from oddsgraph.resolution import ResolutionState
+from oddsgraph.schema import GraphFragment, InferenceReport
 
 from tests.helpers import load_golden_markets
 

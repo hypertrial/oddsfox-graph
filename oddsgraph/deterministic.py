@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from collections import defaultdict
 
-from oddsfox_graph import ids
-from oddsfox_graph.ontology import EdgeType, NodeType
-from oddsfox_graph.schema import Edge, GraphFragment, Node, SemanticMarket
+from oddsgraph import ids
+from oddsgraph.ontology import EdgeType, NodeType
+from oddsgraph.schema import Edge, GraphFragment, Node, SemanticMarket
 
 
 def build_deterministic_fragment(markets: list[SemanticMarket]) -> GraphFragment:

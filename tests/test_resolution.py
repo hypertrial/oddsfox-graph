@@ -1,7 +1,7 @@
-from oddsfox_graph.config import Settings
-from oddsfox_graph.ontology import NodeType
-from oddsfox_graph.resolution import resolve_fragments
-from oddsfox_graph.schema import GraphFragment, Node
+from oddsgraph.config import Settings
+from oddsgraph.ontology import NodeType
+from oddsgraph.resolution import resolve_fragments
+from oddsgraph.schema import GraphFragment, Node
 
 from tests.helpers import load_fixture_fragment
 

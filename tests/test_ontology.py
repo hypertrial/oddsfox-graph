@@ -1,4 +1,4 @@
-from oddsfox_graph.ontology import ALLOWED_EDGE_PATTERNS, EdgeType, NodeType, is_allowed_edge
+from oddsgraph.ontology import ALLOWED_EDGE_PATTERNS, EdgeType, NodeType, is_allowed_edge
 
 
 def test_allowed_edge_patterns_include_spec_examples() -> None:
