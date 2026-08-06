@@ -1,6 +1,10 @@
 # Contributors
 
-Use this hub when you change OddsFox Graph code, tests, or docs.
+Use this hub when you change OddsFox Graph code, tests, or docs. See
+[CONTRIBUTING.md](https://github.com/hypertrial/oddsfox-graph/blob/main/CONTRIBUTING.md)
+for the PR checklist and
+[CHANGELOG.md](https://github.com/hypertrial/oddsfox-graph/blob/main/CHANGELOG.md)
+for notable changes.
 
 <span class="of-persona of-persona--contributor">Contributor</span>
 

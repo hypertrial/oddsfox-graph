@@ -83,6 +83,7 @@ nav:
       - Deterministic topology: guides/deterministic-topology.md
       - Official bracket: guides/official-bracket.md
       - llama-server: guides/llama-server.md
+      - Linux / CPU-only setup: guides/linux-cpu-setup.md
       - Explorer: guides/explorer.md
       - Fine-tuning: guides/finetuning.md
   - Reference:
@@ -94,6 +95,8 @@ nav:
   - Concepts:
       - Architecture: concepts/architecture.md
       - Entity resolution: concepts/entity-resolution.md
+      - Known limitations: concepts/limitations.md
+      - Troubleshooting: concepts/troubleshooting.md
       - FAQ: concepts/faq.md
   - Development:
       - Development guide: development/index.md

@@ -55,4 +55,5 @@ and validation path.
 
 - [Output artifacts](../reference/output-artifacts.md)
 - [Ontology](../reference/ontology.md)
+- [Known limitations](../concepts/limitations.md)
 - [Architecture](../concepts/architecture.md)

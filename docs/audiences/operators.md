@@ -17,6 +17,10 @@ On Apple Silicon, install `llama-cpp-python` with Metal support:
 CMAKE_ARGS="-DGGML_METAL=on" uv sync --frozen --extra dev
 ```
 
+On Linux or any CPU-only machine, see
+[Linux / CPU-only setup](../guides/linux-cpu-setup.md) to avoid compiling
+`llama-cpp-python` from source.
+
 Download the recommended GGUF model (see `models/README.md`):
 
 ```bash
@@ -69,4 +73,5 @@ oddsgraph run --llm-backend server --concurrency 4
 - [Quickstart](../getting-started/index.md)
 - [Deterministic topology](../guides/deterministic-topology.md)
 - [Official bracket](../guides/official-bracket.md)
+- [Troubleshooting](../concepts/troubleshooting.md)
 - [FAQ](../concepts/faq.md)

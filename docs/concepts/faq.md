@@ -15,8 +15,8 @@ for template-covered events (~91% on WC2026). For residual events, prefer
 ## Do I need Metal?
 
 Metal-accelerated `llama-cpp-python` is recommended on Apple Silicon. CI and
-CPU-only environments can install the prebuilt CPU wheel instead. See the
-repository README setup section.
+CPU-only environments can install the prebuilt CPU wheel instead. See
+[Linux / CPU-only setup](../guides/linux-cpu-setup.md).
 
 ## Are topology and markets connected?
 
@@ -32,5 +32,7 @@ page mirrors those code defaults.
 ## See also
 
 - [Architecture](architecture.md)
+- [Known limitations](limitations.md)
+- [Troubleshooting](troubleshooting.md)
 - [Explorer](../guides/explorer.md)
 - [Quickstart](../getting-started/index.md)
