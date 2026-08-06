@@ -16,6 +16,40 @@ from oddsgraph.schema import SemanticMarket
 
 logger = logging.getLogger(__name__)
 
+REDUCE_BATCH_SIZE = 5000
+
+
+def _semantic_markets_arrow_schema() -> pa.Schema:
+    """Canonical Arrow schema so batched parquet writes stay type-stable."""
+    sample = {
+        "market_id": "",
+        "event_id": "",
+        "event_slug": "",
+        "event_title": "",
+        "event_description": "",
+        "question": "",
+        "description": "",
+        "market_slug": "",
+        "sports_market_type": "",
+        "group_item_title": "",
+        "outcomes": [""],
+        "tags": [""],
+        "event_tags": [""],
+        "game_start_time": "",
+        "end_time": "",
+    }
+    return pa.Table.from_pylist([sample]).schema
+
+
+def _market_row_for_parquet(market: SemanticMarket) -> dict[str, Any]:
+    """Dump a market with list fields normalized for stable Arrow schemas."""
+    row = market.model_dump()
+    for key in ("outcomes", "tags", "event_tags"):
+        if row.get(key) is None:
+            # Keep list typed across batches (None would infer as Arrow null).
+            row[key] = []
+    return row
+
 
 def quote_sql_literal(value: str) -> str:
     """Escape a string for safe inclusion in a DuckDB single-quoted literal."""
@@ -79,6 +113,16 @@ def select_event_ids(
     return selected
 
 
+def _market_row_for_parquet(market: SemanticMarket) -> dict[str, Any]:
+    """Dump a market with list fields normalized for stable Arrow schemas."""
+    row = market.model_dump()
+    for key in ("outcomes", "tags", "event_tags"):
+        if row.get(key) is None:
+            # Keep list typed across batches (None would infer as Arrow null).
+            row[key] = []
+    return row
+
+
 def reduce_semantic_markets(settings: Settings) -> Path:
     settings.ensure_dirs()
     input_glob = settings.resolve_input_glob()
@@ -114,7 +158,7 @@ def reduce_semantic_markets(settings: Settings) -> Path:
 
     # Validate and write in batches to avoid holding pylist + pydantic + dump
     # copies of the full table simultaneously.
-    batch_size = 5000
+    batch_size = REDUCE_BATCH_SIZE
     writer: pq.ParquetWriter | None = None
     total = 0
     try:
@@ -125,7 +169,10 @@ def reduce_semantic_markets(settings: Settings) -> Path:
                 batch = table.slice(start, batch_size)
                 validated = _rows_to_semantic_markets(batch.to_pylist())
                 total += len(validated)
-                out_batch = pa.Table.from_pylist([m.model_dump() for m in validated])
+                out_batch = pa.Table.from_pylist(
+                    [_market_row_for_parquet(m) for m in validated],
+                    schema=_semantic_markets_arrow_schema(),
+                )
                 if writer is None:
                     writer = pq.ParquetWriter(output_path, out_batch.schema)
                 writer.write_table(out_batch)

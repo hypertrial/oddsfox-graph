@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pyarrow as pa
 import pyarrow.parquet as pq
+import pytest
 
 from oddsgraph.config import Settings
 from oddsgraph.reduce import (
@@ -104,3 +105,34 @@ def test_reduce_semantic_markets_handles_apostrophe_in_data_dir(
     markets = load_semantic_markets(out)
     assert len(markets) == 1
     assert markets[0].market_id == "m1"
+
+
+def test_reduce_batches_tolerate_null_then_list_optional_fields(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import oddsgraph.reduce as reduce_mod
+
+    monkeypatch.setattr(reduce_mod, "REDUCE_BATCH_SIZE", 1)
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    rows = [
+        _market_row(market_id="m1", event_id="e1"),
+        {
+            **_market_row(market_id="m2", event_id="e2"),
+            "tags": '["soccer"]',
+            "event_tags": '["wc2026"]',
+        },
+    ]
+    _write_markets(
+        data_dir / "polymarket_wc2026_market_hourly_odds_test.parquet",
+        rows,
+    )
+
+    settings = Settings()
+    settings.configure_build_dir(tmp_path / "build")
+    settings.configure_data_dir(data_dir)
+    settings.ensure_dirs()
+
+    out = reduce_semantic_markets(settings)
+    markets = load_semantic_markets(out)
+    assert {m.market_id for m in markets} == {"m1", "m2"}

@@ -282,6 +282,68 @@ def test_verify_deterministic_resume_skips_llm(tmp_path: Path) -> None:
     assert "match-evt" in results
 
 
+def test_verify_resume_rechecks_when_template_fingerprint_changes(
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path)
+    settings.deterministic_topology = True
+    settings.verify_deterministic = True
+    settings.resume = True
+    markets = [
+        SemanticMarket(
+            market_id="m1",
+            event_id="match-evt",
+            event_title="Brazil vs. Morocco - Exact Score",
+            event_slug="fifwc-bra-mar-2026-06-14",
+            question="Winner?",
+            outcomes=["Brazil", "Morocco"],
+            sports_market_type="soccer_match",
+        )
+    ]
+
+    class CountingLLM(BaseGraphLLM):
+        def __init__(self, settings: Settings) -> None:
+            super().__init__(settings)
+            self.calls = 0
+
+        def _complete(
+            self, user_prompt: str, max_tokens: int, temperature: float
+        ) -> str:
+            self.calls += 1
+            return json.dumps(
+                {
+                    "n": [
+                        {
+                            "id": "team:brazil",
+                            "t": "TEAM",
+                            "l": "Brazil",
+                            "a": [],
+                            "c": 0.9,
+                            "e": ["m1"],
+                        }
+                    ],
+                    "g": [],
+                }
+            )
+
+    infer_event_fragments(settings, markets, llm=CountingLLM(settings))
+    manifest = settings.fragments_dir / "match-evt__verify_manifest.json"
+    assert manifest.exists()
+    # Corrupt fingerprint so resume must re-verify.
+    manifest.write_text(
+        json.dumps(
+            {
+                "candidate_fingerprint": "stale",
+                "status": "deterministic_corrected",
+            }
+        ),
+        encoding="utf-8",
+    )
+    llm2 = CountingLLM(settings)
+    infer_event_fragments(settings, markets, llm=llm2)
+    assert llm2.calls >= 1
+
+
 def test_fragments_equal_considers_aliases(tmp_path: Path) -> None:
     from oddsgraph.infer import _fragments_equal
 

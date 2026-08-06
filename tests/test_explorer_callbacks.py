@@ -211,7 +211,7 @@ def test_expand_surfaces_neighbor_truncation(tmp_path: Path) -> None:
         inference_method="",
         neighbor_limit=1,
     )
-    assert "Truncated to 1 neighbors" in status
+    assert "Truncated to 1 incident edges" in status
 
 
 def test_load_view_honors_skip_reload(tmp_path: Path) -> None:
@@ -241,6 +241,15 @@ def test_open_in_topology_and_search_switch_view(tmp_path: Path) -> None:
     assert opened[4] == VIEW_TOPOLOGY
     assert opened[8] is True
     assert "Opened match:a in Full topology." in opened[1]
+
+    already = open_in_topology(
+        settings,
+        "match:a",
+        0.0,
+        "",
+        current_view_mode=VIEW_TOPOLOGY,
+    )
+    assert already[8] is False
 
     added = add_search_result(
         settings,

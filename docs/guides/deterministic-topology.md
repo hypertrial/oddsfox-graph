@@ -44,10 +44,12 @@ Optional LLM confirm/patch over deterministic output:
 oddsgraph infer --verify-deterministic
 ```
 
-Verified artifacts land at `build/fragments/<event_id>__verified.json`. With
-`--resume` (default), existing verified files are reused without another LLM
-call. On `build`, verified topology **replaces** template topology for that
-event (EVENT/MARKET/OUTCOME base nodes remain deterministic).
+Verified artifacts land at `build/fragments/<event_id>__verified.json` with a
+sidecar `__verify_manifest.json` that fingerprints the template candidate. With
+`--resume` (default), verified files are reused only when that fingerprint still
+matches the current template; otherwise verification runs again. On `build`,
+verified topology **replaces** template topology for that event
+(EVENT/MARKET/OUTCOME base nodes remain deterministic).
 
 ## See also
 

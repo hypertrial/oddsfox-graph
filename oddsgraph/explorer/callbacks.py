@@ -54,7 +54,7 @@ def _noop_mutation() -> CanvasMutation:
 
 def _truncation_note(slice_: GraphSlice, limit: int = 300) -> str:
     if slice_.truncated:
-        return f" Truncated to {limit} neighbors."
+        return f" Truncated to {limit} incident edges."
     return ""
 
 
@@ -163,6 +163,7 @@ def open_in_topology(
     min_confidence: float,
     inference_method: str,
     *,
+    current_view_mode: str = VIEW_BRACKET,
     neighbor_limit: int = 300,
 ) -> CanvasMutation:
     """Merge selected node + neighbors into full topology and switch view."""
@@ -199,6 +200,8 @@ def open_in_topology(
         f"Opened {selected_node_id} in Full topology."
         f"{_truncation_note(neighbors, neighbor_limit)}"
     )
+    # Only suppress the view-mode echo reload when we actually change modes.
+    skip_reload = current_view_mode != VIEW_TOPOLOGY
     return (
         highlighted,
         status,
@@ -208,7 +211,7 @@ def open_in_topology(
         stylesheet_for(VIEW_TOPOLOGY),
         selected_node_id,
         None,
-        True,
+        skip_reload,
     )
 
 
@@ -778,7 +781,13 @@ def register_callbacks(app: Dash, settings: Settings) -> None:
         view_mode = view_mode_state or VIEW_BRACKET
 
         if triggered.startswith("view-in-topology-button"):
-            return open_in_topology(settings, selected_node_id, conf, method)
+            return open_in_topology(
+                settings,
+                selected_node_id,
+                conf,
+                method,
+                current_view_mode=view_mode,
+            )
 
         if triggered.startswith("expand-button"):
             return expand_neighbors(

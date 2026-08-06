@@ -65,6 +65,7 @@ Schema from `InferenceReport`:
 | `semantic_markets.parquet` | Reduced market records |
 | `fragments/<event_id>.json` | Per-event residual graph fragments |
 | `fragments/<event_id>__verified.json` | Opt-in verified/corrected topology; on build these **replace** template topology for that event |
+| `fragments/<event_id>__verify_manifest.json` | Fingerprint of the template candidate used for resume invalidation |
 
 Fragment filenames use a single path-safe `event_id` segment matching
 `[A-Za-z0-9._-]+`. IDs with path separators, spaces, or `..` are rejected so

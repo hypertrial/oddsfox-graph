@@ -249,6 +249,10 @@ def main() -> None:
                 )
                 try:
                     if backend == "server" and concurrency > 1:
+                        if not events:
+                            raise SystemExit(
+                                "No events available for concurrent server benchmark"
+                            )
                         # Need at least `concurrency` events; repeat if necessary.
                         expanded = list(events)
                         while len(expanded) < concurrency:

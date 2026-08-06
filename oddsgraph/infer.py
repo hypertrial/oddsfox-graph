@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from oddsgraph.config import Settings
 from oddsgraph.llm import BaseGraphLLM, build_graph_llm
@@ -71,6 +73,12 @@ def _chunk_manifest_path(settings: Settings, event_id: str) -> Path:
 def _verified_fragment_path(settings: Settings, event_id: str) -> Path:
     return event_artifact_path(
         settings.fragments_dir, event_id, "__verified.json"
+    )
+
+
+def _verify_manifest_path(settings: Settings, event_id: str) -> Path:
+    return event_artifact_path(
+        settings.fragments_dir, event_id, "__verify_manifest.json"
     )
 
 
@@ -196,6 +204,79 @@ def _fragments_equal(a: GraphFragment, b: GraphFragment) -> bool:
     return a_nodes == b_nodes and a_edges == b_edges
 
 
+def _fragment_fingerprint(fragment: GraphFragment) -> str:
+    """Stable hash of the equality-relevant fragment topology."""
+    payload: dict[str, Any] = {
+        "nodes": sorted(
+            (
+                n.local_id,
+                n.type.value,
+                n.label,
+                tuple(sorted(n.aliases)),
+                tuple(sorted(n.evidence_market_ids)),
+            )
+            for n in fragment.nodes
+        ),
+        "edges": sorted(
+            (
+                e.source,
+                e.target,
+                e.type.value,
+                tuple(sorted(e.evidence_market_ids)),
+                e.evidence_text,
+            )
+            for e in fragment.edges
+        ),
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _save_verify_manifest(
+    settings: Settings,
+    event_id: str,
+    candidate: GraphFragment,
+    status: str,
+) -> None:
+    path = _verify_manifest_path(settings, event_id)
+    path.write_text(
+        json.dumps(
+            {
+                "candidate_fingerprint": _fragment_fingerprint(candidate),
+                "status": status,
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+
+def _resume_verified_fragment(
+    settings: Settings,
+    event_id: str,
+    candidate: GraphFragment,
+) -> tuple[GraphFragment, str] | None:
+    """Return (fragment, status) when resume artifacts match the candidate topology."""
+    verified_path = _verified_fragment_path(settings, event_id)
+    manifest_path = _verify_manifest_path(settings, event_id)
+    if not (settings.resume and verified_path.exists() and manifest_path.exists()):
+        return None
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None
+    if manifest.get("candidate_fingerprint") != _fragment_fingerprint(candidate):
+        return None
+    status = manifest.get("status")
+    if status not in {"deterministic_verified", "deterministic_corrected"}:
+        status = (
+            "deterministic_verified"
+            if _fragments_equal(_load_fragment(verified_path), candidate)
+            else "deterministic_corrected"
+        )
+    return _load_fragment(verified_path), status
+
+
 def _run_infer_task(llm: BaseGraphLLM, task: _InferTask) -> None:
     prompt = build_event_prompt(
         task.event_id,
@@ -233,15 +314,13 @@ def verify_deterministic_fragments(
         topology = classified.get(event_id)
         if topology is None or not topology.fragment.nodes:
             continue
-        verified_path = _verified_fragment_path(settings, event_id)
-        if settings.resume and verified_path.exists():
-            loaded = _load_fragment(verified_path)
+        resumed = _resume_verified_fragment(
+            settings, event_id, topology.fragment
+        )
+        if resumed is not None:
+            loaded, event_status = resumed
             verified[event_id] = loaded
-            status[event_id] = (
-                "deterministic_verified"
-                if _fragments_equal(loaded, topology.fragment)
-                else "deterministic_corrected"
-            )
+            status[event_id] = event_status
             continue
         markets = by_event[event_id]
         tasks.append(
@@ -256,7 +335,7 @@ def verify_deterministic_fragments(
     if not tasks:
         return verified, status
     if llm is None:
-        raise ValueError("LLM required for deterministic verification tasks")
+        llm = build_graph_llm(settings)
 
     concurrency = _effective_concurrency(settings)
 
@@ -293,6 +372,9 @@ def verify_deterministic_fragments(
             verified[event_id] = fragment
             status[event_id] = event_status
             _save_fragment(_verified_fragment_path(settings, event_id), fragment)
+            _save_verify_manifest(
+                settings, event_id, task.candidate, event_status
+            )
 
     return verified, status
 
@@ -385,16 +467,7 @@ def infer_event_fragments(
             )
 
     failed_events: set[str] = set()
-    needs_verify_llm = False
-    if settings.verify_deterministic and covered:
-        if settings.resume:
-            needs_verify_llm = any(
-                not _verified_fragment_path(settings, event_id).exists()
-                for event_id in covered
-            )
-        else:
-            needs_verify_llm = True
-    if pending_tasks or needs_verify_llm:
+    if pending_tasks:
         llm = llm or build_graph_llm(settings)
 
     if settings.verify_deterministic and covered:
@@ -482,6 +555,8 @@ def load_all_fragments(settings: Settings) -> FragmentLoadResult:
         if path.name.startswith("_"):
             continue
         if "__part" in path.name or "__chunk_manifest" in path.name:
+            continue
+        if path.name.endswith("__verify_manifest.json"):
             continue
         if path.name.endswith("__verified.json"):
             # Prefer verified topology fragments when present.
