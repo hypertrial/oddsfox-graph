@@ -137,7 +137,9 @@ Statuses in `inference_report.json`:
 
 Residual LLM prompts include up to `few_shot_top_k` curated examples from
 `oddsgraph/data/llm_exemplars.json`, ranked with `rapidfuzz` against the current
-event title/question. Disable with `--no-few-shot`.
+event title/question. Disable with `--no-few-shot`. When enabled, infer reserves
+~700 tokens × `few_shot_top_k` from `chunk_token_budget` so exemplar blocks do
+not blow the model context window.
 
 ### Official WC2026 bracket (default on)
 

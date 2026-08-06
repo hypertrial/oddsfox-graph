@@ -66,6 +66,16 @@ def test_generate_fragment_uses_max_tokens_override(tmp_path) -> None:
     assert llm.max_tokens_seen == [512]
 
 
+def test_generate_fragment_retries_on_empty_output(tmp_path) -> None:
+    settings = Settings()
+    settings.build_dir = tmp_path
+    settings.failed_fragments_dir = tmp_path / "failed"
+    settings.max_retries = 1
+    llm = _StubGraphLLM(settings, ["", _valid_fragment_json()])
+    fragment = llm.generate_fragment("prompt", "evt1")
+    assert fragment.nodes[0].label == "Brazil"
+
+
 def test_generate_fragment_raises_after_retries(tmp_path) -> None:
     settings = Settings()
     settings.build_dir = tmp_path

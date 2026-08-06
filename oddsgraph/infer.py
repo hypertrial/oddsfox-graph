@@ -124,12 +124,13 @@ def _chunk_max_tokens(settings: Settings, chunk_size: int) -> int:
 
 
 def _effective_concurrency(settings: Settings) -> int:
-    if settings.llm_backend in {"server", "mlx"}:
-        return max(1, settings.llm_concurrency) if settings.llm_backend == "server" else 1
+    if settings.llm_backend == "server":
+        return max(1, settings.llm_concurrency)
     if settings.llm_concurrency > 1:
         logger.warning(
-            "llm_concurrency=%d ignored for inprocess backend; using 1",
+            "llm_concurrency=%d ignored for %s backend; using 1",
             settings.llm_concurrency,
+            settings.llm_backend,
         )
     return 1
 
@@ -204,12 +205,18 @@ def verify_deterministic_fragments(
         return task.event_id, fragment, "deterministic_corrected"
 
     with ThreadPoolExecutor(max_workers=concurrency) as executor:
-        futures = [executor.submit(_run_verify, task) for task in tasks]
-        for future in as_completed(futures):
+        future_to_task = {
+            executor.submit(_run_verify, task): task for task in tasks
+        }
+        for future in as_completed(future_to_task):
+            task = future_to_task[future]
             try:
                 event_id, fragment, event_status = future.result()
             except Exception:
-                logger.exception("Verification failed for deterministic event")
+                logger.exception(
+                    "Verification failed for deterministic event %s", task.event_id
+                )
+                status[task.event_id] = "deterministic"
                 continue
             verified[event_id] = fragment
             status[event_id] = event_status
@@ -244,16 +251,14 @@ def infer_event_fragments(
     results: dict[str, GraphFragment] = {}
     status: dict[str, str] = {}
 
-    # Opt-in LLM verify/patch over deterministic topology.
-    needs_llm = bool(
-        settings.verify_deterministic and covered
-    ) or any(eid not in covered for eid in event_ids)
-    if needs_llm and llm is None:
-        # Defer construction until we know residual/verify work remains.
-        pass
-
     event_chunks: dict[str, list[list[SemanticMarket]]] = {}
     pending_tasks: list[_InferTask] = []
+
+    # Reserve prompt budget for few-shot exemplar blocks when enabled.
+    few_shot_token_reserve = 0
+    if settings.use_few_shot_exemplars:
+        few_shot_token_reserve = max(0, settings.few_shot_top_k) * 700
+    chunk_token_budget = max(512, settings.chunk_token_budget - few_shot_token_reserve)
 
     for event_id in event_ids:
         if event_id in covered:
@@ -271,7 +276,7 @@ def infer_event_fragments(
         chunks = chunk_markets_for_prompt(
             event_markets,
             event_id,
-            settings.chunk_token_budget,
+            chunk_token_budget,
             settings.chunk_output_token_budget,
             settings.max_markets_per_chunk,
             settings.max_text_field_chars,

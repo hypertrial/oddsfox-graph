@@ -50,7 +50,7 @@ class Settings:
     deterministic_topology: bool = True
     official_bracket: bool = True
     verify_deterministic: bool = False
-    verify_max_tokens: int = 300
+    verify_max_tokens: int = 512
     use_few_shot_exemplars: bool = True
     few_shot_top_k: int = 2
     competition_label: str = "World Cup 2026"

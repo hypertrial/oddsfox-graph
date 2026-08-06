@@ -16,9 +16,9 @@ logger = logging.getLogger(__name__)
 _MLX_INSTALL_HINT = (
     "Install the mlx extra on Apple Silicon:\n"
     "  uv sync --frozen --extra mlx\n"
-    "Convert a Hugging Face / GGUF-compatible checkpoint, for example:\n"
+    "Convert a Hugging Face checkpoint, for example:\n"
     "  uv run python -m mlx_lm.convert "
-    "--hf-path Qwen/Qwen3-4B-Instruct --mlx-path models/qwen3-4b-mlx -q"
+    "--hf-path Qwen/Qwen3-4B --mlx-path models/qwen3-4b-mlx -q"
 )
 
 

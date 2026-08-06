@@ -71,6 +71,10 @@ class BaseGraphLLM(ABC):
                     max_tokens=max_tokens,
                     temperature=self.settings.temperature,
                 )
+                if not raw_output or not raw_output.strip():
+                    raise json.JSONDecodeError(
+                        "Empty LLM output", raw_output or "", 0
+                    )
                 fragment = self._parse_fragment(raw_output)
                 return self._filter_llm_fragment(fragment)
             except (json.JSONDecodeError, ValidationError, KeyError, TypeError) as exc:
