@@ -26,13 +26,16 @@ Infer graph fragments per event using deterministic topology and/or a local LLM.
 | `--mlx-model-path` | Path to MLX model directory |
 | `--limit-events N` | Limit number of events to infer |
 | `--event-id <id>` | Specific event ID (repeatable) |
-| `--resume` / `--no-resume` | Skip events with existing fragments (default: on) |
+| `--resume` / `--no-resume` | Skip residual fragments and existing `__verified.json` artifacts (default: on) |
 | `--llm-backend` | `inprocess`, `server`, or `mlx` |
 | `--server-url` | Base URL when `--llm-backend server` |
 | `--concurrency N` | Concurrent LLM requests (server backend only) |
 | `--deterministic-topology` / `--no-deterministic-topology` | Extract TEAM/MATCH/GROUP/STAGE without LLM when possible |
 | `--verify-deterministic` / `--no-verify-deterministic` | LLM confirm/patch pass over deterministic topology (default: off) |
 | `--few-shot` / `--no-few-shot` | Include rapidfuzz-ranked few-shot exemplars in residual prompts |
+| `--chunk-token-budget` | Approx input-token budget per residual chunk |
+| `--chunk-output-token-budget` | Approx output-token budget per residual chunk |
+| `--max-markets-per-chunk` | Hard cap on markets included in one residual chunk |
 
 ## `oddsgraph build`
 

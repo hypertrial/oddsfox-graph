@@ -140,5 +140,5 @@ def test_build_app_registers_layout_assets_and_callbacks(tmp_path: Path) -> None
     edge = next(rule for rule in styles if rule["selector"] == "edge")
     assert edge["style"]["curve-style"] == "taxi"
 
-    # Callback map is populated (exact count may evolve).
-    assert len(app.callback_map) >= 5
+    # Callback map is populated (exact count may evolve; split canvas callbacks).
+    assert len(app.callback_map) >= 7

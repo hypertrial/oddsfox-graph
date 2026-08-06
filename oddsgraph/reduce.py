@@ -112,10 +112,28 @@ def reduce_semantic_markets(settings: Settings) -> Path:
     else:
         table = arrow_result.read_all()
 
-    validated = _rows_to_semantic_markets(table.to_pylist())
-    out_table = pa.Table.from_pylist([m.model_dump() for m in validated])
-    pq.write_table(out_table, output_path)
-    logger.info("Reduced %d semantic markets to %s", len(validated), output_path)
+    # Validate and write in batches to avoid holding pylist + pydantic + dump
+    # copies of the full table simultaneously.
+    batch_size = 5000
+    writer: pq.ParquetWriter | None = None
+    total = 0
+    try:
+        if table.num_rows == 0:
+            pq.write_table(pa.Table.from_pylist([]), output_path)
+        else:
+            for start in range(0, table.num_rows, batch_size):
+                batch = table.slice(start, batch_size)
+                validated = _rows_to_semantic_markets(batch.to_pylist())
+                total += len(validated)
+                out_batch = pa.Table.from_pylist([m.model_dump() for m in validated])
+                if writer is None:
+                    writer = pq.ParquetWriter(output_path, out_batch.schema)
+                writer.write_table(out_batch)
+    finally:
+        if writer is not None:
+            writer.close()
+
+    logger.info("Reduced %d semantic markets to %s", total, output_path)
     return output_path
 
 

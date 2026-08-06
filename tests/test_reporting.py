@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from oddsgraph.config import Settings
 from oddsgraph.graphbuild import GraphBuildResult
 from oddsgraph.infer import infer_event_fragments
@@ -71,6 +73,19 @@ class _NoOpLLM:
         max_tokens_override: int | None = None,
     ) -> GraphFragment:
         return GraphFragment()
+
+
+def test_load_inference_report_warns_on_corrupt_json(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    import logging
+
+    path = tmp_path / "inference_report.json"
+    path.write_text("{not-json", encoding="utf-8")
+    with caplog.at_level(logging.WARNING):
+        report = load_inference_report(path)
+    assert report.per_event_status == {}
+    assert any("Ignoring corrupt inference report" in r.message for r in caplog.records)
 
 
 def test_events_deterministic_counted_in_report() -> None:

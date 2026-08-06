@@ -28,10 +28,18 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
+class FragmentLoadResult:
+    fragments: dict[str, GraphFragment]
+    verified_event_ids: set[str]
+
+
+@dataclass
 class _InferTask:
     event_id: str
     chunk_index: int
-    prompt: str
+    markets: list[SemanticMarket]
+    few_shot_exemplars: list[dict]
+    max_text_field_chars: int
     max_tokens: int
     part_path: Path
 
@@ -39,8 +47,9 @@ class _InferTask:
 @dataclass(frozen=True)
 class _VerifyTask:
     event_id: str
-    prompt: str
+    markets: list[SemanticMarket]
     candidate: GraphFragment
+    max_text_field_chars: int
 
 
 def _fragment_path(settings: Settings, event_id: str) -> Path:
@@ -145,23 +154,57 @@ def _effective_concurrency(settings: Settings) -> int:
 
 def _fragments_equal(a: GraphFragment, b: GraphFragment) -> bool:
     a_nodes = {
-        (n.local_id, n.type.value, n.label) for n in a.nodes
+        (
+            n.local_id,
+            n.type.value,
+            n.label,
+            tuple(sorted(n.aliases)),
+            tuple(sorted(n.evidence_market_ids)),
+        )
+        for n in a.nodes
     }
     b_nodes = {
-        (n.local_id, n.type.value, n.label) for n in b.nodes
+        (
+            n.local_id,
+            n.type.value,
+            n.label,
+            tuple(sorted(n.aliases)),
+            tuple(sorted(n.evidence_market_ids)),
+        )
+        for n in b.nodes
     }
     a_edges = {
-        (e.source, e.target, e.type.value) for e in a.edges
+        (
+            e.source,
+            e.target,
+            e.type.value,
+            tuple(sorted(e.evidence_market_ids)),
+            e.evidence_text,
+        )
+        for e in a.edges
     }
     b_edges = {
-        (e.source, e.target, e.type.value) for e in b.edges
+        (
+            e.source,
+            e.target,
+            e.type.value,
+            tuple(sorted(e.evidence_market_ids)),
+            e.evidence_text,
+        )
+        for e in b.edges
     }
     return a_nodes == b_nodes and a_edges == b_edges
 
 
 def _run_infer_task(llm: BaseGraphLLM, task: _InferTask) -> None:
+    prompt = build_event_prompt(
+        task.event_id,
+        task.markets,
+        task.max_text_field_chars,
+        few_shot_exemplars=task.few_shot_exemplars,
+    )
     fragment = llm.generate_fragment(
-        task.prompt,
+        prompt,
         task.event_id,
         max_tokens_override=task.max_tokens,
     )
@@ -172,7 +215,7 @@ def verify_deterministic_fragments(
     settings: Settings,
     by_event: dict[str, list[SemanticMarket]],
     covered: set[str],
-    llm: BaseGraphLLM,
+    llm: BaseGraphLLM | None,
 ) -> tuple[dict[str, GraphFragment], dict[str, str]]:
     """LLM confirm/patch pass over deterministic topology (opt-in)."""
     if not settings.verify_deterministic or not covered:
@@ -183,28 +226,49 @@ def verify_deterministic_fragments(
         competition_label=settings.competition_label,
     )
     tasks: list[_VerifyTask] = []
+    verified: dict[str, GraphFragment] = {}
+    status: dict[str, str] = {}
+
     for event_id in sorted(covered):
         topology = classified.get(event_id)
         if topology is None or not topology.fragment.nodes:
             continue
+        verified_path = _verified_fragment_path(settings, event_id)
+        if settings.resume and verified_path.exists():
+            loaded = _load_fragment(verified_path)
+            verified[event_id] = loaded
+            status[event_id] = (
+                "deterministic_verified"
+                if _fragments_equal(loaded, topology.fragment)
+                else "deterministic_corrected"
+            )
+            continue
         markets = by_event[event_id]
-        prompt = build_verification_prompt(
-            event_id,
-            markets,
-            topology.fragment,
-            settings.max_text_field_chars,
-        )
         tasks.append(
-            _VerifyTask(event_id=event_id, prompt=prompt, candidate=topology.fragment)
+            _VerifyTask(
+                event_id=event_id,
+                markets=markets,
+                candidate=topology.fragment,
+                max_text_field_chars=settings.max_text_field_chars,
+            )
         )
 
-    verified: dict[str, GraphFragment] = {}
-    status: dict[str, str] = {}
+    if not tasks:
+        return verified, status
+    if llm is None:
+        raise ValueError("LLM required for deterministic verification tasks")
+
     concurrency = _effective_concurrency(settings)
 
     def _run_verify(task: _VerifyTask) -> tuple[str, GraphFragment, str]:
+        prompt = build_verification_prompt(
+            task.event_id,
+            task.markets,
+            task.candidate,
+            task.max_text_field_chars,
+        )
         fragment = llm.generate_fragment(
-            task.prompt,
+            prompt,
             task.event_id,
             max_tokens_override=settings.verify_max_tokens,
         )
@@ -308,27 +372,32 @@ def infer_event_fragments(
             part_path = _part_fragment_path(settings, event_id, idx)
             if settings.resume and part_path.exists():
                 continue
-            prompt = build_event_prompt(
-                event_id,
-                chunk,
-                settings.max_text_field_chars,
-                few_shot_exemplars=few_shot,
-            )
             pending_tasks.append(
                 _InferTask(
                     event_id=event_id,
                     chunk_index=idx,
-                    prompt=prompt,
+                    markets=list(chunk),
+                    few_shot_exemplars=list(few_shot),
+                    max_text_field_chars=settings.max_text_field_chars,
                     max_tokens=_chunk_max_tokens(settings, len(chunk)),
                     part_path=part_path,
                 )
             )
 
     failed_events: set[str] = set()
-    if pending_tasks or (settings.verify_deterministic and covered):
+    needs_verify_llm = False
+    if settings.verify_deterministic and covered:
+        if settings.resume:
+            needs_verify_llm = any(
+                not _verified_fragment_path(settings, event_id).exists()
+                for event_id in covered
+            )
+        else:
+            needs_verify_llm = True
+    if pending_tasks or needs_verify_llm:
         llm = llm or build_graph_llm(settings)
 
-    if settings.verify_deterministic and covered and llm is not None:
+    if settings.verify_deterministic and covered:
         verified, verify_status = verify_deterministic_fragments(
             settings, by_event, covered, llm
         )
@@ -406,8 +475,9 @@ def load_markets_for_infer(settings: Settings) -> list[SemanticMarket]:
     return load_semantic_markets(path, event_ids=target_event_ids)
 
 
-def load_all_fragments(settings: Settings) -> dict[str, GraphFragment]:
+def load_all_fragments(settings: Settings) -> FragmentLoadResult:
     fragments: dict[str, GraphFragment] = {}
+    verified_event_ids: set[str] = set()
     for path in sorted(settings.fragments_dir.glob("*.json")):
         if path.name.startswith("_"):
             continue
@@ -417,8 +487,12 @@ def load_all_fragments(settings: Settings) -> dict[str, GraphFragment]:
             # Prefer verified topology fragments when present.
             event_id = path.name[: -len("__verified.json")]
             fragments[event_id] = _load_fragment(path)
+            verified_event_ids.add(event_id)
             continue
         event_id = path.stem
         if event_id not in fragments:
             fragments[event_id] = _load_fragment(path)
-    return fragments
+    return FragmentLoadResult(
+        fragments=fragments,
+        verified_event_ids=verified_event_ids,
+    )

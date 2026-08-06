@@ -11,6 +11,7 @@ from oddsgraph.explorer.presentation import (
     short_match_label,
     stage_column,
     stage_rank,
+    stylesheet_for,
 )
 
 
@@ -196,3 +197,13 @@ def test_bracket_stylesheet_and_layout_contract() -> None:
     node_style = next(rule["style"] for rule in styles if rule["selector"] == "node")
     assert node_style["shape"] == "round-rectangle"
     assert node_style["label"] == "data(short_label)"
+
+
+def test_stylesheet_for_matches_bracket_and_topology() -> None:
+    from oddsgraph.explorer import VIEW_BRACKET, VIEW_TOPOLOGY
+
+    bracket = stylesheet_for(VIEW_BRACKET)
+    topology = stylesheet_for(VIEW_TOPOLOGY)
+    assert bracket == bracket_stylesheet()
+    assert any(rule["selector"] == "edge" for rule in topology)
+    assert bracket != topology

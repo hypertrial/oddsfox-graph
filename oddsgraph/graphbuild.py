@@ -67,6 +67,69 @@ def _has_progression_cycle(edges: list[CanonicalEdge]) -> bool:
     return not rx.is_directed_acyclic_graph(graph)
 
 
+def _reject_cyclic_progression_edges(
+    edges: list[CanonicalEdge],
+) -> tuple[list[CanonicalEdge], list[RejectedEdge]]:
+    """Keep non-cyclic progression edges; reject only edges found on cycles."""
+    remaining = list(edges)
+    rejected: list[RejectedEdge] = []
+
+    while True:
+        graph = rx.PyDiGraph()
+        node_index: dict[str, int] = {}
+        # Map directed node-index pairs to remaining-edge indexes (parallel edges rare).
+        pair_to_indexes: dict[tuple[int, int], list[int]] = {}
+
+        def idx(node_id: str) -> int:
+            if node_id not in node_index:
+                node_index[node_id] = graph.add_node(node_id)
+            return node_index[node_id]
+
+        for i, edge in enumerate(remaining):
+            src = idx(edge.source_id)
+            tgt = idx(edge.target_id)
+            graph.add_edge(src, tgt, i)
+            pair_to_indexes.setdefault((src, tgt), []).append(i)
+
+        if graph.num_nodes() == 0 or rx.is_directed_acyclic_graph(graph):
+            break
+
+        cycle_pairs = list(rx.digraph_find_cycle(graph))
+        if not cycle_pairs:
+            # Safety: if the DAG check failed but no cycle was reported, reject all.
+            for edge in remaining:
+                rejected.append(
+                    RejectedEdge(**edge.model_dump(), rejection_reason="progression_cycle")
+                )
+            remaining = []
+            break
+
+        drop: set[int] = set()
+        for src, tgt in cycle_pairs:
+            indexes = pair_to_indexes.get((src, tgt), [])
+            if indexes:
+                drop.add(indexes[0])
+        if not drop:
+            for edge in remaining:
+                rejected.append(
+                    RejectedEdge(**edge.model_dump(), rejection_reason="progression_cycle")
+                )
+            remaining = []
+            break
+
+        next_remaining: list[CanonicalEdge] = []
+        for i, edge in enumerate(remaining):
+            if i in drop:
+                rejected.append(
+                    RejectedEdge(**edge.model_dump(), rejection_reason="progression_cycle")
+                )
+            else:
+                next_remaining.append(edge)
+        remaining = next_remaining
+
+    return remaining, rejected
+
+
 def build_graph_from_fragments(
     fragments: list[GraphFragment],
     resolution_state: ResolutionState,
@@ -138,16 +201,10 @@ def build_graph_from_fragments(
         accepted.append(edge)
 
     progression_edges = [e for e in accepted if e.edge_type in PROGRESSION_EDGE_TYPES]
-    if _has_progression_cycle(progression_edges):
-        new_accepted: list[CanonicalEdge] = []
-        for edge in accepted:
-            if edge.edge_type in PROGRESSION_EDGE_TYPES:
-                rejected.append(
-                    RejectedEdge(**edge.model_dump(), rejection_reason="progression_cycle")
-                )
-            else:
-                new_accepted.append(edge)
-        accepted = new_accepted
+    non_progression = [e for e in accepted if e.edge_type not in PROGRESSION_EDGE_TYPES]
+    kept_progression, cycle_rejected = _reject_cyclic_progression_edges(progression_edges)
+    accepted = non_progression + kept_progression
+    rejected.extend(cycle_rejected)
 
     result.edges = accepted
     result.rejected_edges = rejected

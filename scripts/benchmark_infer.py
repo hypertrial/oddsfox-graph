@@ -3,7 +3,7 @@
 
 Examples:
   uv run python scripts/benchmark_infer.py --backends inprocess --limit 1
-  uv run python scripts/benchmark_infer.py --backends inprocess,server --concurrency 1,2
+  uv run python scripts/benchmark_infer.py --backends server --concurrency 1,2
 """
 
 from __future__ import annotations
@@ -11,10 +11,11 @@ from __future__ import annotations
 import argparse
 import json
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from oddsgraph.config import Settings
-from oddsgraph.llm import build_graph_llm
+from oddsgraph.llm import BaseGraphLLM, build_graph_llm
 from oddsgraph.prompts import build_event_prompt, chunk_markets_for_prompt, estimate_prompt_tokens
 from oddsgraph.reduce import load_semantic_markets
 from oddsgraph.schema import SemanticMarket
@@ -39,11 +40,11 @@ def _pick_events(
     return ordered[:limit]
 
 
-def _run_trial(
+def _prepare_prompt(
     settings: Settings,
     event_id: str,
     markets: list[SemanticMarket],
-) -> dict:
+) -> tuple[str, int, int]:
     chunks = chunk_markets_for_prompt(
         markets,
         event_id,
@@ -56,22 +57,85 @@ def _run_trial(
     )
     chunk = chunks[0]
     prompt = build_event_prompt(event_id, chunk, settings.max_text_field_chars)
-    prompt_tokens = estimate_prompt_tokens(prompt)
-    llm = build_graph_llm(settings)
+    return prompt, estimate_prompt_tokens(prompt), len(chunk)
+
+
+def _time_generate(
+    llm: BaseGraphLLM,
+    prompt: str,
+    event_id: str,
+) -> dict:
     started = time.perf_counter()
     fragment = llm.generate_fragment(prompt, event_id, max_tokens_override=2048)
     elapsed = time.perf_counter() - started
-    # Approximate output tokens from compact JSON length.
     out_tokens = max(1, len(fragment.model_dump_json()) // 4)
     return {
         "event_id": event_id,
-        "markets_in_chunk": len(chunk),
-        "prompt_tokens_est": prompt_tokens,
         "output_tokens_est": out_tokens,
         "elapsed_sec": round(elapsed, 3),
         "tok_per_sec_est": round(out_tokens / elapsed, 2) if elapsed > 0 else None,
         "nodes": len(fragment.nodes),
         "edges": len(fragment.edges),
+    }
+
+
+def _run_trial(
+    settings: Settings,
+    event_id: str,
+    markets: list[SemanticMarket],
+    llm: BaseGraphLLM | None = None,
+) -> dict:
+    prompt, prompt_tokens, markets_in_chunk = _prepare_prompt(
+        settings, event_id, markets
+    )
+    llm = llm or build_graph_llm(settings)
+    result = _time_generate(llm, prompt, event_id)
+    result.update(
+        {
+            "markets_in_chunk": markets_in_chunk,
+            "prompt_tokens_est": prompt_tokens,
+        }
+    )
+    return result
+
+
+def _run_concurrent_server_trial(
+    settings: Settings,
+    events: list[tuple[str, list[SemanticMarket]]],
+) -> dict:
+    """Issue concurrent generate_fragment calls against one shared server LLM."""
+    if settings.llm_backend != "server":
+        raise ValueError("Concurrent trials require --backends server")
+    concurrency = max(1, settings.llm_concurrency)
+    llm = build_graph_llm(settings)
+    prepared = [
+        (event_id, *_prepare_prompt(settings, event_id, markets))
+        for event_id, markets in events
+    ]
+    # Warm one request so connection/setup is outside the timed window.
+    warm_event, warm_prompt, _, _ = prepared[0]
+    _time_generate(llm, warm_prompt, warm_event)
+
+    started = time.perf_counter()
+    results: list[dict] = []
+    with ThreadPoolExecutor(max_workers=concurrency) as executor:
+        futures = {
+            executor.submit(_time_generate, llm, prompt, event_id): event_id
+            for event_id, prompt, _, _ in prepared[:concurrency]
+        }
+        for future in as_completed(futures):
+            results.append(future.result())
+    wall = time.perf_counter() - started
+    total_out = sum(r["output_tokens_est"] for r in results)
+    return {
+        "mode": "concurrent",
+        "concurrency": concurrency,
+        "events": [r["event_id"] for r in results],
+        "wall_sec": round(wall, 3),
+        "sum_elapsed_sec": round(sum(r["elapsed_sec"] for r in results), 3),
+        "output_tokens_est": total_out,
+        "tok_per_sec_est": round(total_out / wall, 2) if wall > 0 else None,
+        "per_event": results,
     }
 
 
@@ -84,16 +148,39 @@ def _markdown_table(rows: list[dict]) -> str:
         "elapsed_sec",
         "tok_per_sec_est",
         "nodes",
-        "edges",
     ]
-    lines = [
-        "| " + " | ".join(headers) + " |",
-        "| " + " | ".join("---" for _ in headers) + " |",
-    ]
+    lines = ["| " + " | ".join(headers) + " |", "| " + " | ".join("---" for _ in headers) + " |"]
     for row in rows:
+        if row.get("error"):
+            lines.append(
+                "| "
+                + " | ".join(
+                    [
+                        str(row.get("backend", "")),
+                        str(row.get("n_ctx", "")),
+                        str(row.get("concurrency", "")),
+                        str(row.get("event_id", "")),
+                        "ERR",
+                        "",
+                        "",
+                    ]
+                )
+                + " |"
+            )
+            continue
         lines.append(
             "| "
-            + " | ".join(str(row.get(h, "")) for h in headers)
+            + " | ".join(
+                [
+                    str(row.get("backend", "")),
+                    str(row.get("n_ctx", "")),
+                    str(row.get("concurrency", "")),
+                    str(row.get("event_id", row.get("mode", ""))),
+                    str(row.get("elapsed_sec", row.get("wall_sec", ""))),
+                    str(row.get("tok_per_sec_est", "")),
+                    str(row.get("nodes", "")),
+                ]
+            )
             + " |"
         )
     return "\n".join(lines)
@@ -122,7 +209,7 @@ def main() -> None:
     parser.add_argument(
         "--concurrency",
         default="1",
-        help="Comma-separated concurrency values (server only)",
+        help="Comma-separated concurrency values (server only; >1 runs concurrent trial)",
     )
     parser.add_argument(
         "--n-ctx",
@@ -149,7 +236,7 @@ def main() -> None:
     for backend in backends:
         for n_ctx in n_ctx_values:
             for concurrency in concurrencies:
-                if backend != "server" and concurrency != concurrencies[0]:
+                if backend != "server" and concurrency != 1:
                     continue
                 settings = Settings()
                 settings.llm_backend = backend
@@ -157,37 +244,61 @@ def main() -> None:
                 settings.llm_concurrency = concurrency
                 settings.resume = False
                 settings.use_few_shot_exemplars = False
-                for event_id, event_markets in events:
-                    print(
-                        f"bench backend={backend} n_ctx={n_ctx} "
-                        f"concurrency={concurrency} event={event_id} ..."
-                    )
-                    try:
-                        result = _run_trial(settings, event_id, event_markets)
+                print(
+                    f"bench backend={backend} n_ctx={n_ctx} concurrency={concurrency} ..."
+                )
+                try:
+                    if backend == "server" and concurrency > 1:
+                        # Need at least `concurrency` events; repeat if necessary.
+                        expanded = list(events)
+                        while len(expanded) < concurrency:
+                            expanded.extend(events)
+                        result = _run_concurrent_server_trial(
+                            settings, expanded[:concurrency]
+                        )
                         result.update(
                             {
                                 "backend": backend,
                                 "n_ctx": n_ctx,
-                                "concurrency": concurrency,
+                                "event_id": f"concurrentx{concurrency}",
                             }
                         )
                         rows.append(result)
                         print(
-                            f"  elapsed={result['elapsed_sec']}s "
+                            f"  wall={result['wall_sec']}s "
                             f"tok/s≈{result['tok_per_sec_est']} "
-                            f"nodes={result['nodes']}"
+                            f"sum_elapsed={result['sum_elapsed_sec']}s"
                         )
-                    except Exception as exc:
-                        rows.append(
-                            {
-                                "backend": backend,
-                                "n_ctx": n_ctx,
-                                "concurrency": concurrency,
-                                "event_id": event_id,
-                                "error": str(exc),
-                            }
-                        )
-                        print(f"  FAILED: {exc}")
+                    else:
+                        llm = build_graph_llm(settings)
+                        for event_id, event_markets in events:
+                            result = _run_trial(
+                                settings, event_id, event_markets, llm=llm
+                            )
+                            result.update(
+                                {
+                                    "backend": backend,
+                                    "n_ctx": n_ctx,
+                                    "concurrency": concurrency,
+                                }
+                            )
+                            rows.append(result)
+                            print(
+                                f"  event={event_id} elapsed={result['elapsed_sec']}s "
+                                f"tok/s≈{result['tok_per_sec_est']} "
+                                f"nodes={result['nodes']}"
+                            )
+                except Exception as exc:
+                    rows.append(
+                        {
+                            "backend": backend,
+                            "n_ctx": n_ctx,
+                            "concurrency": concurrency,
+                            "event_id": "",
+                            "error": str(exc),
+                        }
+                    )
+                    print(f"  FAILED: {exc}")
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     report = {"trials": rows, "markdown": _markdown_table(rows)}

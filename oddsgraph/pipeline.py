@@ -30,17 +30,25 @@ def build_pipeline_from_markets(
     settings: Settings,
     markets: list[SemanticMarket],
     inferred_fragments: dict[str, GraphFragment] | None = None,
+    *,
+    verified_event_ids: set[str] | None = None,
 ) -> BuildPipelineResult:
+    verified_ids = verified_event_ids or set()
     deterministic = build_deterministic_fragments_by_event(
         markets,
         include_topology=settings.deterministic_topology,
         competition_label=settings.competition_label,
+        skip_topology_event_ids=verified_ids,
     )
     inferred = inferred_fragments or {}
     det_fragments = list(deterministic.values())
-    inf_fragments = list(inferred.values())
+    inferred_items = list(inferred.items())
+    inf_fragments = [fragment for _, fragment in inferred_items]
     all_fragments = det_fragments + inf_fragments
-    inference_methods = ["deterministic"] * len(det_fragments) + ["llm"] * len(inf_fragments)
+    inference_methods = ["deterministic"] * len(det_fragments) + [
+        "verified" if event_id in verified_ids else "llm"
+        for event_id, _ in inferred_items
+    ]
 
     if settings.official_bracket:
         bracket = build_official_bracket_fragment(settings.competition_label)
@@ -75,8 +83,13 @@ def run_build_and_export(
     settings.ensure_dirs()
     if markets is None:
         markets = load_semantic_markets(settings.semantic_markets_path)
-    inferred = load_all_fragments(settings)
-    result = build_pipeline_from_markets(settings, markets, inferred)
+    loaded = load_all_fragments(settings)
+    result = build_pipeline_from_markets(
+        settings,
+        markets,
+        loaded.fragments,
+        verified_event_ids=loaded.verified_event_ids,
+    )
 
     export_graph_artifacts(
         nodes=result.graph.nodes,

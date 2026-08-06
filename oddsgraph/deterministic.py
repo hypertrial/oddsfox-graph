@@ -85,11 +85,13 @@ def build_deterministic_fragments_by_event(
     *,
     include_topology: bool = True,
     competition_label: str = DEFAULT_COMPETITION_LABEL,
+    skip_topology_event_ids: set[str] | None = None,
 ) -> dict[str, GraphFragment]:
     by_event: dict[str, list[SemanticMarket]] = defaultdict(list)
     for market in markets:
         by_event[market.event_id].append(market)
 
+    skip_topology = skip_topology_event_ids or set()
     topology_by_event = (
         classify_events(markets, competition_label=competition_label)
         if include_topology
@@ -99,6 +101,11 @@ def build_deterministic_fragments_by_event(
     results: dict[str, GraphFragment] = {}
     for event_id, event_markets in by_event.items():
         base = build_deterministic_fragment(event_markets)
+        if event_id in skip_topology:
+            # Verified/corrected topology is supplied separately and must replace
+            # template topology rather than union with it.
+            results[event_id] = base
+            continue
         topology = topology_by_event.get(event_id)
         if topology is not None and topology.fragment.nodes:
             results[event_id] = merge_fragments([base, topology.fragment])

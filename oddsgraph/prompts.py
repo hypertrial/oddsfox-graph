@@ -180,7 +180,7 @@ def build_event_prompt(
         SYSTEM_RULES
         + _format_exemplars_block(exemplars)
         + "\n\nPolymarket records:\n"
-        + json.dumps(payload, indent=2, ensure_ascii=False)
+        + json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
         + _PROMPT_FOOTER
     )
 
@@ -204,7 +204,7 @@ def build_verification_prompt(
     return (
         VERIFICATION_RULES
         + "\n\nPolymarket records and candidate:\n"
-        + json.dumps(payload, indent=2, ensure_ascii=False)
+        + json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
         + _PROMPT_FOOTER
     )
 
@@ -239,7 +239,7 @@ def _event_header_tokens(
             "event_slug": event_slug,
             "markets": [],
         },
-        indent=2,
+        separators=(",", ":"),
         ensure_ascii=False,
     )
     return estimate_prompt_tokens(

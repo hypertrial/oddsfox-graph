@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections import Counter
 from pathlib import Path
 
@@ -12,13 +13,16 @@ from oddsgraph.graphbuild import GraphBuildResult
 from oddsgraph.resolution import ResolutionState
 from oddsgraph.schema import InferenceReport
 
+logger = logging.getLogger(__name__)
+
 
 def load_inference_report(path: Path) -> InferenceReport:
     if not path.exists():
         return InferenceReport()
     try:
         return InferenceReport.model_validate_json(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, ValidationError, ValueError):
+    except (json.JSONDecodeError, ValidationError, ValueError, OSError) as exc:
+        logger.warning("Ignoring corrupt inference report %s: %s", path, exc)
         return InferenceReport()
 
 

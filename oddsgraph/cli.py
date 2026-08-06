@@ -13,6 +13,7 @@ from oddsgraph.infer import infer_event_fragments, load_markets_for_infer
 from oddsgraph.pipeline import run_build_and_export, validate_exported_artifacts
 from oddsgraph.reduce import reduce_semantic_markets
 from oddsgraph.reporting import load_inference_report
+from oddsgraph import cli_options as opts
 
 app = typer.Typer(
     name="oddsgraph",
@@ -38,6 +39,9 @@ def _apply_infer_options(
     deterministic_topology: Optional[bool] = None,
     verify_deterministic: Optional[bool] = None,
     few_shot: Optional[bool] = None,
+    chunk_token_budget: Optional[int] = None,
+    chunk_output_token_budget: Optional[int] = None,
+    max_markets_per_chunk: Optional[int] = None,
 ) -> Settings:
     if model_path is not None:
         settings.model_path = model_path
@@ -60,6 +64,12 @@ def _apply_infer_options(
         settings.verify_deterministic = verify_deterministic
     if few_shot is not None:
         settings.use_few_shot_exemplars = few_shot
+    if chunk_token_budget is not None:
+        settings.chunk_token_budget = chunk_token_budget
+    if chunk_output_token_budget is not None:
+        settings.chunk_output_token_budget = chunk_output_token_budget
+    if max_markets_per_chunk is not None:
+        settings.max_markets_per_chunk = max_markets_per_chunk
     return settings
 
 
@@ -121,52 +131,20 @@ def reduce(ctx: typer.Context) -> None:
 @app.command()
 def infer(
     ctx: typer.Context,
-    model_path: Annotated[
-        Optional[Path], typer.Option(help="Path to GGUF model file")
-    ] = None,
-    mlx_model_path: Annotated[
-        Optional[Path], typer.Option(help="Path to MLX model directory")
-    ] = None,
-    limit_events: Annotated[
-        Optional[int], typer.Option(help="Limit number of events to infer")
-    ] = None,
-    event_id: Annotated[
-        list[str], typer.Option(help="Specific event IDs to infer")
-    ] = [],
-    resume: Annotated[bool, typer.Option(help="Skip events with existing fragments")] = True,
-    llm_backend: Annotated[
-        Optional[str],
-        typer.Option(help="LLM backend: inprocess, server, or mlx"),
-    ] = None,
-    server_url: Annotated[
-        Optional[str],
-        typer.Option(help="Base URL for llama-server when llm-backend=server"),
-    ] = None,
-    concurrency: Annotated[
-        Optional[int],
-        typer.Option(help="Concurrent LLM requests (server backend only)"),
-    ] = None,
-    deterministic_topology: Annotated[
-        Optional[bool],
-        typer.Option(
-            "--deterministic-topology/--no-deterministic-topology",
-            help="Extract TEAM/MATCH/GROUP/STAGE topology without LLM when possible",
-        ),
-    ] = None,
-    verify_deterministic: Annotated[
-        Optional[bool],
-        typer.Option(
-            "--verify-deterministic/--no-verify-deterministic",
-            help="LLM confirm/patch pass over deterministic topology (default: off)",
-        ),
-    ] = None,
-    few_shot: Annotated[
-        Optional[bool],
-        typer.Option(
-            "--few-shot/--no-few-shot",
-            help="Include rapidfuzz-ranked few-shot exemplars in residual prompts",
-        ),
-    ] = None,
+    model_path: opts.ModelPathOpt = None,
+    mlx_model_path: opts.MlxModelPathOpt = None,
+    limit_events: opts.LimitEventsOpt = None,
+    event_id: opts.EventIdOpt = [],
+    resume: opts.ResumeOpt = True,
+    llm_backend: opts.LlmBackendOpt = None,
+    server_url: opts.ServerUrlOpt = None,
+    concurrency: opts.ConcurrencyOpt = None,
+    deterministic_topology: opts.DeterministicTopologyOpt = None,
+    verify_deterministic: opts.VerifyDeterministicOpt = None,
+    few_shot: opts.FewShotOpt = None,
+    chunk_token_budget: opts.ChunkTokenBudgetOpt = None,
+    chunk_output_token_budget: opts.ChunkOutputTokenBudgetOpt = None,
+    max_markets_per_chunk: opts.MaxMarketsPerChunkOpt = None,
 ) -> None:
     """Infer graph fragments per event using local LLM."""
     settings = _apply_infer_options(
@@ -182,6 +160,9 @@ def infer(
         deterministic_topology=deterministic_topology,
         verify_deterministic=verify_deterministic,
         few_shot=few_shot,
+        chunk_token_budget=chunk_token_budget,
+        chunk_output_token_budget=chunk_output_token_budget,
+        max_markets_per_chunk=max_markets_per_chunk,
     )
     markets = load_markets_for_infer(settings)
     results = infer_event_fragments(settings, markets)
@@ -277,55 +258,23 @@ def explore(
 @app.command()
 def run(
     ctx: typer.Context,
-    model_path: Annotated[
-        Optional[Path], typer.Option(help="Path to GGUF model file")
-    ] = None,
-    mlx_model_path: Annotated[
-        Optional[Path], typer.Option(help="Path to MLX model directory")
-    ] = None,
-    limit_events: Annotated[
-        Optional[int], typer.Option(help="Limit number of events to infer")
-    ] = None,
-    event_id: Annotated[
-        list[str], typer.Option(help="Specific event IDs to infer")
-    ] = [],
-    resume: Annotated[bool, typer.Option(help="Skip events with existing fragments")] = True,
+    model_path: opts.ModelPathOpt = None,
+    mlx_model_path: opts.MlxModelPathOpt = None,
+    limit_events: opts.LimitEventsOpt = None,
+    event_id: opts.EventIdOpt = [],
+    resume: opts.ResumeOpt = True,
     minimum_confidence: Annotated[
         float, typer.Option(help="Minimum edge confidence threshold")
     ] = 0.0,
-    llm_backend: Annotated[
-        Optional[str],
-        typer.Option(help="LLM backend: inprocess, server, or mlx"),
-    ] = None,
-    server_url: Annotated[
-        Optional[str],
-        typer.Option(help="Base URL for llama-server when llm-backend=server"),
-    ] = None,
-    concurrency: Annotated[
-        Optional[int],
-        typer.Option(help="Concurrent LLM requests (server backend only)"),
-    ] = None,
-    deterministic_topology: Annotated[
-        Optional[bool],
-        typer.Option(
-            "--deterministic-topology/--no-deterministic-topology",
-            help="Extract TEAM/MATCH/GROUP/STAGE topology without LLM when possible",
-        ),
-    ] = None,
-    verify_deterministic: Annotated[
-        Optional[bool],
-        typer.Option(
-            "--verify-deterministic/--no-verify-deterministic",
-            help="LLM confirm/patch pass over deterministic topology (default: off)",
-        ),
-    ] = None,
-    few_shot: Annotated[
-        Optional[bool],
-        typer.Option(
-            "--few-shot/--no-few-shot",
-            help="Include rapidfuzz-ranked few-shot exemplars in residual prompts",
-        ),
-    ] = None,
+    llm_backend: opts.LlmBackendOpt = None,
+    server_url: opts.ServerUrlOpt = None,
+    concurrency: opts.ConcurrencyOpt = None,
+    deterministic_topology: opts.DeterministicTopologyOpt = None,
+    verify_deterministic: opts.VerifyDeterministicOpt = None,
+    few_shot: opts.FewShotOpt = None,
+    chunk_token_budget: opts.ChunkTokenBudgetOpt = None,
+    chunk_output_token_budget: opts.ChunkOutputTokenBudgetOpt = None,
+    max_markets_per_chunk: opts.MaxMarketsPerChunkOpt = None,
     official_bracket: Annotated[
         Optional[bool],
         typer.Option(
@@ -349,6 +298,9 @@ def run(
             deterministic_topology=deterministic_topology,
             verify_deterministic=verify_deterministic,
             few_shot=few_shot,
+            chunk_token_budget=chunk_token_budget,
+            chunk_output_token_budget=chunk_output_token_budget,
+            max_markets_per_chunk=max_markets_per_chunk,
         ),
         minimum_confidence=minimum_confidence,
         official_bracket=official_bracket,

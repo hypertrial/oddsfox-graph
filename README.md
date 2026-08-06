@@ -223,9 +223,10 @@ Measured on Apple M4 (32GB) with `qwen3-4b-q4_k_m.gguf`, warm inprocess decode:
 | `server` (prior) | llama.cpp GBNF | ~3.7–5.2 |
 | `inprocess` (now) | outlines FSM + compact JSON | ~8.7–14.5 |
 
-**Recommended local paths:** `--llm-backend inprocess` (default) or `mlx`.
-The `server` backend still uses GBNF over HTTP and is mainly for out-of-process
-pipelining — expect it to be slower per token.
+**Recommended local paths:** `--llm-backend inprocess` (default) or `mlx` for
+single-machine decode speed. Use `--llm-backend server --concurrency N` when you
+want concurrent request pipelining across `llama-server` slots. The server path
+still uses GBNF over HTTP, so expect it to be slower per token than inprocess/mlx.
 
 Benchmark locally:
 

@@ -228,6 +228,90 @@ def test_verify_deterministic_marks_verified_and_corrected(tmp_path: Path) -> No
     assert (settings.fragments_dir / "match-evt__verified.json").exists()
 
 
+def test_verify_deterministic_resume_skips_llm(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    settings.deterministic_topology = True
+    settings.verify_deterministic = True
+    settings.resume = True
+    markets = [
+        SemanticMarket(
+            market_id="m1",
+            event_id="match-evt",
+            event_title="Brazil vs. Morocco - Exact Score",
+            event_slug="fifwc-bra-mar-2026-06-14",
+            question="Winner?",
+            outcomes=["Brazil", "Morocco"],
+            sports_market_type="soccer_match",
+        )
+    ]
+
+    class CountingLLM(BaseGraphLLM):
+        def __init__(self, settings: Settings) -> None:
+            super().__init__(settings)
+            self.calls = 0
+
+        def _complete(
+            self, user_prompt: str, max_tokens: int, temperature: float
+        ) -> str:
+            self.calls += 1
+            return json.dumps(
+                {
+                    "n": [
+                        {
+                            "id": "team:brazil",
+                            "t": "TEAM",
+                            "l": "Brazil",
+                            "a": [],
+                            "c": 0.9,
+                            "e": ["m1"],
+                        }
+                    ],
+                    "g": [],
+                }
+            )
+
+    llm = CountingLLM(settings)
+    infer_event_fragments(settings, markets, llm=llm)
+    first_calls = llm.calls
+    assert first_calls >= 1
+    assert (settings.fragments_dir / "match-evt__verified.json").exists()
+
+    llm2 = CountingLLM(settings)
+    results = infer_event_fragments(settings, markets, llm=llm2)
+    assert llm2.calls == 0
+    assert "match-evt" in results
+
+
+def test_fragments_equal_considers_aliases(tmp_path: Path) -> None:
+    from oddsgraph.infer import _fragments_equal
+
+    a = GraphFragment(
+        nodes=[
+            Node(
+                local_id="team:brazil",
+                type=NodeType.TEAM,
+                label="Brazil",
+                aliases=["Selecao"],
+                confidence=1.0,
+                evidence_market_ids=["m1"],
+            )
+        ]
+    )
+    b = GraphFragment(
+        nodes=[
+            Node(
+                local_id="team:brazil",
+                type=NodeType.TEAM,
+                label="Brazil",
+                aliases=[],
+                confidence=1.0,
+                evidence_market_ids=["m1"],
+            )
+        ]
+    )
+    assert not _fragments_equal(a, b)
+
+
 @pytest.mark.parametrize(
     "event_id",
     [

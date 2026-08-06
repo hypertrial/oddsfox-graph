@@ -599,3 +599,12 @@ def topology_stylesheet(
         }
     )
     return styles
+
+
+def stylesheet_for(view_mode: str) -> list[dict[str, Any]]:
+    """Return the Cytoscape stylesheet for bracket or topology view."""
+    from oddsgraph.explorer import VIEW_TOPOLOGY
+
+    if view_mode == VIEW_TOPOLOGY:
+        return topology_stylesheet(NODE_COLORS, EDGE_COLORS)
+    return bracket_stylesheet()

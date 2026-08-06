@@ -34,8 +34,11 @@ flowchart LR
 ## Performance note
 
 Local LLM inference dominates end-to-end wall-clock time. Deterministic topology
-covers most WC2026 events; residual LLM work is the expensive path. Prefer
-`--llm-backend server --concurrency N` for full-dataset runs.
+covers most WC2026 events; residual LLM work is the expensive path.
+
+**Backend choice:**
+- Single-machine decode speed: prefer `--llm-backend inprocess` (default) or `mlx`.
+- Concurrent request pipelining across processes: use `--llm-backend server --concurrency N`.
 
 ## See also
 

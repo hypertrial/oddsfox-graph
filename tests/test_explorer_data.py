@@ -11,8 +11,10 @@ from oddsgraph.config import Settings
 from oddsgraph.explorer import TOPOLOGY_NODE_TYPES
 from oddsgraph.explorer.data import (
     bracket_elements,
+    clear_stores,
     get_edge,
     get_node,
+    get_store,
     graph_counts,
     node_neighbors,
     search_nodes,
@@ -197,6 +199,13 @@ def _write_fixture_graph(build_dir: Path) -> None:
     )
 
 
+@pytest.fixture(autouse=True)
+def _clear_explorer_stores() -> None:
+    clear_stores()
+    yield
+    clear_stores()
+
+
 def test_topology_elements_excludes_market_layer(tmp_path: Path) -> None:
     settings = make_settings(tmp_path)
     _write_fixture_graph(settings.build_dir)
@@ -216,6 +225,62 @@ def test_topology_elements_excludes_market_layer(tmp_path: Path) -> None:
     assert "HAS_OUTCOME" not in edge_types
     assert "PARTICIPATES_IN" in edge_types
     assert "PART_OF" in edge_types
+
+
+def test_canvas_elements_strip_evidence_payloads(tmp_path: Path) -> None:
+    settings = make_settings(tmp_path)
+    _write_fixture_graph(settings.build_dir)
+
+    topo = topology_elements(settings)
+    bracket = bracket_elements(settings)
+    for el in [*topo.nodes, *topo.edges, *bracket.nodes, *bracket.edges]:
+        data = el["data"]
+        assert "evidence_market_ids" not in data
+        assert "evidence_text" not in data
+        assert data["evidence_count"] >= 1
+
+    row = get_node(settings, "team:brazil")
+    assert row is not None
+    assert row["evidence_market_ids"] == ["m1"]
+    edge = get_edge(
+        settings,
+        "team:brazil",
+        "match:brazil-vs-france",
+        "PARTICIPATES_IN",
+    )
+    assert edge is not None
+    assert edge["evidence_market_ids"] == ["m1"]
+    assert edge["evidence_text"] == "Brazil plays"
+
+
+def test_get_store_caches_topology_and_refreshes_on_mtime(tmp_path: Path) -> None:
+    settings = make_settings(tmp_path)
+    _write_fixture_graph(settings.build_dir)
+
+    store = get_store(settings)
+    first = store.topology_elements()
+    second = store.topology_elements()
+    assert first is second
+
+    # Touch parquet so the store closes and rebuilds caches.
+    settings.nodes_path.write_bytes(settings.nodes_path.read_bytes())
+    store.refresh_if_stale()
+    third = store.topology_elements()
+    assert third is not first
+    assert len(third.nodes) == len(first.nodes)
+
+
+def test_node_neighbors_sets_truncated_when_limit_hit(tmp_path: Path) -> None:
+    settings = make_settings(tmp_path)
+    _write_fixture_graph(settings.build_dir)
+
+    full = node_neighbors(settings, "match:brazil-vs-france", limit=300)
+    assert full.truncated is False
+    assert len(full.edges) >= 2
+
+    limited = node_neighbors(settings, "match:brazil-vs-france", limit=1)
+    assert limited.truncated is True
+    assert len(limited.edges) == 1
 
 
 def test_bracket_elements_returns_only_knockout_matches(tmp_path: Path) -> None:

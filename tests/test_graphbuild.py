@@ -68,7 +68,7 @@ def test_has_progression_cycle_detects_match_cycle() -> None:
     assert _has_progression_cycle(edges)
 
 
-def test_progression_cycle_rejects_advances_to_edges() -> None:
+def test_progression_cycle_rejects_only_cycle_edges() -> None:
     fragment = GraphFragment(
         nodes=[
             Node(
@@ -84,6 +84,20 @@ def test_progression_cycle_rejects_advances_to_edges() -> None:
                 label="Match B",
                 confidence=0.9,
                 evidence_market_ids=["2"],
+            ),
+            Node(
+                local_id="match:c",
+                type=NodeType.MATCH,
+                label="Match C",
+                confidence=0.9,
+                evidence_market_ids=["3"],
+            ),
+            Node(
+                local_id="match:d",
+                type=NodeType.MATCH,
+                label="Match D",
+                confidence=0.9,
+                evidence_market_ids=["4"],
             ),
         ],
         edges=[
@@ -103,14 +117,28 @@ def test_progression_cycle_rejects_advances_to_edges() -> None:
                 evidence_market_ids=["2"],
                 evidence_text="b to a",
             ),
+            Edge(
+                source="match:c",
+                target="match:d",
+                type=EdgeType.ADVANCES_TO,
+                confidence=0.9,
+                evidence_market_ids=["3"],
+                evidence_text="c to d",
+            ),
         ],
     )
     settings = Settings()
     state = resolve_fragments([fragment], settings, inference_method="llm")
     result = build_graph_from_fragments([fragment], state, settings, ["llm"])
 
-    assert not any(e.edge_type == EdgeType.ADVANCES_TO for e in result.edges)
     assert any(e.rejection_reason == "progression_cycle" for e in result.rejected_edges)
+    kept = [
+        (e.source_id, e.target_id)
+        for e in result.edges
+        if e.edge_type == EdgeType.ADVANCES_TO
+    ]
+    assert ("match:c", "match:d") in kept
+    assert ("match:a", "match:b") not in kept or ("match:b", "match:a") not in kept
     assert validate_exported_graph(result.nodes, result.edges) == []
 
 

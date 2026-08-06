@@ -11,13 +11,7 @@ import dash_cytoscape as cyto
 from oddsgraph.config import Settings
 from oddsgraph.explorer import VIEW_BRACKET, VIEW_TOPOLOGY
 from oddsgraph.explorer.data import bracket_elements, graph_counts
-from oddsgraph.explorer.presentation import (
-    EDGE_COLORS,
-    NODE_COLORS,
-    bracket_layout,
-    bracket_stylesheet,
-    topology_stylesheet,
-)
+from oddsgraph.explorer.presentation import bracket_layout, stylesheet_for
 from oddsgraph.ontology import NodeType
 
 # Extra layouts used by the explorer (dagre lives in the extra bundle).
@@ -38,9 +32,7 @@ STAGE_STRIP = [
 
 def default_stylesheet(view_mode: str = VIEW_BRACKET) -> list[dict[str, Any]]:
     """Return the Cytoscape stylesheet for the active view."""
-    if view_mode == VIEW_TOPOLOGY:
-        return topology_stylesheet(NODE_COLORS, EDGE_COLORS)
-    return bracket_stylesheet()
+    return stylesheet_for(view_mode)
 
 
 def _counts_summary(counts: dict[str, Any]) -> str:
