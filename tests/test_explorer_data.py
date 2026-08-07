@@ -538,6 +538,36 @@ def test_schedule_winner_overrides_odds_history_soft_lock() -> None:
     assert enriched["data"]["match_end_epoch"] == 1_784_494_800
 
 
+def test_schedule_outcome_matches_by_team_pair_when_match_id_drifts() -> None:
+    """Kickoff-date drift in MATCH ids still attaches curated winners."""
+    from oddsgraph.explorer.data import _enrich_match_with_odds
+
+    element = {
+        "data": {
+            # Stale build artifact dated one day earlier than the schedule id.
+            "id": "match:netherlands-vs-morocco-2026-06-29",
+            "label": "Netherlands vs. Morocco",
+            "type": "MATCH",
+        }
+    }
+    schedule_outcomes = {
+        "match:netherlands-vs-morocco-2026-06-30": {
+            "home_team": "Netherlands",
+            "away_team": "Morocco",
+            "winner_team": "Morocco",
+            "match_start_epoch": 1_782_781_200,
+            "match_end_epoch": 1_782_788_400,
+        }
+    }
+    enriched = _enrich_match_with_odds(
+        element, {}, {}, schedule_outcomes=schedule_outcomes
+    )
+    assert enriched["data"]["winner_team"] == "Morocco"
+    assert enriched["data"]["match_end_epoch"] == 1_782_788_400
+    assert enriched["data"]["home_team"] == "Netherlands"
+    assert enriched["data"]["away_team"] == "Morocco"
+
+
 def test_odds_time_bounds_prefer_tournament_schedule(tmp_path: Path) -> None:
     import pyarrow as pa
     import pyarrow.parquet as pq

@@ -199,6 +199,32 @@ def _odds_indexes(
     return odds_by_match, by_teams
 
 
+def _schedule_outcome_for_match(
+    match_id: str,
+    teams: tuple[str, str] | None,
+    schedule_outcomes: dict[str, dict[str, Any]] | None,
+) -> dict[str, Any] | None:
+    """Resolve a schedule outcome by match id, then by unordered team pair.
+
+    Team-pair fallback covers kickoff-date drift in MATCH ids (schedule date
+    vs an older build artifact) so curated winners still lock on the canvas.
+    """
+    if not schedule_outcomes:
+        return None
+    schedule = schedule_outcomes.get(match_id)
+    if schedule is not None:
+        return schedule
+    if teams is None:
+        return None
+    wanted = frozenset(teams)
+    for entry in schedule_outcomes.values():
+        home = entry.get("home_team")
+        away = entry.get("away_team")
+        if home and away and frozenset({str(home), str(away)}) == wanted:
+            return entry
+    return None
+
+
 def _enrich_match_with_odds(
     element: dict[str, Any],
     odds_by_match: dict[str, dict[str, Any]],
@@ -237,7 +263,10 @@ def _enrich_match_with_odds(
         if prob is not None:
             data["current_home_prob"] = prob
 
-    schedule = (schedule_outcomes or {}).get(match_id)
+    schedule_teams = teams
+    if schedule_teams is None and data.get("home_team") and data.get("away_team"):
+        schedule_teams = (str(data["home_team"]), str(data["away_team"]))
+    schedule = _schedule_outcome_for_match(match_id, schedule_teams, schedule_outcomes)
     if schedule:
         data.setdefault("match_start_epoch", schedule.get("match_start_epoch"))
         # Curated schedule outcomes win over soft odds-history locks so Final /
