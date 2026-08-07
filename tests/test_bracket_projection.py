@@ -394,6 +394,42 @@ def test_flag_svgs_declare_explicit_root_dimensions() -> None:
     assert missing == []
 
 
+def test_partial_stage_reach_falls_back_to_feeder_advance() -> None:
+    """Incomplete stage-reach markets must not rank a single scored side."""
+    from oddsgraph.bracket_projection import _pick_branch_team
+
+    feeder = {
+        "label": "Spain vs. France",
+        "schedule_home": "Spain",
+        "schedule_away": "France",
+        "home_team": "Spain",
+        "away_team": "France",
+        "stage": "Semifinals",
+        "odds_series": [{"h": 0, "home": 0.8, "away": 0.2}],
+    }
+    # Only France has Final reach; Spain is the clear advance favorite.
+    stage_odds = {"France": {"Final": _series((0, 0.05))}}
+
+    assert (
+        _pick_branch_team(feeder, match_stage="Final", hour_epoch=100, stage_odds=stage_odds)
+        == "Spain"
+    )
+    assert (
+        _pick_branch_team(
+            feeder,
+            match_stage="Third Place",
+            hour_epoch=100,
+            stage_odds=stage_odds,
+            prefer_loser=True,
+        )
+        == "France"
+    )
+    assert (
+        _pick_branch_team(feeder, match_stage="Final", hour_epoch=100, stage_odds={})
+        == "Spain"
+    )
+
+
 def test_projection_falls_back_to_feeder_advance_odds_without_stage_odds() -> None:
     """Without stage-reach series, use feeder advance odds — not schedule homes."""
     elements = [

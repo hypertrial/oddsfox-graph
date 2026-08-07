@@ -220,17 +220,15 @@ def _pick_branch_team(
             unscored.append(team)
             continue
         scored.append((score, team))
-    if not scored:
-        # Stage-reach unavailable: fall back to feeder advance-market odds.
+    if unscored:
+        # Stage-reach incomplete or unavailable: require both sides scored before
+        # ranking by reach; otherwise fall back to feeder advance-market odds.
         # Do not invent schedule-home favorites when those are also missing.
         home_prob = home_prob_at_hour(feeder_data, hour_epoch)
         if home_prob is None:
             return None
         home, away = teams
         scored = [(home_prob, home), (1.0 - home_prob, away)]
-    elif prefer_loser and unscored:
-        # Incomplete markets: treat the missing-odds side as the likelier loser.
-        return unscored[0]
     scored.sort(key=lambda item: item[0], reverse=not prefer_loser)
     return scored[0][1]
 

@@ -60,6 +60,13 @@ flags and output schema as pre-1.0 and subject to change.
 
 ### Fixed
 
+- Bracket projection falls back to feeder direct-advance odds whenever any
+  stage-reach side is missing (not only when both are missing), so partial
+  markets no longer mis-rank Final / Third Place participants.
+- Explorer unavailable probabilities (`—`) use Diverged gray styling even when
+  the card is not yet marked projected.
+- `oddsgraph infer` reports deterministic counts from this run’s statuses, not
+  the cumulative on-disk inference report.
 - Explorer playback dock no longer covers bottom bracket cards on short /
   non-maximized viewports: the dock is a normal-flow flex sibling below the
   scrollable canvas instead of an absolute overlay inside it.

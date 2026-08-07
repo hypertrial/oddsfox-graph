@@ -45,9 +45,10 @@ for the registry table and flag interactions.
 Unresolved future match cards are populated by picking the most likely team
 from each feeder branch (`P(reach displayed round)`), then normalizing
 conditional stage ratios `P(reach next) / P(reach current)` for the displayed
-pair. When stage-reach odds are missing, projection falls back to that feeder's
-direct `soccer_team_to_advance` series rather than inventing schedule-home
-favorites; if both are unavailable the slot stays unresolved. That is **not** a
+pair. When stage-reach odds are missing for either team in a feeder, projection
+falls back to that feeder's direct `soccer_team_to_advance` series rather than
+inventing schedule-home favorites; if both stage-reach and advance odds are
+unavailable the slot stays unresolved. That is **not** a
 coherent joint bracket model: independence is assumed, Third Place has no
 dedicated reach market, and missing/zero stage odds mark probabilities
 unavailable rather than inventing 50/50. Prefer resolved match results and

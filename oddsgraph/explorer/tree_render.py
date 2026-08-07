@@ -23,7 +23,7 @@ def match_grade_status(data: dict[str, Any]) -> GradeStatus:
     """Map explorer match fields onto status styles for probability text."""
     if data.get("resolved"):
         return "correct"
-    if not data.get("probability_available", True) and data.get("projected"):
+    if not data.get("probability_available", True):
         return "path-diverged"
     return "pending"
 

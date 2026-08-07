@@ -388,6 +388,8 @@ def infer_event_fragments(
     settings: Settings,
     markets: list[SemanticMarket],
     llm: BaseGraphLLM | None = None,
+    *,
+    run_status: dict[str, str] | None = None,
 ) -> dict[str, GraphFragment]:
     settings.ensure_dirs()
     by_event: dict[str, list[SemanticMarket]] = defaultdict(list)
@@ -540,6 +542,9 @@ def infer_event_fragments(
         status[event_id] = "success"
 
     merge_per_event_status(settings.inference_report_path, status)
+    if run_status is not None:
+        run_status.clear()
+        run_status.update(status)
     return results
 
 

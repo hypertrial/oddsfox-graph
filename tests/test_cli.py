@@ -2,6 +2,7 @@ import re
 import shutil
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from oddsgraph.cli import app
@@ -155,3 +156,77 @@ def test_cli_closure_writes_empty_parquet(tmp_path: Path) -> None:
     assert result.exit_code == 0
     assert settings.implies_closure_path.exists()
     assert "transitive IMPLIES" in result.output
+
+
+def test_cli_infer_summary_uses_this_run_status(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Deterministic count must not include prior report entries outside this run."""
+    import oddsgraph.cli as cli_mod
+    from oddsgraph.schema import InferenceReport
+
+    build_dir = tmp_path / "build"
+    settings = Settings()
+    settings.configure_build_dir(build_dir)
+    settings.ensure_dirs()
+    settings.inference_report_path.write_text(
+        InferenceReport(
+            per_event_status={
+                "old-a": "deterministic",
+                "old-b": "deterministic",
+                "old-c": "deterministic",
+            }
+        ).model_dump_json(indent=2),
+        encoding="utf-8",
+    )
+
+    def _fake_load(_settings: Settings):
+        return []
+
+    def _fake_infer(_settings: Settings, _markets, llm=None, *, run_status=None):
+        if run_status is not None:
+            run_status.clear()
+        return {}
+
+    monkeypatch.setattr(cli_mod, "load_markets_for_infer", _fake_load)
+    monkeypatch.setattr(cli_mod, "infer_event_fragments", _fake_infer)
+
+    result = runner.invoke(
+        app,
+        ["--build-dir", str(build_dir), "infer", "--limit-events", "0"],
+    )
+    assert result.exit_code == 0
+    output = _plain_output(result.output)
+    assert "Inferred fragments for 0 events" in output
+    assert "deterministic" not in output
+
+
+def test_cli_infer_summary_counts_deterministic_from_run_status(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import oddsgraph.cli as cli_mod
+
+    build_dir = tmp_path / "build"
+
+    def _fake_load(_settings: Settings):
+        return []
+
+    def _fake_infer(_settings: Settings, _markets, llm=None, *, run_status=None):
+        if run_status is not None:
+            run_status.clear()
+            run_status.update(
+                {
+                    "evt-1": "deterministic",
+                    "evt-2": "deterministic_verified",
+                    "evt-3": "success",
+                }
+            )
+        return {"evt-3": object()}
+
+    monkeypatch.setattr(cli_mod, "load_markets_for_infer", _fake_load)
+    monkeypatch.setattr(cli_mod, "infer_event_fragments", _fake_infer)
+
+    result = runner.invoke(app, ["--build-dir", str(build_dir), "infer"])
+    assert result.exit_code == 0
+    output = _plain_output(result.output)
+    assert "Inferred fragments for 1 events (2 deterministic)" in output

@@ -16,8 +16,11 @@ from oddsgraph.pipeline import run_build_and_export, validate_exported_artifacts
 from oddsgraph.odds_history import build_odds_history
 from oddsgraph.stage_odds_history import build_stage_odds_history
 from oddsgraph.reduce import reduce_semantic_markets
-from oddsgraph.reporting import load_inference_report
 from oddsgraph import cli_options as opts
+
+_DETERMINISTIC_INFER_STATUSES = frozenset(
+    {"deterministic", "deterministic_verified", "deterministic_corrected"}
+)
 
 app = typer.Typer(
     name="oddsgraph",
@@ -203,13 +206,10 @@ def infer(
         max_markets_per_chunk=max_markets_per_chunk,
     )
     markets = load_markets_for_infer(settings)
-    results = infer_event_fragments(settings, markets)
-    report = load_inference_report(settings.inference_report_path)
+    run_status: dict[str, str] = {}
+    results = infer_event_fragments(settings, markets, run_status=run_status)
     deterministic = sum(
-        1
-        for status in report.per_event_status.values()
-        if status
-        in {"deterministic", "deterministic_verified", "deterministic_corrected"}
+        1 for status in run_status.values() if status in _DETERMINISTIC_INFER_STATUSES
     )
     typer.echo(
         f"Inferred fragments for {len(results)} events"

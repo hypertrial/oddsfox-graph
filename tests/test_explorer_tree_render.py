@@ -74,6 +74,9 @@ def test_match_grade_status_mapping() -> None:
     assert match_grade_status({"projected": True, "probability_available": False}) == (
         "path-diverged"
     )
+    assert match_grade_status(
+        {"projected": False, "probability_available": False}
+    ) == "path-diverged"
     assert match_grade_status({"projected": True}) == "pending"
 
 

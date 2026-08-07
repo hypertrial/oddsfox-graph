@@ -56,9 +56,10 @@ At the selected hour:
 
 1. Resolved matches keep actual participants and lock the winner to probability 1.
 2. Unresolved future slots pick the most likely team from each feeder branch
-   using `P(reach displayed round)`. When stage-reach odds are missing, the
-   feeder's direct advance series is used instead; if both are unavailable the
-   slot stays unresolved rather than inventing schedule-home favorites.
+   using `P(reach displayed round)`. When stage-reach odds are missing for
+   either team in the feeder, the feeder's direct advance series is used
+   instead; if both stage-reach and advance odds are unavailable the slot
+   stays unresolved rather than inventing schedule-home favorites.
 3. Each displayed team’s advance score is
    `P(reach next round) / P(reach displayed round)`, then the pair is
    normalized to 100%. The Final uses `P(win tournament) / P(reach Final)`.
