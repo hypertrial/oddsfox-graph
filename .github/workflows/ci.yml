@@ -22,6 +22,21 @@ jobs:
         # --no-sync: keep llama-cpp-python excluded; uv run would otherwise reinstall it.
         run: NO_MKDOCS_2_WARNING=true uv run --no-sync mkdocs build --strict
 
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install lint dependencies
+        run: uv sync --frozen --extra dev --no-install-package llama-cpp-python
+      - name: Ruff check
+        run: uv run --no-sync ruff check .
+
   test:
     runs-on: ubuntu-latest
     steps:

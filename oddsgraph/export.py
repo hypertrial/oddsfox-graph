@@ -14,7 +14,7 @@ from oddsgraph.schema import CanonicalEdge, CanonicalNode, InferenceReport, Reje
 
 _STRING_LIST = pa.list_(pa.string())
 
-_NODE_SCHEMA = pa.schema(
+NODE_SCHEMA = pa.schema(
     [
         ("canonical_id", pa.string()),
         ("type", pa.string()),
@@ -28,7 +28,7 @@ _NODE_SCHEMA = pa.schema(
     ]
 )
 
-_EDGE_SCHEMA = pa.schema(
+EDGE_SCHEMA = pa.schema(
     [
         ("source_id", pa.string()),
         ("target_id", pa.string()),
@@ -44,19 +44,19 @@ _EDGE_SCHEMA = pa.schema(
     ]
 )
 
-_REJECTED_EDGE_SCHEMA = pa.schema(
-    [*_EDGE_SCHEMA, ("rejection_reason", pa.string())]
+REJECTED_EDGE_SCHEMA = pa.schema(
+    [*EDGE_SCHEMA, ("rejection_reason", pa.string())]
 )
 
 
-def _table_with_schema(rows: list[dict], schema: pa.Schema) -> pa.Table:
+def table_with_schema(rows: list[dict], schema: pa.Schema) -> pa.Table:
     if not rows:
         return schema.empty_table()
     return pa.Table.from_pylist(rows, schema=schema)
 
 
-def _write_parquet(path: Path, rows: list[dict], schema: pa.Schema) -> None:
-    pq.write_table(_table_with_schema(rows, schema), path)
+def write_parquet(path: Path, rows: list[dict], schema: pa.Schema) -> None:
+    pq.write_table(table_with_schema(rows, schema), path)
 
 
 def _node_row(node: CanonicalNode) -> dict[str, Any]:
@@ -102,12 +102,12 @@ def export_graph_artifacts(
     ontology_path: Path,
     inference_report_path: Path,
 ) -> None:
-    _write_parquet(nodes_path, [_node_row(n) for n in nodes], _NODE_SCHEMA)
-    _write_parquet(edges_path, [_edge_row(e) for e in edges], _EDGE_SCHEMA)
-    _write_parquet(
+    write_parquet(nodes_path, [_node_row(n) for n in nodes], NODE_SCHEMA)
+    write_parquet(edges_path, [_edge_row(e) for e in edges], EDGE_SCHEMA)
+    write_parquet(
         rejected_edges_path,
         [{**_edge_row(e), "rejection_reason": e.rejection_reason} for e in rejected_edges],
-        _REJECTED_EDGE_SCHEMA,
+        REJECTED_EDGE_SCHEMA,
     )
     ontology_path.write_text(json.dumps(dump_ontology_json(), indent=2), encoding="utf-8")
     inference_report_path.write_text(report.model_dump_json(indent=2), encoding="utf-8")

@@ -47,7 +47,7 @@ class CompactNode(BaseModel):
 
     id: str
     t: LLMNodeType
-    l: str
+    l: str  # noqa: E741 — intentional short-key wire format for LLM tokens
     a: list[str] = Field(default_factory=list)
     c: float = Field(ge=0.0, le=1.0)
     e: list[str] = Field(min_length=1)

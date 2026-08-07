@@ -210,8 +210,9 @@ def _upgrade_match_canonical_id(
     for local_id, cid in list(state.local_to_canonical.items()):
         if cid == old_id:
             state.local_to_canonical[local_id] = new_id
-    indexes.by_slug[(upgraded.type, ids.slugify(upgraded.label))] = upgraded
-    indexes.by_label[(upgraded.type, ids.normalize_label(upgraded.label))] = upgraded
+    label_slug = ids.slugify(upgraded.label)
+    indexes.by_slug[(upgraded.type, label_slug)] = upgraded
+    indexes.by_label[(upgraded.type, label_slug)] = upgraded
     _index_aliases(upgraded, list(upgraded.aliases) + [upgraded.label], indexes)
     _remap_fuzzy_canonical_id(indexes.fuzzy_index, upgraded.type, old_id, new_id)
     return upgraded
@@ -237,8 +238,9 @@ def _merge_canonical(
             "resolution_method": method,
         }
     )
-    indexes.by_slug[(merged.type, ids.slugify(merged.label))] = merged
-    indexes.by_label[(merged.type, ids.normalize_label(merged.label))] = merged
+    label_slug = ids.slugify(merged.label)
+    indexes.by_slug[(merged.type, label_slug)] = merged
+    indexes.by_label[(merged.type, label_slug)] = merged
     _index_aliases(merged, merged_aliases + [merged.label], indexes)
     if node.label not in previous_aliases:
         indexes.fuzzy_index.add(merged.type, node.label, merged.canonical_id)
@@ -267,8 +269,9 @@ def _register_canonical(
     )
     state.canonical_nodes[canonical_id] = canonical
     state.local_to_canonical[node.local_id] = canonical_id
-    indexes.by_slug[(node.type, ids.slugify(node.label))] = canonical
-    indexes.by_label[(node.type, ids.normalize_label(node.label))] = canonical
+    label_slug = ids.slugify(node.label)
+    indexes.by_slug[(node.type, label_slug)] = canonical
+    indexes.by_label[(node.type, label_slug)] = canonical
     _index_aliases(canonical, list(node.aliases) + [node.label], indexes)
     indexes.fuzzy_index.add(node.type, node.label, canonical_id)
 
@@ -339,6 +342,7 @@ def _try_exact_label(
     node: Node,
     indexes: _ResolutionIndexes,
 ) -> bool:
+    # slugify == normalize_label; reuse the cached slug from exact_slug lookups.
     label_key = (node.type, ids.normalize_label(node.label))
     existing = indexes.by_label.get(label_key)
     if existing is None:
@@ -423,10 +427,12 @@ def _register_new(
 
 def _finalize_evidence(state: ResolutionState, indexes: _ResolutionIndexes) -> None:
     for canonical_id, canonical in list(state.canonical_nodes.items()):
+        evidence = _materialize_evidence(canonical_id, indexes)
+        # Skip model_copy when evidence is already the finalized sorted list.
+        if evidence == canonical.evidence_market_ids:
+            continue
         state.canonical_nodes[canonical_id] = canonical.model_copy(
-            update={
-                "evidence_market_ids": _materialize_evidence(canonical_id, indexes)
-            }
+            update={"evidence_market_ids": evidence}
         )
 
 

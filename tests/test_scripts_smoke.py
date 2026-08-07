@@ -134,9 +134,10 @@ def test_eval_finetuned_offline_score(tmp_path: Path) -> None:
 
 
 def test_benchmark_and_finetune_help() -> None:
-    root = Path(__file__).resolve().parents[1]
+    root = Path(__file__).resolve().parent.parent
     for script in [
         "scripts/benchmark_infer.py",
+        "scripts/benchmark_build.py",
         "scripts/finetune_lora.py",
         "scripts/export_finetune_dataset.py",
         "scripts/eval_finetuned_model.py",
@@ -150,3 +151,35 @@ def test_benchmark_and_finetune_help() -> None:
         )
         assert result.returncode == 0, result.stderr
         assert "usage" in result.stdout.lower() or "Usage" in result.stdout
+
+
+def test_benchmark_build_smoke_on_golden_fixture(tmp_path: Path) -> None:
+    root = Path(__file__).resolve().parent.parent
+    markets = root / "tests" / "fixtures" / "golden_semantic_markets.parquet"
+    out = tmp_path / "benchmark_build.json"
+    result = subprocess.run(
+        [
+            sys.executable,
+            "scripts/benchmark_build.py",
+            "--markets",
+            str(markets),
+            "--repeats",
+            "1",
+            "--limit-markets",
+            "50",
+            "--output",
+            str(out),
+            "--json",
+        ],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert out.exists()
+    report = json.loads(out.read_text(encoding="utf-8"))
+    assert "stages" in report
+    assert "compile_propositions" in report["stages"]
+    assert "apply_rules" in report["stages"]
+    assert report["stages"]["apply_rules"]["median_sec"] >= 0

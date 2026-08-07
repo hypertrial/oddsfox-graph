@@ -5,7 +5,7 @@ from __future__ import annotations
 from oddsgraph import ids
 from oddsgraph.ontology import EdgeType, NodeType
 from oddsgraph.rules import apply_rules, stage_rank_for_proposition
-from oddsgraph.schema import CanonicalNode, Proposition
+from oddsgraph.schema import CanonicalEdge, CanonicalNode, Proposition
 
 
 def _outcome(
@@ -200,3 +200,69 @@ def test_elimination_implies_reaches_same_stage() -> None:
         and e.rule_id == "wc.elimination_implies_reaches"
         for e in implies
     )
+
+
+def test_group_argument_does_not_change_rule_edge_set() -> None:
+    """Competition/group args must not alter candidate generation or edges."""
+    competition = ids.competition_id("World Cup 2026")
+    final = ids.stage_id("World Cup 2026", "Final")
+    semi = ids.stage_id("World Cup 2026", "Semifinals")
+    group_a = ids.group_id("World Cup 2026", "Group A")
+
+    base_nodes: list[CanonicalNode] = []
+    with_group_nodes: list[CanonicalNode] = []
+    for i in range(50):
+        team = ids.team_id(f"Team {i}")
+        win = Proposition(
+            predicate="wins_competition",
+            arguments={"team": team, "competition": competition},
+        )
+        reach_final = Proposition(
+            predicate="reaches_stage",
+            arguments={"team": team, "competition": competition, "stage": final},
+        )
+        reach_semi = Proposition(
+            predicate="reaches_stage",
+            arguments={"team": team, "competition": competition, "stage": semi},
+        )
+        base_nodes.extend(
+            [
+                _outcome(f"outcome:win:{i}", win),
+                _outcome(f"outcome:final:{i}", reach_final),
+                _outcome(f"outcome:semi:{i}", reach_semi),
+            ]
+        )
+        with_group_nodes.extend(
+            [
+                _outcome(
+                    f"outcome:win:{i}",
+                    win.model_copy(
+                        update={"arguments": {**win.arguments, "group": group_a}}
+                    ),
+                ),
+                _outcome(
+                    f"outcome:final:{i}",
+                    reach_final.model_copy(
+                        update={
+                            "arguments": {**reach_final.arguments, "group": group_a}
+                        }
+                    ),
+                ),
+                _outcome(
+                    f"outcome:semi:{i}",
+                    reach_semi.model_copy(
+                        update={
+                            "arguments": {**reach_semi.arguments, "group": group_a}
+                        }
+                    ),
+                ),
+            ]
+        )
+
+    def _edge_key(edge: CanonicalEdge) -> tuple:
+        return (edge.source_id, edge.target_id, edge.edge_type, edge.rule_id)
+
+    base_edges = {_edge_key(e) for e in apply_rules(base_nodes)}
+    group_edges = {_edge_key(e) for e in apply_rules(with_group_nodes)}
+    assert base_edges == group_edges
+    assert len(base_edges) > 0

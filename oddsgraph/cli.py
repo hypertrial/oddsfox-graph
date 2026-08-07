@@ -257,7 +257,7 @@ def implies_closure(ctx: typer.Context) -> None:
         raise typer.Exit(code=1)
 
     from oddsgraph.closure import compute_implies_closure
-    from oddsgraph.export import _EDGE_SCHEMA, _write_parquet
+    from oddsgraph.export import EDGE_SCHEMA, write_parquet
     from oddsgraph.schema import CanonicalEdge
 
     edges_table = pq.read_table(settings.edges_path)
@@ -279,7 +279,7 @@ def implies_closure(ctx: typer.Context) -> None:
     ]
     closure_edges = compute_implies_closure(edges)
     settings.ensure_dirs()
-    _write_parquet(
+    write_parquet(
         settings.implies_closure_path,
         [
             {
@@ -297,7 +297,7 @@ def implies_closure(ctx: typer.Context) -> None:
             }
             for e in closure_edges
         ],
-        _EDGE_SCHEMA,
+        EDGE_SCHEMA,
     )
     typer.echo(
         f"Wrote {len(closure_edges)} transitive IMPLIES edges to {settings.implies_closure_path}"

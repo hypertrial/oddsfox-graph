@@ -24,7 +24,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "pyyaml>=6.0"]
+dev = ["pytest>=8.0", "pyyaml>=6.0", "ruff>=0.15"]
 docs = ["mkdocs>=1.6.0", "mkdocs-material>=9.5.0"]
 explore = ["dash>=2.18", "dash-cytoscape>=1.0"]
 mlx = ["mlx-lm>=0.22", "outlines>=1.0"]
@@ -47,3 +47,12 @@ pythonpath = ["."]
 markers = [
     "integration: live model integration tests",
 ]
+
+[tool.ruff]
+target-version = "py311"
+src = ["oddsgraph", "tests", "scripts"]
+
+# Pin the classic default ruleset (pycodestyle errors + pyflakes). Ruff 0.16+
+# expanded its implicit defaults; keep CI stable and match the verified scope.
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]

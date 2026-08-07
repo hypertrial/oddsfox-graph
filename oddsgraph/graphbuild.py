@@ -78,6 +78,25 @@ def _has_implies_cycle(edges: list[CanonicalEdge]) -> bool:
     return _has_typed_cycle(edges, frozenset({EdgeType.IMPLIES}))
 
 
+def reject_implies_cycle(
+    edges: list[CanonicalEdge],
+) -> tuple[list[CanonicalEdge], list[RejectedEdge]]:
+    """Drop all IMPLIES edges when any IMPLIES cycle is present.
+
+    Non-IMPLIES edges are preserved. When the IMPLIES subgraph is acyclic,
+    returns ``edges`` unchanged with an empty rejection list.
+    """
+    implies = [e for e in edges if e.edge_type == EdgeType.IMPLIES]
+    if not implies or not _has_implies_cycle(implies):
+        return edges, []
+    kept = [e for e in edges if e.edge_type != EdgeType.IMPLIES]
+    rejected = [
+        RejectedEdge(**edge.model_dump(), rejection_reason="implies_cycle")
+        for edge in implies
+    ]
+    return kept, rejected
+
+
 # Public aliases used by the build pipeline.
 dedupe_edges = _dedupe_edges
 has_implies_cycle = _has_implies_cycle
@@ -235,15 +254,8 @@ def build_graph_from_fragments(
     accepted = non_progression + kept_progression
     rejected.extend(cycle_rejected)
 
-    implies_edges = [e for e in accepted if e.edge_type == EdgeType.IMPLIES]
-    if _has_implies_cycle(implies_edges):
-        # Reject all IMPLIES edges when a cycle is present — a rule-engine bug signal.
-        kept = [e for e in accepted if e.edge_type != EdgeType.IMPLIES]
-        for edge in implies_edges:
-            rejected.append(
-                RejectedEdge(**edge.model_dump(), rejection_reason="implies_cycle")
-            )
-        accepted = kept
+    accepted, implies_rejected = reject_implies_cycle(accepted)
+    rejected.extend(implies_rejected)
 
     result.edges = accepted
     result.rejected_edges = rejected

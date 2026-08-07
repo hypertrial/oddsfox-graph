@@ -108,13 +108,13 @@ def test_cli_build_and_validate_with_fixture(tmp_path: Path) -> None:
 
 
 def test_cli_closure_writes_empty_parquet(tmp_path: Path) -> None:
-    from oddsgraph.export import _EDGE_SCHEMA, _write_parquet
+    from oddsgraph.export import EDGE_SCHEMA, write_parquet
 
     build_dir = tmp_path / "build"
     settings = Settings()
     settings.configure_build_dir(build_dir)
     settings.ensure_dirs()
-    _write_parquet(settings.edges_path, [], _EDGE_SCHEMA)
+    write_parquet(settings.edges_path, [], EDGE_SCHEMA)
 
     result = runner.invoke(app, ["--build-dir", str(build_dir), "closure"])
     assert result.exit_code == 0

@@ -24,6 +24,12 @@ uv sync --extra docs
 uv run pytest
 ```
 
+Lint (also run in CI):
+
+```bash
+uv run ruff check .
+```
+
 Live model integration (optional):
 
 ```bash
@@ -42,6 +48,18 @@ Docs structure and strict build:
 uv run mkdocs build --strict
 uv run pytest tests/docs -q
 ```
+
+## Benchmarks
+
+```bash
+uv run python scripts/benchmark_build.py \
+  --markets tests/fixtures/golden_semantic_markets.parquet
+uv run python scripts/benchmark_infer.py --help
+```
+
+`benchmark_build.py` times proposition compilation, rule application, entity
+resolution, and the full build pipeline. Residual LLM decode timing lives in
+[Inference backends](../guides/inference-backends.md).
 
 ## Quality expectations
 

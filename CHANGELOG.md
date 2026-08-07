@@ -15,8 +15,26 @@ flags and output schema as pre-1.0 and subject to change.
 
 ## [Unreleased]
 
+### Changed
+
+- Public export schema API (`NODE_SCHEMA`, `EDGE_SCHEMA`, `write_parquet`,
+  `table_with_schema`) replaces the prior underscore-private helpers used by
+  the CLI and explorer.
+- Rule-engine candidate indexing uses only `team`/`match` keys (dropping
+  tournament-wide `competition`/`group` buckets that forced O(n²) pair scans).
+- Shared `has_implies_cycle` / `reject_implies_cycle()` helpers: graph build
+  drops all IMPLIES on cycle; the post-rule pipeline merge still drops only
+  rule-engine IMPLIES so fragment edges are preserved.
+- Entity resolution caches `normalize_label` and skips no-op evidence
+  `model_copy`s on finalize.
+- Explorer callbacks split into `canvas_actions.py` / `inspector.py` with
+  stable re-exports from `callbacks.py`.
+
 ### Added
 
+- `scripts/benchmark_build.py` for timing proposition compilation, rule
+  application, entity resolution, and the full build pipeline.
+- CI `lint` job running `ruff check` (E4/E7/E9/F) via the `dev` extra.
 - Formal proposition layer: deterministic compiler attaches `Proposition`
   payloads to covered `OUTCOME` nodes and emits `REFERS_TO`, `PRICES`,
   `COMPLEMENT`, and `EXACTLY_ONE` (+ `CONSTRAINT` nodes).

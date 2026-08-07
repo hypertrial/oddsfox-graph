@@ -134,3 +134,182 @@ def test_pipeline_can_disable_propositions() -> None:
     assert result.propositions is None
     assert not any(e.edge_type == EdgeType.REFERS_TO for e in result.graph.edges)
     assert not any(n.proposition is not None for n in result.graph.nodes)
+
+
+def test_pipeline_rejects_all_implies_on_rule_cycle(monkeypatch) -> None:
+    """Cyclic rule IMPLIES must reject every rule-engine IMPLIES edge."""
+    from oddsgraph.ontology import EdgeType, NodeType
+    from oddsgraph.schema import CanonicalEdge, CanonicalNode, SemanticMarket
+    import oddsgraph.pipeline as pipeline_mod
+
+    markets = [
+        SemanticMarket(
+            market_id="10",
+            event_id="100",
+            event_title="Brazil vs. Morocco",
+            event_slug="fifwc-bra-mar-2026-06-13",
+            question="Will Brazil win?",
+            group_item_title="Brazil",
+            sports_market_type="moneyline",
+            outcomes=["Yes", "No"],
+        ),
+        SemanticMarket(
+            market_id="11",
+            event_id="100",
+            event_title="Brazil vs. Morocco",
+            event_slug="fifwc-bra-mar-2026-06-13",
+            question="Will Morocco win?",
+            group_item_title="Morocco",
+            sports_market_type="moneyline",
+            outcomes=["Yes", "No"],
+        ),
+    ]
+
+    def _cyclic_rules(nodes: list[CanonicalNode]) -> list[CanonicalEdge]:
+        outcomes = [
+            n.canonical_id
+            for n in nodes
+            if n.type == NodeType.OUTCOME and n.proposition is not None
+        ]
+        assert len(outcomes) >= 2
+        a, b = outcomes[0], outcomes[1]
+        return [
+            CanonicalEdge(
+                source_id=a,
+                target_id=b,
+                edge_type=EdgeType.IMPLIES,
+                confidence=1.0,
+                evidence_market_ids=["rule:a"],
+                inference_method="rule_engine",
+                derivation_type="rule",
+                rule_id="test.cycle_a",
+                rule_version=1,
+                premises=["a", "b"],
+            ),
+            CanonicalEdge(
+                source_id=b,
+                target_id=a,
+                edge_type=EdgeType.IMPLIES,
+                confidence=1.0,
+                evidence_market_ids=["rule:b"],
+                inference_method="rule_engine",
+                derivation_type="rule",
+                rule_id="test.cycle_b",
+                rule_version=1,
+                premises=["b", "a"],
+            ),
+            CanonicalEdge(
+                source_id=a,
+                target_id=b,
+                edge_type=EdgeType.MUTEX,
+                confidence=1.0,
+                evidence_market_ids=["rule:m"],
+                inference_method="rule_engine",
+                derivation_type="rule",
+                rule_id="test.mutex",
+                rule_version=1,
+                premises=["a", "b"],
+            ),
+        ]
+
+    monkeypatch.setattr(pipeline_mod, "apply_rules", _cyclic_rules)
+    settings = Settings()
+    settings.official_bracket = False
+    result = build_pipeline_from_markets(settings, markets)
+    assert not any(e.edge_type == EdgeType.IMPLIES for e in result.graph.edges)
+    assert any(e.edge_type == EdgeType.MUTEX for e in result.graph.edges)
+    assert any(e.rejection_reason == "implies_cycle" for e in result.graph.rejected_edges)
+    # Both cyclic IMPLIES edges are rejected, not only one side of the merge.
+    rejected_implies = [
+        e for e in result.graph.rejected_edges if e.rejection_reason == "implies_cycle"
+    ]
+    assert len(rejected_implies) == 2
+
+
+def test_pipeline_cycle_preserves_fragment_implies(monkeypatch) -> None:
+    """Rule-created cycles must not wipe pre-existing fragment IMPLIES edges."""
+    from oddsgraph.graphbuild import GraphBuildResult
+    from oddsgraph.ontology import EdgeType, NodeType
+    from oddsgraph.schema import CanonicalEdge, CanonicalNode, SemanticMarket
+    import oddsgraph.pipeline as pipeline_mod
+
+    markets = [
+        SemanticMarket(
+            market_id="20",
+            event_id="200",
+            event_title="Brazil vs. Morocco",
+            event_slug="fifwc-bra-mar-2026-06-13",
+            question="Will Brazil win?",
+            group_item_title="Brazil",
+            sports_market_type="moneyline",
+            outcomes=["Yes", "No"],
+        ),
+        SemanticMarket(
+            market_id="21",
+            event_id="200",
+            event_title="Brazil vs. Morocco",
+            event_slug="fifwc-bra-mar-2026-06-13",
+            question="Will Morocco win?",
+            group_item_title="Morocco",
+            sports_market_type="moneyline",
+            outcomes=["Yes", "No"],
+        ),
+    ]
+
+    real_build = pipeline_mod.build_graph_from_fragments
+    fragment_pair: dict[str, str] = {}
+
+    def _build_with_fragment_implies(*args, **kwargs) -> GraphBuildResult:
+        result = real_build(*args, **kwargs)
+        outcomes = [n.canonical_id for n in result.nodes if n.type == NodeType.OUTCOME]
+        assert len(outcomes) >= 2
+        a, b = outcomes[0], outcomes[1]
+        fragment_pair["a"] = a
+        fragment_pair["b"] = b
+        result.edges.append(
+            CanonicalEdge(
+                source_id=a,
+                target_id=b,
+                edge_type=EdgeType.IMPLIES,
+                confidence=1.0,
+                evidence_market_ids=["frag:a"],
+                inference_method="deterministic",
+                derivation_type="direct",
+            )
+        )
+        return result
+
+    def _back_edge(nodes: list[CanonicalNode]) -> list[CanonicalEdge]:
+        a, b = fragment_pair["a"], fragment_pair["b"]
+        return [
+            CanonicalEdge(
+                source_id=b,
+                target_id=a,
+                edge_type=EdgeType.IMPLIES,
+                confidence=1.0,
+                evidence_market_ids=["rule:back"],
+                inference_method="rule_engine",
+                derivation_type="rule",
+                rule_id="test.cycle_back",
+                rule_version=1,
+                premises=[b, a],
+            )
+        ]
+
+    monkeypatch.setattr(pipeline_mod, "build_graph_from_fragments", _build_with_fragment_implies)
+    monkeypatch.setattr(pipeline_mod, "apply_rules", _back_edge)
+    settings = Settings()
+    settings.official_bracket = False
+    result = build_pipeline_from_markets(settings, markets)
+
+    implies = [e for e in result.graph.edges if e.edge_type == EdgeType.IMPLIES]
+    assert len(implies) == 1
+    assert implies[0].source_id == fragment_pair["a"]
+    assert implies[0].target_id == fragment_pair["b"]
+    assert implies[0].inference_method == "deterministic"
+    rejected = [
+        e for e in result.graph.rejected_edges if e.rejection_reason == "implies_cycle"
+    ]
+    assert len(rejected) == 1
+    assert rejected[0].source_id == fragment_pair["b"]
+    assert rejected[0].target_id == fragment_pair["a"]

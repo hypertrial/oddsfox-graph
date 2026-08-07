@@ -17,7 +17,7 @@ from oddsgraph.explorer.presentation import (
     short_match_label,
     stage_rank,
 )
-from oddsgraph.export import _EDGE_SCHEMA, _NODE_SCHEMA, _table_with_schema
+from oddsgraph.export import EDGE_SCHEMA, NODE_SCHEMA, table_with_schema
 from oddsgraph.reduce import quote_path
 
 
@@ -147,14 +147,14 @@ class ExplorerDataStore:
             )
         else:
             # Match export schema so queries on type/label/aliases do not BinderError.
-            conn.register("_nodes_stub", _table_with_schema([], _NODE_SCHEMA))
+            conn.register("_nodes_stub", table_with_schema([], NODE_SCHEMA))
             conn.execute("CREATE TABLE nodes AS SELECT * FROM _nodes_stub")
         if self.edges_path.exists():
             conn.execute(
                 f"CREATE TABLE edges AS SELECT * FROM read_parquet('{edges_sql}')"
             )
         else:
-            conn.register("_edges_stub", _table_with_schema([], _EDGE_SCHEMA))
+            conn.register("_edges_stub", table_with_schema([], EDGE_SCHEMA))
             conn.execute("CREATE TABLE edges AS SELECT * FROM _edges_stub")
         self._conn = conn
         self._nodes_mtime = nodes_mtime

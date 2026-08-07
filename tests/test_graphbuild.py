@@ -153,7 +153,7 @@ def test_fixture_fragment_builds_valid_edges() -> None:
 
 
 def test_implies_cycle_is_rejected() -> None:
-    from oddsgraph.graphbuild import _has_implies_cycle
+    from oddsgraph.graphbuild import _has_implies_cycle, reject_implies_cycle
 
     edges = [
         CanonicalEdge(
@@ -172,6 +172,10 @@ def test_implies_cycle_is_rejected() -> None:
         ),
     ]
     assert _has_implies_cycle(edges)
+    kept, rejected = reject_implies_cycle(edges)
+    assert kept == []
+    assert len(rejected) == 2
+    assert all(e.rejection_reason == "implies_cycle" for e in rejected)
 
     fragment = GraphFragment(
         nodes=[

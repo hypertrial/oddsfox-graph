@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from oddsgraph import ids
@@ -329,6 +330,65 @@ def _build_match_propositions(
     )
 
 
+def _compile_single_subject_partition(
+    markets: list[SemanticMarket],
+    *,
+    subject_fn: Callable[[SemanticMarket], str | None],
+    make_prop: Callable[[str], tuple[Proposition, TargetMap]],
+    constraint: tuple[str, str, str] | None = None,
+) -> EventPropositionResult:
+    """Compile binary Yes/No markets that share one subject dimension.
+
+    ``subject_fn`` extracts the per-market subject label (team, stage, …).
+    ``make_prop`` builds the proposition and REFERS_TO target map for that
+    subject. When ``constraint`` is provided as
+    ``(constraint_local_id, constraint_label, evidence_text)``, an
+    ``EXACTLY_ONE`` partition is emitted over the Yes outcomes.
+    """
+    propositions: dict[str, Proposition] = {}
+    edges: list[Edge] = []
+    nodes: list[Node] = []
+    yes_outcome_ids: list[str] = []
+    evidence_ids: set[str] = set()
+
+    for market in markets:
+        binary = _binary_outcomes(market)
+        subject = subject_fn(market)
+        if not binary or not subject:
+            continue
+        yes_label, no_label = binary
+        prop, targets = make_prop(subject)
+        props, new_nodes, new_edges = _complement_pair(
+            market, yes_label, no_label, prop, targets
+        )
+        propositions.update(props)
+        nodes.extend(new_nodes)
+        edges.extend(new_edges)
+        yes_outcome_ids.append(ids.outcome_id(market.market_id, yes_label))
+        evidence_ids.add(market.market_id)
+
+    if not propositions:
+        return EventPropositionResult(fragment=GraphFragment(), fully_covered=False)
+
+    if constraint is not None and len(yes_outcome_ids) >= 2:
+        constraint_local, constraint_label, evidence_text = constraint
+        c_nodes, c_edges = _exactly_one(
+            constraint_local,
+            constraint_label,
+            yes_outcome_ids,
+            sorted(evidence_ids),
+            evidence_text,
+        )
+        nodes.extend(c_nodes)
+        edges.extend(c_edges)
+
+    return EventPropositionResult(
+        fragment=GraphFragment(nodes=nodes, edges=edges),
+        propositions=propositions,
+        fully_covered=True,
+    )
+
+
 def _build_group_winner_propositions(
     markets: list[SemanticMarket],
     competition_label: str,
@@ -340,20 +400,14 @@ def _build_group_winner_propositions(
     group_label = f"Group {letter}"
     group_local = ids.group_id(competition_label, group_label)
     competition_local = ids.competition_id(competition_label)
-    propositions: dict[str, Proposition] = {}
-    edges: list[Edge] = []
-    nodes: list[Node] = []
-    yes_outcome_ids: list[str] = []
-    evidence_ids: set[str] = set()
 
-    for market in markets:
-        binary = _binary_outcomes(market)
-        raw_team = (market.group_item_title or "").strip()
-        if not binary or not raw_team:
-            continue
+    def subject_fn(market: SemanticMarket) -> str | None:
+        raw = (market.group_item_title or "").strip()
+        return raw or None
+
+    def make_prop(raw_team: str) -> tuple[Proposition, TargetMap]:
         team = ids.canonical_team_name(raw_team)
         team_local = ids.team_id(team)
-        yes_label, no_label = binary
         prop = Proposition(
             predicate="wins_group",
             arguments={
@@ -367,35 +421,17 @@ def _build_group_winner_propositions(
             NodeType.GROUP: (group_local, group_label),
             NodeType.COMPETITION: (competition_local, competition_label),
         }
-        props, new_nodes, new_edges = _complement_pair(
-            market, yes_label, no_label, prop, targets
-        )
-        propositions.update(props)
-        nodes.extend(new_nodes)
-        edges.extend(new_edges)
-        yes_outcome_ids.append(ids.outcome_id(market.market_id, yes_label))
-        evidence_ids.add(market.market_id)
+        return prop, targets
 
-    if not propositions:
-        return EventPropositionResult(fragment=GraphFragment(), fully_covered=False)
-
-    constraint_local = ids.constraint_id(
-        "exact-group-winner", competition_label, group_label
-    )
-    c_nodes, c_edges = _exactly_one(
-        constraint_local,
-        f"Exact winner: {group_label}",
-        yes_outcome_ids,
-        sorted(evidence_ids),
-        group_label,
-    )
-    nodes.extend(c_nodes)
-    edges.extend(c_edges)
-
-    return EventPropositionResult(
-        fragment=GraphFragment(nodes=nodes, edges=edges),
-        propositions=propositions,
-        fully_covered=True,
+    return _compile_single_subject_partition(
+        markets,
+        subject_fn=subject_fn,
+        make_prop=make_prop,
+        constraint=(
+            ids.constraint_id("exact-group-winner", competition_label, group_label),
+            f"Exact winner: {group_label}",
+            group_label,
+        ),
     )
 
 
@@ -410,19 +446,13 @@ def _build_stage_elimination_propositions(
     team = ids.canonical_team_name(raw_team)
     team_local = ids.team_id(team)
     competition_local = ids.competition_id(competition_label)
-    propositions: dict[str, Proposition] = {}
-    edges: list[Edge] = []
-    nodes: list[Node] = []
-    yes_outcome_ids: list[str] = []
-    evidence_ids: set[str] = set()
 
-    for market in markets:
-        binary = _binary_outcomes(market)
+    def subject_fn(market: SemanticMarket) -> str | None:
         stage_label = (market.group_item_title or "").strip()
-        if not binary or not stage_label:
-            continue
+        return stage_label or None
+
+    def make_prop(stage_label: str) -> tuple[Proposition, TargetMap]:
         stage_local = ids.stage_id(competition_label, stage_label)
-        yes_label, no_label = binary
         prop = Proposition(
             predicate="eliminated_at_stage",
             arguments={
@@ -436,33 +466,17 @@ def _build_stage_elimination_propositions(
             NodeType.STAGE: (stage_local, stage_label),
             NodeType.COMPETITION: (competition_local, competition_label),
         }
-        props, new_nodes, new_edges = _complement_pair(
-            market, yes_label, no_label, prop, targets
-        )
-        propositions.update(props)
-        nodes.extend(new_nodes)
-        edges.extend(new_edges)
-        yes_outcome_ids.append(ids.outcome_id(market.market_id, yes_label))
-        evidence_ids.add(market.market_id)
+        return prop, targets
 
-    if not propositions:
-        return EventPropositionResult(fragment=GraphFragment(), fully_covered=False)
-
-    constraint_local = ids.constraint_id("exact-elimination", competition_label, team)
-    c_nodes, c_edges = _exactly_one(
-        constraint_local,
-        f"Exact elimination stage: {team}",
-        yes_outcome_ids,
-        sorted(evidence_ids),
-        f"{team} stage of elimination",
-    )
-    nodes.extend(c_nodes)
-    edges.extend(c_edges)
-
-    return EventPropositionResult(
-        fragment=GraphFragment(nodes=nodes, edges=edges),
-        propositions=propositions,
-        fully_covered=True,
+    return _compile_single_subject_partition(
+        markets,
+        subject_fn=subject_fn,
+        make_prop=make_prop,
+        constraint=(
+            ids.constraint_id("exact-elimination", competition_label, team),
+            f"Exact elimination stage: {team}",
+            f"{team} stage of elimination",
+        ),
     )
 
 
@@ -475,25 +489,19 @@ def _build_world_cup_winner_propositions(
         return None
 
     competition_local = ids.competition_id(competition_label)
-    propositions: dict[str, Proposition] = {}
-    edges: list[Edge] = []
-    nodes: list[Node] = []
-    yes_outcome_ids: list[str] = []
-    evidence_ids: set[str] = set()
 
-    for market in markets:
-        binary = _binary_outcomes(market)
+    def subject_fn(market: SemanticMarket) -> str | None:
         raw_team = (market.group_item_title or "").strip()
         if not raw_team:
             question = market.question or ""
             q_match = re.match(r"^Will (.+?) win the .+ World Cup\?$", question)
             if q_match:
                 raw_team = q_match.group(1).strip()
-        if not binary or not raw_team:
-            continue
+        return raw_team or None
+
+    def make_prop(raw_team: str) -> tuple[Proposition, TargetMap]:
         team = ids.canonical_team_name(raw_team)
         team_local = ids.team_id(team)
-        yes_label, no_label = binary
         prop = Proposition(
             predicate="wins_competition",
             arguments={"team": team_local, "competition": competition_local},
@@ -502,33 +510,17 @@ def _build_world_cup_winner_propositions(
             NodeType.TEAM: (team_local, team),
             NodeType.COMPETITION: (competition_local, competition_label),
         }
-        props, new_nodes, new_edges = _complement_pair(
-            market, yes_label, no_label, prop, targets
-        )
-        propositions.update(props)
-        nodes.extend(new_nodes)
-        edges.extend(new_edges)
-        yes_outcome_ids.append(ids.outcome_id(market.market_id, yes_label))
-        evidence_ids.add(market.market_id)
+        return prop, targets
 
-    if not propositions:
-        return EventPropositionResult(fragment=GraphFragment(), fully_covered=False)
-
-    constraint_local = ids.constraint_id("exact-champion", competition_label)
-    c_nodes, c_edges = _exactly_one(
-        constraint_local,
-        f"Exact champion: {competition_label}",
-        yes_outcome_ids,
-        sorted(evidence_ids),
-        competition_label,
-    )
-    nodes.extend(c_nodes)
-    edges.extend(c_edges)
-
-    return EventPropositionResult(
-        fragment=GraphFragment(nodes=nodes, edges=edges),
-        propositions=propositions,
-        fully_covered=True,
+    return _compile_single_subject_partition(
+        markets,
+        subject_fn=subject_fn,
+        make_prop=make_prop,
+        constraint=(
+            ids.constraint_id("exact-champion", competition_label),
+            f"Exact champion: {competition_label}",
+            competition_label,
+        ),
     )
 
 
@@ -548,18 +540,14 @@ def _build_reaches_stage_propositions(
 
     stage_local = ids.stage_id(competition_label, stage_label)
     competition_local = ids.competition_id(competition_label)
-    propositions: dict[str, Proposition] = {}
-    edges: list[Edge] = []
-    nodes: list[Node] = []
 
-    for market in markets:
-        binary = _binary_outcomes(market)
+    def subject_fn(market: SemanticMarket) -> str | None:
         raw_team = (market.group_item_title or "").strip()
-        if not binary or not raw_team:
-            continue
+        return raw_team or None
+
+    def make_prop(raw_team: str) -> tuple[Proposition, TargetMap]:
         team = ids.canonical_team_name(raw_team)
         team_local = ids.team_id(team)
-        yes_label, no_label = binary
         prop = Proposition(
             predicate="reaches_stage",
             arguments={
@@ -573,20 +561,13 @@ def _build_reaches_stage_propositions(
             NodeType.STAGE: (stage_local, stage_label),
             NodeType.COMPETITION: (competition_local, competition_label),
         }
-        props, new_nodes, new_edges = _complement_pair(
-            market, yes_label, no_label, prop, targets
-        )
-        propositions.update(props)
-        nodes.extend(new_nodes)
-        edges.extend(new_edges)
+        return prop, targets
 
-    if not propositions:
-        return EventPropositionResult(fragment=GraphFragment(), fully_covered=False)
-
-    return EventPropositionResult(
-        fragment=GraphFragment(nodes=nodes, edges=edges),
-        propositions=propositions,
-        fully_covered=True,
+    return _compile_single_subject_partition(
+        markets,
+        subject_fn=subject_fn,
+        make_prop=make_prop,
+        constraint=None,
     )
 
 

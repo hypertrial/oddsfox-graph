@@ -123,6 +123,8 @@ def build_pipeline_from_markets(
             node_types = {n.canonical_id: n.type for n in graph.nodes}
             accepted, rejected = accept_edges(rule_edges, node_types, settings)
             merged = dedupe_edges(graph.edges + accepted)
+            # On cycle, drop only rule-engine IMPLIES so fragment edges stay.
+            # ``reject_implies_cycle`` (used in graph build) drops every IMPLIES.
             implies = [e for e in merged if e.edge_type == EdgeType.IMPLIES]
             if has_implies_cycle(implies):
                 non_implies_rules = [

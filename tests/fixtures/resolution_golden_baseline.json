@@ -1,0 +1,5704 @@
+{
+  "canonical_nodes": {
+    "competition:world-cup-2026": {
+      "aliases": [
+        "World Cup 2026",
+        "world-cup-2026"
+      ],
+      "canonical_id": "competition:world-cup-2026",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "1897127",
+        "1897130",
+        "1897133",
+        "1897161",
+        "1897162",
+        "1897163",
+        "2754869",
+        "839420",
+        "839421",
+        "839422",
+        "839423"
+      ],
+      "inference_method": "deterministic",
+      "label": "World Cup 2026",
+      "proposition": null,
+      "resolution_method": "exact_slug",
+      "type": "COMPETITION"
+    },
+    "constraint:exact-group-winner:world-cup-2026:group-d": {
+      "aliases": [],
+      "canonical_id": "constraint:exact-group-winner:world-cup-2026:group-d",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "839420",
+        "839421",
+        "839422",
+        "839423"
+      ],
+      "inference_method": "proposition_compiler",
+      "label": "Exact winner: Group D",
+      "proposition": null,
+      "resolution_method": "new_entity",
+      "type": "CONSTRAINT"
+    },
+    "constraint:exact-match-advance:world-cup-2026:match-brazil-vs-norway-2026-07-05": {
+      "aliases": [],
+      "canonical_id": "constraint:exact-match-advance:world-cup-2026:match-brazil-vs-norway-2026-07-05",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2754869"
+      ],
+      "inference_method": "proposition_compiler",
+      "label": "Team to advance: Brazil vs. Norway",
+      "proposition": null,
+      "resolution_method": "new_entity",
+      "type": "CONSTRAINT"
+    },
+    "constraint:exact-match-result:world-cup-2026:match-spain-vs-saudi-arabia-2026-06-21": {
+      "aliases": [],
+      "canonical_id": "constraint:exact-match-result:world-cup-2026:match-spain-vs-saudi-arabia-2026-06-21",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "1897161",
+        "1897162",
+        "1897163"
+      ],
+      "inference_method": "proposition_compiler",
+      "label": "Exact result: Spain vs. Saudi Arabia",
+      "proposition": null,
+      "resolution_method": "new_entity",
+      "type": "CONSTRAINT"
+    },
+    "constraint:exact-match-result:world-cup-2026:match-turkiye-vs-paraguay-2026-06-19": {
+      "aliases": [],
+      "canonical_id": "constraint:exact-match-result:world-cup-2026:match-turkiye-vs-paraguay-2026-06-19",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "1897127",
+        "1897130",
+        "1897133"
+      ],
+      "inference_method": "proposition_compiler",
+      "label": "Exact result: T\u00fcrkiye vs. Paraguay",
+      "proposition": null,
+      "resolution_method": "new_entity",
+      "type": "CONSTRAINT"
+    },
+    "event:351746": {
+      "aliases": [
+        "fifwc-tur-par-2026-06-19",
+        "fifwc-tur-par-2026-06-19",
+        "fifwc-tur-par-2026-06-19"
+      ],
+      "canonical_id": "event:351746",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "1897127",
+        "1897130",
+        "1897133"
+      ],
+      "inference_method": "deterministic",
+      "label": "T\u00fcrkiye vs. Paraguay",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "EVENT"
+    },
+    "event:351751": {
+      "aliases": [
+        "fifwc-esp-ksa-2026-06-21",
+        "fifwc-esp-ksa-2026-06-21",
+        "fifwc-esp-ksa-2026-06-21"
+      ],
+      "canonical_id": "event:351751",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "1897161",
+        "1897162",
+        "1897163"
+      ],
+      "inference_method": "deterministic",
+      "label": "Spain vs. Saudi Arabia",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "EVENT"
+    },
+    "event:385789": {
+      "aliases": [
+        "who-will-perform-at-world-cup-halftime-show",
+        "who-will-perform-at-world-cup-halftime-show",
+        "who-will-perform-at-world-cup-halftime-show",
+        "who-will-perform-at-world-cup-halftime-show",
+        "who-will-perform-at-world-cup-halftime-show",
+        "who-will-perform-at-world-cup-halftime-show",
+        "who-will-perform-at-world-cup-halftime-show",
+        "who-will-perform-at-world-cup-halftime-show",
+        "who-will-perform-at-world-cup-halftime-show",
+        "who-will-perform-at-world-cup-halftime-show",
+        "who-will-perform-at-world-cup-halftime-show",
+        "who-will-perform-at-world-cup-halftime-show",
+        "who-will-perform-at-world-cup-halftime-show",
+        "who-will-perform-at-world-cup-halftime-show",
+        "who-will-perform-at-world-cup-halftime-show",
+        "who-will-perform-at-world-cup-halftime-show",
+        "who-will-perform-at-world-cup-halftime-show",
+        "who-will-perform-at-world-cup-halftime-show",
+        "who-will-perform-at-world-cup-halftime-show",
+        "who-will-perform-at-world-cup-halftime-show",
+        "who-will-perform-at-world-cup-halftime-show",
+        "who-will-perform-at-world-cup-halftime-show",
+        "who-will-perform-at-world-cup-halftime-show",
+        "who-will-perform-at-world-cup-halftime-show",
+        "who-will-perform-at-world-cup-halftime-show",
+        "who-will-perform-at-world-cup-halftime-show",
+        "who-will-perform-at-world-cup-halftime-show",
+        "who-will-perform-at-world-cup-halftime-show",
+        "who-will-perform-at-world-cup-halftime-show",
+        "who-will-perform-at-world-cup-halftime-show",
+        "who-will-perform-at-world-cup-halftime-show",
+        "who-will-perform-at-world-cup-halftime-show",
+        "who-will-perform-at-world-cup-halftime-show",
+        "who-will-perform-at-world-cup-halftime-show",
+        "who-will-perform-at-world-cup-halftime-show",
+        "who-will-perform-at-world-cup-halftime-show",
+        "who-will-perform-at-world-cup-halftime-show",
+        "who-will-perform-at-world-cup-halftime-show",
+        "who-will-perform-at-world-cup-halftime-show",
+        "who-will-perform-at-world-cup-halftime-show",
+        "who-will-perform-at-world-cup-halftime-show",
+        "who-will-perform-at-world-cup-halftime-show",
+        "who-will-perform-at-world-cup-halftime-show",
+        "who-will-perform-at-world-cup-halftime-show",
+        "who-will-perform-at-world-cup-halftime-show",
+        "who-will-perform-at-world-cup-halftime-show",
+        "who-will-perform-at-world-cup-halftime-show",
+        "who-will-perform-at-world-cup-halftime-show",
+        "who-will-perform-at-world-cup-halftime-show",
+        "who-will-perform-at-world-cup-halftime-show",
+        "who-will-perform-at-world-cup-halftime-show",
+        "who-will-perform-at-world-cup-halftime-show"
+      ],
+      "canonical_id": "event:385789",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000239",
+        "2000240",
+        "2000241",
+        "2000242",
+        "2000243",
+        "2000244",
+        "2000245",
+        "2000246",
+        "2000247",
+        "2000248",
+        "2000249",
+        "2000250",
+        "2000251",
+        "2000252",
+        "2000253",
+        "2000254",
+        "2000255",
+        "2000256",
+        "2000257",
+        "2000258",
+        "2000259",
+        "2000260",
+        "2000261",
+        "2000262",
+        "2000263",
+        "2000264",
+        "2000265",
+        "2000266",
+        "2000267",
+        "2000268",
+        "2000269",
+        "2000270",
+        "2000271",
+        "2000272",
+        "2000273",
+        "2000274",
+        "2000275",
+        "2000276",
+        "2000277",
+        "2000278",
+        "2000279",
+        "2000280",
+        "2000281",
+        "2000282",
+        "2000283",
+        "2000284",
+        "2000285",
+        "2000286",
+        "2000287",
+        "2000288",
+        "2817714",
+        "2972624"
+      ],
+      "inference_method": "deterministic",
+      "label": "Who will perform at World Cup halftime show?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "EVENT"
+    },
+    "event:413862": {
+      "aliases": [
+        "world-cup-golden-boot-winner",
+        "world-cup-golden-boot-winner",
+        "world-cup-golden-boot-winner",
+        "world-cup-golden-boot-winner",
+        "world-cup-golden-boot-winner",
+        "world-cup-golden-boot-winner",
+        "world-cup-golden-boot-winner",
+        "world-cup-golden-boot-winner",
+        "world-cup-golden-boot-winner",
+        "world-cup-golden-boot-winner",
+        "world-cup-golden-boot-winner",
+        "world-cup-golden-boot-winner",
+        "world-cup-golden-boot-winner",
+        "world-cup-golden-boot-winner",
+        "world-cup-golden-boot-winner",
+        "world-cup-golden-boot-winner",
+        "world-cup-golden-boot-winner",
+        "world-cup-golden-boot-winner",
+        "world-cup-golden-boot-winner",
+        "world-cup-golden-boot-winner",
+        "world-cup-golden-boot-winner",
+        "world-cup-golden-boot-winner",
+        "world-cup-golden-boot-winner",
+        "world-cup-golden-boot-winner",
+        "world-cup-golden-boot-winner",
+        "world-cup-golden-boot-winner",
+        "world-cup-golden-boot-winner",
+        "world-cup-golden-boot-winner",
+        "world-cup-golden-boot-winner",
+        "world-cup-golden-boot-winner",
+        "world-cup-golden-boot-winner",
+        "world-cup-golden-boot-winner",
+        "world-cup-golden-boot-winner",
+        "world-cup-golden-boot-winner",
+        "world-cup-golden-boot-winner",
+        "world-cup-golden-boot-winner",
+        "world-cup-golden-boot-winner",
+        "world-cup-golden-boot-winner",
+        "world-cup-golden-boot-winner",
+        "world-cup-golden-boot-winner",
+        "world-cup-golden-boot-winner",
+        "world-cup-golden-boot-winner",
+        "world-cup-golden-boot-winner",
+        "world-cup-golden-boot-winner",
+        "world-cup-golden-boot-winner",
+        "world-cup-golden-boot-winner",
+        "world-cup-golden-boot-winner",
+        "world-cup-golden-boot-winner",
+        "world-cup-golden-boot-winner",
+        "world-cup-golden-boot-winner",
+        "world-cup-golden-boot-winner",
+        "world-cup-golden-boot-winner"
+      ],
+      "canonical_id": "event:413862",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069635",
+        "2069636",
+        "2069637",
+        "2069638",
+        "2069639",
+        "2069640",
+        "2069641",
+        "2069642",
+        "2069643",
+        "2069644",
+        "2069645",
+        "2069646",
+        "2069647",
+        "2069648",
+        "2069649",
+        "2069650",
+        "2069651",
+        "2069652",
+        "2069653",
+        "2069654",
+        "2069655",
+        "2069656",
+        "2069657",
+        "2069658",
+        "2069659",
+        "2069660",
+        "2069661",
+        "2069662",
+        "2069663",
+        "2069664",
+        "2069665",
+        "2069666",
+        "2069667",
+        "2069668",
+        "2069669",
+        "2069670",
+        "2069672",
+        "2069673",
+        "2069674",
+        "2069675",
+        "2069676",
+        "2069677",
+        "2069678",
+        "2069679",
+        "2069680",
+        "2069681",
+        "2069687",
+        "2069690",
+        "2069691",
+        "2069694",
+        "2069704",
+        "2069706"
+      ],
+      "inference_method": "deterministic",
+      "label": "World Cup: Golden Boot Winner",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "EVENT"
+    },
+    "event:654708": {
+      "aliases": [
+        "fifwc-bra-nor-2026-07-05-more-markets"
+      ],
+      "canonical_id": "event:654708",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2754869"
+      ],
+      "inference_method": "deterministic",
+      "label": "Brazil vs. Norway - More Markets",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "EVENT"
+    },
+    "event:98266": {
+      "aliases": [
+        "world-cup-group-d-winner",
+        "world-cup-group-d-winner",
+        "world-cup-group-d-winner",
+        "world-cup-group-d-winner"
+      ],
+      "canonical_id": "event:98266",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "839420",
+        "839421",
+        "839422",
+        "839423"
+      ],
+      "inference_method": "deterministic",
+      "label": "World Cup Group D Winner",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "EVENT"
+    },
+    "group:world-cup-2026:group-d": {
+      "aliases": [
+        "Group D",
+        "world-cup-group-d-winner"
+      ],
+      "canonical_id": "group:world-cup-2026:group-d",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "1897127",
+        "1897130",
+        "1897133",
+        "839420",
+        "839421",
+        "839422",
+        "839423"
+      ],
+      "inference_method": "deterministic",
+      "label": "Group D",
+      "proposition": null,
+      "resolution_method": "exact_slug",
+      "type": "GROUP"
+    },
+    "market:1897127": {
+      "aliases": [
+        "fifwc-tur-par-2026-06-19-tur"
+      ],
+      "canonical_id": "market:1897127",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "1897127"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will T\u00fcrkiye win on 2026-06-19?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:1897130": {
+      "aliases": [
+        "fifwc-tur-par-2026-06-19-draw"
+      ],
+      "canonical_id": "market:1897130",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "1897130"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will T\u00fcrkiye vs. Paraguay end in a draw?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:1897133": {
+      "aliases": [
+        "fifwc-tur-par-2026-06-19-par"
+      ],
+      "canonical_id": "market:1897133",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "1897133"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Paraguay win on 2026-06-19?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:1897161": {
+      "aliases": [
+        "fifwc-esp-ksa-2026-06-21-esp"
+      ],
+      "canonical_id": "market:1897161",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "1897161"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Spain win on 2026-06-21?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:1897162": {
+      "aliases": [
+        "fifwc-esp-ksa-2026-06-21-draw"
+      ],
+      "canonical_id": "market:1897162",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "1897162"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Spain vs. Saudi Arabia end in a draw?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:1897163": {
+      "aliases": [
+        "fifwc-esp-ksa-2026-06-21-ksa"
+      ],
+      "canonical_id": "market:1897163",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "1897163"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Saudi Arabia win on 2026-06-21?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2000239": {
+      "aliases": [
+        "will-shakira-perform-at-the-2026-fifa-world-cup-final-halftime-show"
+      ],
+      "canonical_id": "market:2000239",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000239"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Shakira perform at the 2026 FIFA World Cup Final halftime show?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2000240": {
+      "aliases": [
+        "will-rihanna-perform-at-the-2026-fifa-world-cup-final-halftime-show"
+      ],
+      "canonical_id": "market:2000240",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000240"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Rihanna perform at the 2026 FIFA World Cup Final halftime show?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2000241": {
+      "aliases": [
+        "will-the-weeknd-perform-at-the-2026-fifa-world-cup-final-halftime-show"
+      ],
+      "canonical_id": "market:2000241",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000241"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will The Weeknd perform at the 2026 FIFA World Cup Final halftime show?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2000242": {
+      "aliases": [
+        "will-bad-bunny-perform-at-the-2026-fifa-world-cup-final-halftime-show"
+      ],
+      "canonical_id": "market:2000242",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000242"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Bad Bunny perform at the 2026 FIFA World Cup Final halftime show?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2000243": {
+      "aliases": [
+        "will-beyonc-perform-at-the-2026-fifa-world-cup-final-halftime-show"
+      ],
+      "canonical_id": "market:2000243",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000243"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Beyonc\u00e9 perform at the 2026 FIFA World Cup Final halftime show?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2000244": {
+      "aliases": [
+        "will-lady-gaga-perform-at-the-2026-fifa-world-cup-final-halftime-show"
+      ],
+      "canonical_id": "market:2000244",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000244"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Lady Gaga perform at the 2026 FIFA World Cup Final halftime show?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2000245": {
+      "aliases": [
+        "will-taylor-swift-perform-at-the-2026-fifa-world-cup-final-halftime-show"
+      ],
+      "canonical_id": "market:2000245",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000245"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Taylor Swift perform at the 2026 FIFA World Cup Final halftime show?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2000246": {
+      "aliases": [
+        "will-karol-g-perform-at-the-2026-fifa-world-cup-final-halftime-show"
+      ],
+      "canonical_id": "market:2000246",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000246"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Karol G perform at the 2026 FIFA World Cup Final halftime show?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2000247": {
+      "aliases": [
+        "will-coldplay-perform-at-the-2026-fifa-world-cup-final-halftime-show"
+      ],
+      "canonical_id": "market:2000247",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000247"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Coldplay perform at the 2026 FIFA World Cup Final halftime show?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2000248": {
+      "aliases": [
+        "will-ed-sheeran-perform-at-the-2026-fifa-world-cup-final-halftime-show"
+      ],
+      "canonical_id": "market:2000248",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000248"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Ed Sheeran perform at the 2026 FIFA World Cup Final halftime show?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2000249": {
+      "aliases": [
+        "will-j-balvin-perform-at-the-2026-fifa-world-cup-final-halftime-show"
+      ],
+      "canonical_id": "market:2000249",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000249"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will J Balvin perform at the 2026 FIFA World Cup Final halftime show?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2000250": {
+      "aliases": [
+        "will-rauw-alejandro-perform-at-the-2026-fifa-world-cup-final-halftime-show"
+      ],
+      "canonical_id": "market:2000250",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000250"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Rauw Alejandro perform at the 2026 FIFA World Cup Final halftime show?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2000251": {
+      "aliases": [
+        "will-rosala-perform-at-the-2026-fifa-world-cup-final-halftime-show"
+      ],
+      "canonical_id": "market:2000251",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000251"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Rosal\u00eda perform at the 2026 FIFA World Cup Final halftime show?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2000252": {
+      "aliases": [
+        "will-bruno-mars-perform-at-the-2026-fifa-world-cup-final-halftime-show"
+      ],
+      "canonical_id": "market:2000252",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000252"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Bruno Mars perform at the 2026 FIFA World Cup Final halftime show?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2000253": {
+      "aliases": [
+        "will-burna-boy-perform-at-the-2026-fifa-world-cup-final-halftime-show"
+      ],
+      "canonical_id": "market:2000253",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000253"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Burna Boy perform at the 2026 FIFA World Cup Final halftime show?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2000254": {
+      "aliases": [
+        "will-drake-perform-at-the-2026-fifa-world-cup-final-halftime-show"
+      ],
+      "canonical_id": "market:2000254",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000254"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Drake perform at the 2026 FIFA World Cup Final halftime show?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2000255": {
+      "aliases": [
+        "will-maluma-perform-at-the-2026-fifa-world-cup-final-halftime-show"
+      ],
+      "canonical_id": "market:2000255",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000255"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Maluma perform at the 2026 FIFA World Cup Final halftime show?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2000256": {
+      "aliases": [
+        "will-dua-lipa-perform-at-the-2026-fifa-world-cup-final-halftime-show"
+      ],
+      "canonical_id": "market:2000256",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000256"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Dua Lipa perform at the 2026 FIFA World Cup Final halftime show?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2000257": {
+      "aliases": [
+        "will-sabrina-carpenter-perform-at-the-2026-fifa-world-cup-final-halftime-show"
+      ],
+      "canonical_id": "market:2000257",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000257"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Sabrina Carpenter perform at the 2026 FIFA World Cup Final halftime show?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2000258": {
+      "aliases": [
+        "will-billie-eilish-perform-at-the-2026-fifa-world-cup-final-halftime-show"
+      ],
+      "canonical_id": "market:2000258",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000258"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Billie Eilish perform at the 2026 FIFA World Cup Final halftime show?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2000259": {
+      "aliases": [
+        "will-ariana-grande-perform-at-the-2026-fifa-world-cup-final-halftime-show"
+      ],
+      "canonical_id": "market:2000259",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000259"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Ariana Grande perform at the 2026 FIFA World Cup Final halftime show?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2000260": {
+      "aliases": [
+        "will-daddy-yankee-perform-at-the-2026-fifa-world-cup-final-halftime-show"
+      ],
+      "canonical_id": "market:2000260",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000260"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Daddy Yankee perform at the 2026 FIFA World Cup Final halftime show?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2000261": {
+      "aliases": [
+        "will-jennifer-lopez-perform-at-the-2026-fifa-world-cup-final-halftime-show"
+      ],
+      "canonical_id": "market:2000261",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000261"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Jennifer Lopez perform at the 2026 FIFA World Cup Final halftime show?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2000262": {
+      "aliases": [
+        "will-pitbull-perform-at-the-2026-fifa-world-cup-final-halftime-show"
+      ],
+      "canonical_id": "market:2000262",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000262"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Pitbull perform at the 2026 FIFA World Cup Final halftime show?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2000263": {
+      "aliases": [
+        "will-post-malone-perform-at-the-2026-fifa-world-cup-final-halftime-show"
+      ],
+      "canonical_id": "market:2000263",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000263"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Post Malone perform at the 2026 FIFA World Cup Final halftime show?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2000264": {
+      "aliases": [
+        "will-travis-scott-perform-at-the-2026-fifa-world-cup-final-halftime-show"
+      ],
+      "canonical_id": "market:2000264",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000264"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Travis Scott perform at the 2026 FIFA World Cup Final halftime show?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2000265": {
+      "aliases": [
+        "will-kendrick-lamar-perform-at-the-2026-fifa-world-cup-final-halftime-show"
+      ],
+      "canonical_id": "market:2000265",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000265"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Kendrick Lamar perform at the 2026 FIFA World Cup Final halftime show?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2000266": {
+      "aliases": [
+        "will-jay-z-perform-at-the-2026-fifa-world-cup-final-halftime-show"
+      ],
+      "canonical_id": "market:2000266",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000266"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Jay-Z perform at the 2026 FIFA World Cup Final halftime show?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2000267": {
+      "aliases": [
+        "will-eminem-perform-at-the-2026-fifa-world-cup-final-halftime-show"
+      ],
+      "canonical_id": "market:2000267",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000267"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Eminem perform at the 2026 FIFA World Cup Final halftime show?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2000268": {
+      "aliases": [
+        "will-justin-bieber-perform-at-the-2026-fifa-world-cup-final-halftime-show"
+      ],
+      "canonical_id": "market:2000268",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000268"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Justin Bieber perform at the 2026 FIFA World Cup Final halftime show?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2000269": {
+      "aliases": [
+        "will-harry-styles-perform-at-the-2026-fifa-world-cup-final-halftime-show"
+      ],
+      "canonical_id": "market:2000269",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000269"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Harry Styles perform at the 2026 FIFA World Cup Final halftime show?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2000270": {
+      "aliases": [
+        "will-olivia-rodrigo-perform-at-the-2026-fifa-world-cup-final-halftime-show"
+      ],
+      "canonical_id": "market:2000270",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000270"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Olivia Rodrigo perform at the 2026 FIFA World Cup Final halftime show?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2000271": {
+      "aliases": [
+        "will-chappell-roan-perform-at-the-2026-fifa-world-cup-final-halftime-show"
+      ],
+      "canonical_id": "market:2000271",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000271"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Chappell Roan perform at the 2026 FIFA World Cup Final halftime show?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2000272": {
+      "aliases": [
+        "will-charli-xcx-perform-at-the-2026-fifa-world-cup-final-halftime-show"
+      ],
+      "canonical_id": "market:2000272",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000272"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Charli XCX perform at the 2026 FIFA World Cup Final halftime show?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2000273": {
+      "aliases": [
+        "will-sza-perform-at-the-2026-fifa-world-cup-final-halftime-show"
+      ],
+      "canonical_id": "market:2000273",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000273"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will SZA perform at the 2026 FIFA World Cup Final halftime show?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2000274": {
+      "aliases": [
+        "will-cardi-b-perform-at-the-2026-fifa-world-cup-final-halftime-show"
+      ],
+      "canonical_id": "market:2000274",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000274"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Cardi B perform at the 2026 FIFA World Cup Final halftime show?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2000275": {
+      "aliases": [
+        "will-nicki-minaj-perform-at-the-2026-fifa-world-cup-final-halftime-show"
+      ],
+      "canonical_id": "market:2000275",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000275"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Nicki Minaj perform at the 2026 FIFA World Cup Final halftime show?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2000276": {
+      "aliases": [
+        "will-adele-perform-at-the-2026-fifa-world-cup-final-halftime-show"
+      ],
+      "canonical_id": "market:2000276",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000276"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Adele perform at the 2026 FIFA World Cup Final halftime show?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2000277": {
+      "aliases": [
+        "will-sam-smith-perform-at-the-2026-fifa-world-cup-final-halftime-show"
+      ],
+      "canonical_id": "market:2000277",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000277"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Sam Smith perform at the 2026 FIFA World Cup Final halftime show?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2000278": {
+      "aliases": [
+        "will-camila-cabello-perform-at-the-2026-fifa-world-cup-final-halftime-show"
+      ],
+      "canonical_id": "market:2000278",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000278"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Camila Cabello perform at the 2026 FIFA World Cup Final halftime show?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2000279": {
+      "aliases": [
+        "will-myke-towers-perform-at-the-2026-fifa-world-cup-final-halftime-show"
+      ],
+      "canonical_id": "market:2000279",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000279"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Myke Towers perform at the 2026 FIFA World Cup Final halftime show?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2000280": {
+      "aliases": [
+        "will-feid-perform-at-the-2026-fifa-world-cup-final-halftime-show"
+      ],
+      "canonical_id": "market:2000280",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000280"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Feid perform at the 2026 FIFA World Cup Final halftime show?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2000281": {
+      "aliases": [
+        "will-ozuna-perform-at-the-2026-fifa-world-cup-final-halftime-show"
+      ],
+      "canonical_id": "market:2000281",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000281"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Ozuna perform at the 2026 FIFA World Cup Final halftime show?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2000282": {
+      "aliases": [
+        "will-anuel-aa-perform-at-the-2026-fifa-world-cup-final-halftime-show"
+      ],
+      "canonical_id": "market:2000282",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000282"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Anuel AA perform at the 2026 FIFA World Cup Final halftime show?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2000283": {
+      "aliases": [
+        "will-peso-pluma-perform-at-the-2026-fifa-world-cup-final-halftime-show"
+      ],
+      "canonical_id": "market:2000283",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000283"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Peso Pluma perform at the 2026 FIFA World Cup Final halftime show?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2000284": {
+      "aliases": [
+        "will-tems-perform-at-the-2026-fifa-world-cup-final-halftime-show"
+      ],
+      "canonical_id": "market:2000284",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000284"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Tems perform at the 2026 FIFA World Cup Final halftime show?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2000285": {
+      "aliases": [
+        "will-wizkid-perform-at-the-2026-fifa-world-cup-final-halftime-show"
+      ],
+      "canonical_id": "market:2000285",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000285"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Wizkid perform at the 2026 FIFA World Cup Final halftime show?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2000286": {
+      "aliases": [
+        "will-davido-perform-at-the-2026-fifa-world-cup-final-halftime-show"
+      ],
+      "canonical_id": "market:2000286",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000286"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Davido perform at the 2026 FIFA World Cup Final halftime show?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2000287": {
+      "aliases": [
+        "will-calvin-harris-perform-at-the-2026-fifa-world-cup-final-halftime-show"
+      ],
+      "canonical_id": "market:2000287",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000287"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Calvin Harris perform at the 2026 FIFA World Cup Final halftime show?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2000288": {
+      "aliases": [
+        "will-david-guetta-perform-at-the-2026-fifa-world-cup-final-halftime-show"
+      ],
+      "canonical_id": "market:2000288",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000288"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will David Guetta perform at the 2026 FIFA World Cup Final halftime show?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2069635": {
+      "aliases": [
+        "will-lionel-messi-be-the-top-goalscorer-at-the-2026-fifa-world-cup"
+      ],
+      "canonical_id": "market:2069635",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069635"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Lionel Messi be the top goalscorer at the 2026 FIFA World Cup?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2069636": {
+      "aliases": [
+        "will-erling-haaland-be-the-top-goalscorer-at-the-2026-fifa-world-cup"
+      ],
+      "canonical_id": "market:2069636",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069636"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Erling Haaland be the top goalscorer at the 2026 FIFA World Cup?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2069637": {
+      "aliases": [
+        "will-cristiano-ronaldo-be-the-top-goalscorer-at-the-2026-fifa-world-cup"
+      ],
+      "canonical_id": "market:2069637",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069637"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Cristiano Ronaldo be the top goalscorer at the 2026 FIFA World Cup?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2069638": {
+      "aliases": [
+        "will-kylian-mbappe-be-the-top-goalscorer-at-the-2026-fifa-world-cup"
+      ],
+      "canonical_id": "market:2069638",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069638"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Kylian Mbappe be the top goalscorer at the 2026 FIFA World Cup?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2069639": {
+      "aliases": [
+        "will-jude-bellingham-be-the-top-goalscorer-at-the-2026-fifa-world-cup"
+      ],
+      "canonical_id": "market:2069639",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069639"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Jude Bellingham be the top goalscorer at the 2026 FIFA World Cup?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2069640": {
+      "aliases": [
+        "will-lamine-yamal-be-the-top-goalscorer-at-the-2026-fifa-world-cup"
+      ],
+      "canonical_id": "market:2069640",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069640"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Lamine Yamal be the top goalscorer at the 2026 FIFA World Cup?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2069641": {
+      "aliases": [
+        "will-raphinha-be-the-top-goalscorer-at-the-2026-fifa-world-cup"
+      ],
+      "canonical_id": "market:2069641",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069641"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Raphinha be the top goalscorer at the 2026 FIFA World Cup?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2069642": {
+      "aliases": [
+        "will-heung-min-son-be-the-top-goalscorer-at-the-2026-fifa-world-cup"
+      ],
+      "canonical_id": "market:2069642",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069642"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Heung-Min Son be the top goalscorer at the 2026 FIFA World Cup?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2069643": {
+      "aliases": [
+        "will-noah-okafor-be-the-top-goalscorer-at-the-2026-fifa-world-cup"
+      ],
+      "canonical_id": "market:2069643",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069643"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Noah Okafor be the top goalscorer at the 2026 FIFA World Cup?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2069644": {
+      "aliases": [
+        "will-edin-deko-be-the-top-goalscorer-at-the-2026-fifa-world-cup"
+      ],
+      "canonical_id": "market:2069644",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069644"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Edin D\u017eeko be the top goalscorer at the 2026 FIFA World Cup?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2069645": {
+      "aliases": [
+        "will-scott-mctominay-be-the-top-goalscorer-at-the-2026-fifa-world-cup"
+      ],
+      "canonical_id": "market:2069645",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069645"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Scott McTominay be the top goalscorer at the 2026 FIFA World Cup?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2069646": {
+      "aliases": [
+        "will-vinicius-junior-be-the-top-goalscorer-at-the-2026-fifa-world-cup"
+      ],
+      "canonical_id": "market:2069646",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069646"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Vinicius Junior be the top goalscorer at the 2026 FIFA World Cup?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2069647": {
+      "aliases": [
+        "will-rodrygo-be-the-top-goalscorer-at-the-2026-fifa-world-cup"
+      ],
+      "canonical_id": "market:2069647",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069647"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Rodrygo be the top goalscorer at the 2026 FIFA World Cup?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2069648": {
+      "aliases": [
+        "will-igor-thiago-be-the-top-goalscorer-at-the-2026-fifa-world-cup"
+      ],
+      "canonical_id": "market:2069648",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069648"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Igor Thiago be the top goalscorer at the 2026 FIFA World Cup?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2069649": {
+      "aliases": [
+        "will-deniz-undav-be-the-top-goalscorer-at-the-2026-fifa-world-cup"
+      ],
+      "canonical_id": "market:2069649",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069649"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Deniz Undav be the top goalscorer at the 2026 FIFA World Cup?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2069650": {
+      "aliases": [
+        "will-serge-gnabry-be-the-top-goalscorer-at-the-2026-fifa-world-cup"
+      ],
+      "canonical_id": "market:2069650",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069650"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Serge Gnabry be the top goalscorer at the 2026 FIFA World Cup?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2069651": {
+      "aliases": [
+        "will-amad-diallo-be-the-top-goalscorer-at-the-2026-fifa-world-cup"
+      ],
+      "canonical_id": "market:2069651",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069651"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Amad Diallo be the top goalscorer at the 2026 FIFA World Cup?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2069652": {
+      "aliases": [
+        "will-viktor-gykeres-be-the-top-goalscorer-at-the-2026-fifa-world-cup"
+      ],
+      "canonical_id": "market:2069652",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069652"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Viktor Gy\u00f6keres be the top goalscorer at the 2026 FIFA World Cup?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2069653": {
+      "aliases": [
+        "will-depay-memphis-be-the-top-goalscorer-at-the-2026-fifa-world-cup"
+      ],
+      "canonical_id": "market:2069653",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069653"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Depay Memphis be the top goalscorer at the 2026 FIFA World Cup?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2069654": {
+      "aliases": [
+        "will-cody-gakpo-be-the-top-goalscorer-at-the-2026-fifa-world-cup"
+      ],
+      "canonical_id": "market:2069654",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069654"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Cody Gakpo be the top goalscorer at the 2026 FIFA World Cup?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2069655": {
+      "aliases": [
+        "will-mohamed-salah-be-the-top-goalscorer-at-the-2026-fifa-world-cup"
+      ],
+      "canonical_id": "market:2069655",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069655"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Mohamed Salah be the top goalscorer at the 2026 FIFA World Cup?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2069656": {
+      "aliases": [
+        "will-ferran-torres-be-the-top-goalscorer-at-the-2026-fifa-world-cup"
+      ],
+      "canonical_id": "market:2069656",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069656"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Ferran Torres be the top goalscorer at the 2026 FIFA World Cup?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2069657": {
+      "aliases": [
+        "will-dani-olmo-be-the-top-goalscorer-at-the-2026-fifa-world-cup"
+      ],
+      "canonical_id": "market:2069657",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069657"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Dani Olmo be the top goalscorer at the 2026 FIFA World Cup?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2069658": {
+      "aliases": [
+        "will-marcus-thuram-be-the-top-goalscorer-at-the-2026-fifa-world-cup"
+      ],
+      "canonical_id": "market:2069658",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069658"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Marcus Thuram be the top goalscorer at the 2026 FIFA World Cup?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2069659": {
+      "aliases": [
+        "will-desire-doue-be-the-top-goalscorer-at-the-2026-fifa-world-cup"
+      ],
+      "canonical_id": "market:2069659",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069659"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Desire Doue be the top goalscorer at the 2026 FIFA World Cup?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2069660": {
+      "aliases": [
+        "will-ousmane-dembele-be-the-top-goalscorer-at-the-2026-fifa-world-cup"
+      ],
+      "canonical_id": "market:2069660",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069660"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Ousmane Dembele be the top goalscorer at the 2026 FIFA World Cup?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2069661": {
+      "aliases": [
+        "will-bradley-barcola-be-the-top-goalscorer-at-the-2026-fifa-world-cup"
+      ],
+      "canonical_id": "market:2069661",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069661"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Bradley Barcola be the top goalscorer at the 2026 FIFA World Cup?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2069662": {
+      "aliases": [
+        "will-michael-olise-be-the-top-goalscorer-at-the-2026-fifa-world-cup"
+      ],
+      "canonical_id": "market:2069662",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069662"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Michael Olise be the top goalscorer at the 2026 FIFA World Cup?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2069663": {
+      "aliases": [
+        "will-sadio-mane-be-the-top-goalscorer-at-the-2026-fifa-world-cup"
+      ],
+      "canonical_id": "market:2069663",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069663"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Sadio Mane be the top goalscorer at the 2026 FIFA World Cup?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2069664": {
+      "aliases": [
+        "will-luis-diaz-be-the-top-goalscorer-at-the-2026-fifa-world-cup"
+      ],
+      "canonical_id": "market:2069664",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069664"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Luis Diaz be the top goalscorer at the 2026 FIFA World Cup?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2069665": {
+      "aliases": [
+        "will-rafael-leao-be-the-top-goalscorer-at-the-2026-fifa-world-cup"
+      ],
+      "canonical_id": "market:2069665",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069665"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Rafael Leao be the top goalscorer at the 2026 FIFA World Cup?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2069666": {
+      "aliases": [
+        "will-ivan-perii-be-the-top-goalscorer-at-the-2026-fifa-world-cup"
+      ],
+      "canonical_id": "market:2069666",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069666"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Ivan Peri\u0161i\u0107 be the top goalscorer at the 2026 FIFA World Cup?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2069667": {
+      "aliases": [
+        "will-julian-alvarez-be-the-top-goalscorer-at-the-2026-fifa-world-cup"
+      ],
+      "canonical_id": "market:2069667",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069667"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Julian Alvarez be the top goalscorer at the 2026 FIFA World Cup?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2069668": {
+      "aliases": [
+        "will-andrej-kramari-be-the-top-goalscorer-at-the-2026-fifa-world-cup"
+      ],
+      "canonical_id": "market:2069668",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069668"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Andrej Kramari\u0107 be the top goalscorer at the 2026 FIFA World Cup?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2069669": {
+      "aliases": [
+        "will-bukayo-saka-be-the-top-goalscorer-at-the-2026-fifa-world-cup"
+      ],
+      "canonical_id": "market:2069669",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069669"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Bukayo Saka be the top goalscorer at the 2026 FIFA World Cup?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2069670": {
+      "aliases": [
+        "will-harry-kane-be-the-top-goalscorer-at-the-2026-fifa-world-cup"
+      ],
+      "canonical_id": "market:2069670",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069670"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Harry Kane be the top goalscorer at the 2026 FIFA World Cup?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2069672": {
+      "aliases": [
+        "will-antoine-semenyo-be-the-top-goalscorer-at-the-2026-fifa-world-cup"
+      ],
+      "canonical_id": "market:2069672",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069672"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Antoine Semenyo be the top goalscorer at the 2026 FIFA World Cup?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2069673": {
+      "aliases": [
+        "will-lautaro-martinez-be-the-top-goalscorer-at-the-2026-fifa-world-cup"
+      ],
+      "canonical_id": "market:2069673",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069673"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Lautaro Martinez be the top goalscorer at the 2026 FIFA World Cup?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2069674": {
+      "aliases": [
+        "will-mikel-oyarzabal-be-the-top-goalscorer-at-the-2026-fifa-world-cup"
+      ],
+      "canonical_id": "market:2069674",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069674"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Mikel Oyarzabal be the top goalscorer at the 2026 FIFA World Cup?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2069675": {
+      "aliases": [
+        "will-bruno-fernandes-be-the-top-goalscorer-at-the-2026-fifa-world-cup"
+      ],
+      "canonical_id": "market:2069675",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069675"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Bruno Fernandes be the top goalscorer at the 2026 FIFA World Cup?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2069676": {
+      "aliases": [
+        "will-federico-valverde-be-the-top-goalscorer-at-the-2026-fifa-world-cup"
+      ],
+      "canonical_id": "market:2069676",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069676"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Federico Valverde be the top goalscorer at the 2026 FIFA World Cup?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2069677": {
+      "aliases": [
+        "will-pedri-be-the-top-goalscorer-at-the-2026-fifa-world-cup"
+      ],
+      "canonical_id": "market:2069677",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069677"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Pedri be the top goalscorer at the 2026 FIFA World Cup?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2069678": {
+      "aliases": [
+        "will-dion-beljo-be-the-top-goalscorer-at-the-2026-fifa-world-cup"
+      ],
+      "canonical_id": "market:2069678",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069678"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Dion Beljo be the top goalscorer at the 2026 FIFA World Cup?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2069679": {
+      "aliases": [
+        "will-luis-javier-surez-be-the-top-goalscorer-at-the-2026-fifa-world-cup"
+      ],
+      "canonical_id": "market:2069679",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069679"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Luis Javier Su\u00e1rez be the top goalscorer at the 2026 FIFA World Cup?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2069680": {
+      "aliases": [
+        "will-endrick-felipe-moreira-de-sousa-pessoa-be-the-top-goalscorer-at-the-2026-fifa-world-cup"
+      ],
+      "canonical_id": "market:2069680",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069680"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Endrick Felipe Moreira de Sousa Pessoa be the top goalscorer at the 2026 FIFA World Cup?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2069681": {
+      "aliases": [
+        "will-kai-havertz-be-the-top-goalscorer-at-the-2026-fifa-world-cup"
+      ],
+      "canonical_id": "market:2069681",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069681"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Kai Havertz be the top goalscorer at the 2026 FIFA World Cup?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2069687": {
+      "aliases": [
+        "will-folarin-balogun-be-the-top-goalscorer-at-the-2026-fifa-world-cup"
+      ],
+      "canonical_id": "market:2069687",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069687"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Folarin Balogun be the top goalscorer at the 2026 FIFA World Cup?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2069690": {
+      "aliases": [
+        "will-romelu-lukaku-be-the-top-goalscorer-at-the-2026-fifa-world-cup"
+      ],
+      "canonical_id": "market:2069690",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069690"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Romelu Lukaku be the top goalscorer at the 2026 FIFA World Cup?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2069691": {
+      "aliases": [
+        "will-florian-wirtz-be-the-top-goalscorer-at-the-2026-fifa-world-cup"
+      ],
+      "canonical_id": "market:2069691",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069691"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Florian Wirtz be the top goalscorer at the 2026 FIFA World Cup?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2069694": {
+      "aliases": [
+        "will-tim-payne-be-the-top-goalscorer-at-the-2026-fifa-world-cup"
+      ],
+      "canonical_id": "market:2069694",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069694"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Tim Payne be the top goalscorer at the 2026 FIFA World Cup?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2069704": {
+      "aliases": [
+        "will-memphis-depay-be-the-top-goalscorer-at-the-2026-fifa-world-cup"
+      ],
+      "canonical_id": "market:2069704",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069704"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Memphis Depay be the top goalscorer at the 2026 FIFA World Cup?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2069706": {
+      "aliases": [
+        "will-donyell-malen-be-the-top-goalscorer-at-the-2026-fifa-world-cup"
+      ],
+      "canonical_id": "market:2069706",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069706"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Donyell Malen be the top goalscorer at the 2026 FIFA World Cup?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2754869": {
+      "aliases": [
+        "fifwc-bra-nor-2026-07-05-team-to-advance"
+      ],
+      "canonical_id": "market:2754869",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2754869"
+      ],
+      "inference_method": "deterministic",
+      "label": "Brazil vs. Norway: Team to Advance",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2817714": {
+      "aliases": [
+        "will-bts-perform-at-the-2026-fifa-world-cup-final-halftime-show-20260706143941002"
+      ],
+      "canonical_id": "market:2817714",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2817714"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will BTS perform at the 2026 FIFA World Cup Final halftime show?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:2972624": {
+      "aliases": [
+        "will-ishowspeed-perform-at-the-2026-fifa-world-cup-final-halftime-show-20260718154303217"
+      ],
+      "canonical_id": "market:2972624",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2972624"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will IShowSpeed perform at the 2026 FIFA World Cup Final halftime show?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:839420": {
+      "aliases": [
+        "will-usa-win-group-d-in-the-2026-fifa-world-cup"
+      ],
+      "canonical_id": "market:839420",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "839420"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will USA win Group D in the 2026 FIFA World Cup?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:839421": {
+      "aliases": [
+        "will-paraguay-win-group-d-in-the-2026-fifa-world-cup"
+      ],
+      "canonical_id": "market:839421",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "839421"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Paraguay win Group D in the 2026 FIFA World Cup?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:839422": {
+      "aliases": [
+        "will-australia-win-group-d-in-the-2026-fifa-world-cup"
+      ],
+      "canonical_id": "market:839422",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "839422"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will Australia win Group D in the 2026 FIFA World Cup?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "market:839423": {
+      "aliases": [
+        "will-the-winner-of-kosovoromaniaslovakiatrkiye-playoff-win-group-d-in-the-2026-fifa-world-cup"
+      ],
+      "canonical_id": "market:839423",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "839423"
+      ],
+      "inference_method": "deterministic",
+      "label": "Will T\u00fcrkiye win Group D in the 2026 FIFA World Cup?",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "MARKET"
+    },
+    "match:brazil-vs-norway-2026-07-05": {
+      "aliases": [
+        "Brazil vs. Norway",
+        "fifwc-bra-nor-2026-07-05"
+      ],
+      "canonical_id": "match:brazil-vs-norway-2026-07-05",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2754869"
+      ],
+      "inference_method": "deterministic",
+      "label": "Brazil vs. Norway",
+      "proposition": null,
+      "resolution_method": "exact_slug",
+      "type": "MATCH"
+    },
+    "match:spain-vs-saudi-arabia-2026-06-21": {
+      "aliases": [
+        "Spain vs. Saudi Arabia",
+        "fifwc-esp-ksa-2026-06-21"
+      ],
+      "canonical_id": "match:spain-vs-saudi-arabia-2026-06-21",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "1897161",
+        "1897162",
+        "1897163"
+      ],
+      "inference_method": "deterministic",
+      "label": "Spain vs. Saudi Arabia",
+      "proposition": null,
+      "resolution_method": "exact_slug",
+      "type": "MATCH"
+    },
+    "match:turkiye-vs-paraguay-2026-06-19": {
+      "aliases": [
+        "T\u00fcrkiye vs. Paraguay",
+        "fifwc-tur-par-2026-06-19"
+      ],
+      "canonical_id": "match:turkiye-vs-paraguay-2026-06-19",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "1897127",
+        "1897130",
+        "1897133"
+      ],
+      "inference_method": "deterministic",
+      "label": "T\u00fcrkiye vs. Paraguay",
+      "proposition": null,
+      "resolution_method": "exact_slug",
+      "type": "MATCH"
+    },
+    "outcome:1897127:no": {
+      "aliases": [],
+      "canonical_id": "outcome:1897127:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "1897127"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:1897127:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:1897127:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "1897127"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:1897130:no": {
+      "aliases": [],
+      "canonical_id": "outcome:1897130:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "1897130"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:1897130:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:1897130:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "1897130"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:1897133:no": {
+      "aliases": [],
+      "canonical_id": "outcome:1897133:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "1897133"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:1897133:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:1897133:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "1897133"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:1897161:no": {
+      "aliases": [],
+      "canonical_id": "outcome:1897161:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "1897161"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:1897161:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:1897161:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "1897161"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:1897162:no": {
+      "aliases": [],
+      "canonical_id": "outcome:1897162:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "1897162"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:1897162:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:1897162:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "1897162"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:1897163:no": {
+      "aliases": [],
+      "canonical_id": "outcome:1897163:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "1897163"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:1897163:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:1897163:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "1897163"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000239:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2000239:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000239"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000239:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2000239:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000239"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000240:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2000240:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000240"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000240:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2000240:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000240"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000241:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2000241:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000241"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000241:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2000241:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000241"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000242:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2000242:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000242"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000242:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2000242:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000242"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000243:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2000243:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000243"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000243:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2000243:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000243"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000244:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2000244:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000244"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000244:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2000244:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000244"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000245:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2000245:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000245"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000245:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2000245:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000245"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000246:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2000246:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000246"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000246:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2000246:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000246"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000247:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2000247:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000247"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000247:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2000247:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000247"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000248:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2000248:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000248"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000248:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2000248:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000248"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000249:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2000249:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000249"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000249:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2000249:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000249"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000250:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2000250:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000250"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000250:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2000250:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000250"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000251:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2000251:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000251"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000251:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2000251:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000251"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000252:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2000252:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000252"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000252:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2000252:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000252"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000253:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2000253:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000253"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000253:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2000253:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000253"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000254:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2000254:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000254"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000254:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2000254:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000254"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000255:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2000255:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000255"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000255:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2000255:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000255"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000256:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2000256:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000256"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000256:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2000256:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000256"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000257:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2000257:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000257"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000257:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2000257:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000257"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000258:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2000258:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000258"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000258:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2000258:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000258"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000259:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2000259:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000259"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000259:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2000259:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000259"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000260:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2000260:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000260"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000260:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2000260:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000260"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000261:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2000261:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000261"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000261:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2000261:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000261"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000262:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2000262:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000262"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000262:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2000262:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000262"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000263:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2000263:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000263"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000263:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2000263:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000263"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000264:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2000264:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000264"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000264:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2000264:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000264"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000265:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2000265:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000265"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000265:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2000265:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000265"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000266:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2000266:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000266"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000266:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2000266:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000266"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000267:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2000267:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000267"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000267:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2000267:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000267"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000268:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2000268:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000268"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000268:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2000268:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000268"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000269:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2000269:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000269"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000269:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2000269:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000269"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000270:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2000270:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000270"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000270:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2000270:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000270"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000271:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2000271:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000271"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000271:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2000271:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000271"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000272:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2000272:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000272"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000272:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2000272:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000272"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000273:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2000273:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000273"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000273:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2000273:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000273"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000274:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2000274:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000274"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000274:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2000274:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000274"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000275:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2000275:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000275"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000275:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2000275:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000275"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000276:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2000276:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000276"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000276:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2000276:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000276"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000277:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2000277:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000277"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000277:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2000277:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000277"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000278:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2000278:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000278"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000278:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2000278:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000278"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000279:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2000279:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000279"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000279:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2000279:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000279"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000280:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2000280:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000280"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000280:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2000280:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000280"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000281:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2000281:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000281"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000281:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2000281:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000281"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000282:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2000282:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000282"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000282:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2000282:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000282"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000283:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2000283:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000283"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000283:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2000283:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000283"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000284:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2000284:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000284"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000284:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2000284:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000284"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000285:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2000285:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000285"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000285:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2000285:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000285"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000286:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2000286:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000286"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000286:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2000286:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000286"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000287:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2000287:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000287"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000287:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2000287:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000287"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000288:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2000288:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000288"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2000288:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2000288:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2000288"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069635:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2069635:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069635"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069635:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2069635:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069635"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069636:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2069636:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069636"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069636:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2069636:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069636"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069637:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2069637:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069637"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069637:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2069637:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069637"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069638:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2069638:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069638"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069638:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2069638:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069638"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069639:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2069639:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069639"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069639:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2069639:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069639"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069640:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2069640:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069640"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069640:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2069640:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069640"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069641:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2069641:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069641"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069641:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2069641:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069641"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069642:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2069642:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069642"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069642:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2069642:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069642"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069643:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2069643:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069643"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069643:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2069643:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069643"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069644:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2069644:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069644"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069644:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2069644:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069644"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069645:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2069645:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069645"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069645:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2069645:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069645"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069646:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2069646:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069646"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069646:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2069646:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069646"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069647:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2069647:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069647"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069647:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2069647:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069647"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069648:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2069648:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069648"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069648:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2069648:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069648"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069649:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2069649:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069649"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069649:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2069649:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069649"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069650:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2069650:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069650"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069650:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2069650:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069650"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069651:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2069651:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069651"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069651:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2069651:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069651"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069652:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2069652:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069652"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069652:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2069652:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069652"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069653:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2069653:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069653"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069653:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2069653:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069653"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069654:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2069654:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069654"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069654:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2069654:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069654"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069655:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2069655:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069655"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069655:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2069655:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069655"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069656:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2069656:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069656"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069656:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2069656:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069656"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069657:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2069657:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069657"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069657:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2069657:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069657"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069658:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2069658:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069658"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069658:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2069658:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069658"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069659:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2069659:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069659"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069659:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2069659:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069659"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069660:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2069660:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069660"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069660:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2069660:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069660"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069661:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2069661:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069661"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069661:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2069661:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069661"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069662:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2069662:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069662"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069662:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2069662:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069662"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069663:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2069663:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069663"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069663:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2069663:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069663"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069664:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2069664:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069664"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069664:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2069664:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069664"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069665:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2069665:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069665"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069665:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2069665:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069665"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069666:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2069666:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069666"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069666:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2069666:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069666"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069667:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2069667:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069667"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069667:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2069667:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069667"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069668:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2069668:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069668"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069668:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2069668:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069668"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069669:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2069669:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069669"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069669:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2069669:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069669"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069670:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2069670:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069670"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069670:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2069670:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069670"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069672:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2069672:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069672"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069672:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2069672:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069672"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069673:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2069673:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069673"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069673:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2069673:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069673"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069674:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2069674:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069674"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069674:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2069674:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069674"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069675:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2069675:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069675"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069675:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2069675:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069675"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069676:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2069676:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069676"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069676:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2069676:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069676"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069677:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2069677:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069677"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069677:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2069677:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069677"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069678:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2069678:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069678"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069678:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2069678:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069678"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069679:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2069679:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069679"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069679:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2069679:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069679"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069680:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2069680:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069680"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069680:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2069680:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069680"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069681:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2069681:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069681"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069681:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2069681:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069681"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069687:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2069687:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069687"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069687:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2069687:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069687"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069690:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2069690:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069690"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069690:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2069690:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069690"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069691:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2069691:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069691"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069691:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2069691:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069691"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069694:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2069694:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069694"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069694:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2069694:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069694"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069704:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2069704:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069704"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069704:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2069704:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069704"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069706:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2069706:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069706"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2069706:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2069706:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2069706"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2754869:brazil": {
+      "aliases": [],
+      "canonical_id": "outcome:2754869:brazil",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2754869"
+      ],
+      "inference_method": "deterministic",
+      "label": "Brazil",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2754869:norway": {
+      "aliases": [],
+      "canonical_id": "outcome:2754869:norway",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2754869"
+      ],
+      "inference_method": "deterministic",
+      "label": "Norway",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2817714:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2817714:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2817714"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2817714:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2817714:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2817714"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2972624:no": {
+      "aliases": [],
+      "canonical_id": "outcome:2972624:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2972624"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:2972624:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:2972624:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2972624"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:839420:no": {
+      "aliases": [],
+      "canonical_id": "outcome:839420:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "839420"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:839420:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:839420:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "839420"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:839421:no": {
+      "aliases": [],
+      "canonical_id": "outcome:839421:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "839421"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:839421:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:839421:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "839421"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:839422:no": {
+      "aliases": [],
+      "canonical_id": "outcome:839422:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "839422"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:839422:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:839422:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "839422"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:839423:no": {
+      "aliases": [],
+      "canonical_id": "outcome:839423:no",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "839423"
+      ],
+      "inference_method": "deterministic",
+      "label": "No",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "outcome:839423:yes": {
+      "aliases": [],
+      "canonical_id": "outcome:839423:yes",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "839423"
+      ],
+      "inference_method": "deterministic",
+      "label": "Yes",
+      "proposition": null,
+      "resolution_method": "exact_id",
+      "type": "OUTCOME"
+    },
+    "team:australia": {
+      "aliases": [
+        "Australia"
+      ],
+      "canonical_id": "team:australia",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "839422"
+      ],
+      "inference_method": "deterministic",
+      "label": "Australia",
+      "proposition": null,
+      "resolution_method": "exact_slug",
+      "type": "TEAM"
+    },
+    "team:brazil": {
+      "aliases": [
+        "Brazil",
+        "bra",
+        "brazil"
+      ],
+      "canonical_id": "team:brazil",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2754869"
+      ],
+      "inference_method": "deterministic",
+      "label": "Brazil",
+      "proposition": null,
+      "resolution_method": "exact_slug",
+      "type": "TEAM"
+    },
+    "team:norway": {
+      "aliases": [
+        "Norway",
+        "nor",
+        "norway"
+      ],
+      "canonical_id": "team:norway",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "2754869"
+      ],
+      "inference_method": "deterministic",
+      "label": "Norway",
+      "proposition": null,
+      "resolution_method": "exact_slug",
+      "type": "TEAM"
+    },
+    "team:paraguay": {
+      "aliases": [
+        "Paraguay",
+        "par",
+        "paraguay"
+      ],
+      "canonical_id": "team:paraguay",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "1897127",
+        "1897130",
+        "1897133",
+        "839421"
+      ],
+      "inference_method": "deterministic",
+      "label": "Paraguay",
+      "proposition": null,
+      "resolution_method": "exact_slug",
+      "type": "TEAM"
+    },
+    "team:saudi-arabia": {
+      "aliases": [
+        "Saudi Arabia",
+        "ksa",
+        "saudi-arabia"
+      ],
+      "canonical_id": "team:saudi-arabia",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "1897161",
+        "1897162",
+        "1897163"
+      ],
+      "inference_method": "deterministic",
+      "label": "Saudi Arabia",
+      "proposition": null,
+      "resolution_method": "exact_slug",
+      "type": "TEAM"
+    },
+    "team:spain": {
+      "aliases": [
+        "Spain",
+        "esp",
+        "spain"
+      ],
+      "canonical_id": "team:spain",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "1897161",
+        "1897162",
+        "1897163"
+      ],
+      "inference_method": "deterministic",
+      "label": "Spain",
+      "proposition": null,
+      "resolution_method": "exact_slug",
+      "type": "TEAM"
+    },
+    "team:turkiye": {
+      "aliases": [
+        "T\u00fcrkiye",
+        "tur",
+        "turkiye"
+      ],
+      "canonical_id": "team:turkiye",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "1897127",
+        "1897130",
+        "1897133",
+        "839423"
+      ],
+      "inference_method": "deterministic",
+      "label": "T\u00fcrkiye",
+      "proposition": null,
+      "resolution_method": "exact_slug",
+      "type": "TEAM"
+    },
+    "team:united-states": {
+      "aliases": [
+        "USA",
+        "United States"
+      ],
+      "canonical_id": "team:united-states",
+      "confidence": 1.0,
+      "evidence_market_ids": [
+        "839420"
+      ],
+      "inference_method": "deterministic",
+      "label": "United States",
+      "proposition": null,
+      "resolution_method": "exact_slug",
+      "type": "TEAM"
+    }
+  },
+  "local_to_canonical": {
+    "competition:world-cup-2026": "competition:world-cup-2026",
+    "constraint:exact-group-winner:world-cup-2026:group-d": "constraint:exact-group-winner:world-cup-2026:group-d",
+    "constraint:exact-match-advance:world-cup-2026:match-brazil-vs-norway-2026-07-05": "constraint:exact-match-advance:world-cup-2026:match-brazil-vs-norway-2026-07-05",
+    "constraint:exact-match-result:world-cup-2026:match-spain-vs-saudi-arabia-2026-06-21": "constraint:exact-match-result:world-cup-2026:match-spain-vs-saudi-arabia-2026-06-21",
+    "constraint:exact-match-result:world-cup-2026:match-turkiye-vs-paraguay-2026-06-19": "constraint:exact-match-result:world-cup-2026:match-turkiye-vs-paraguay-2026-06-19",
+    "event:351746": "event:351746",
+    "event:351751": "event:351751",
+    "event:385789": "event:385789",
+    "event:413862": "event:413862",
+    "event:654708": "event:654708",
+    "event:98266": "event:98266",
+    "group:world-cup-2026:group-d": "group:world-cup-2026:group-d",
+    "market:1897127": "market:1897127",
+    "market:1897130": "market:1897130",
+    "market:1897133": "market:1897133",
+    "market:1897161": "market:1897161",
+    "market:1897162": "market:1897162",
+    "market:1897163": "market:1897163",
+    "market:2000239": "market:2000239",
+    "market:2000240": "market:2000240",
+    "market:2000241": "market:2000241",
+    "market:2000242": "market:2000242",
+    "market:2000243": "market:2000243",
+    "market:2000244": "market:2000244",
+    "market:2000245": "market:2000245",
+    "market:2000246": "market:2000246",
+    "market:2000247": "market:2000247",
+    "market:2000248": "market:2000248",
+    "market:2000249": "market:2000249",
+    "market:2000250": "market:2000250",
+    "market:2000251": "market:2000251",
+    "market:2000252": "market:2000252",
+    "market:2000253": "market:2000253",
+    "market:2000254": "market:2000254",
+    "market:2000255": "market:2000255",
+    "market:2000256": "market:2000256",
+    "market:2000257": "market:2000257",
+    "market:2000258": "market:2000258",
+    "market:2000259": "market:2000259",
+    "market:2000260": "market:2000260",
+    "market:2000261": "market:2000261",
+    "market:2000262": "market:2000262",
+    "market:2000263": "market:2000263",
+    "market:2000264": "market:2000264",
+    "market:2000265": "market:2000265",
+    "market:2000266": "market:2000266",
+    "market:2000267": "market:2000267",
+    "market:2000268": "market:2000268",
+    "market:2000269": "market:2000269",
+    "market:2000270": "market:2000270",
+    "market:2000271": "market:2000271",
+    "market:2000272": "market:2000272",
+    "market:2000273": "market:2000273",
+    "market:2000274": "market:2000274",
+    "market:2000275": "market:2000275",
+    "market:2000276": "market:2000276",
+    "market:2000277": "market:2000277",
+    "market:2000278": "market:2000278",
+    "market:2000279": "market:2000279",
+    "market:2000280": "market:2000280",
+    "market:2000281": "market:2000281",
+    "market:2000282": "market:2000282",
+    "market:2000283": "market:2000283",
+    "market:2000284": "market:2000284",
+    "market:2000285": "market:2000285",
+    "market:2000286": "market:2000286",
+    "market:2000287": "market:2000287",
+    "market:2000288": "market:2000288",
+    "market:2069635": "market:2069635",
+    "market:2069636": "market:2069636",
+    "market:2069637": "market:2069637",
+    "market:2069638": "market:2069638",
+    "market:2069639": "market:2069639",
+    "market:2069640": "market:2069640",
+    "market:2069641": "market:2069641",
+    "market:2069642": "market:2069642",
+    "market:2069643": "market:2069643",
+    "market:2069644": "market:2069644",
+    "market:2069645": "market:2069645",
+    "market:2069646": "market:2069646",
+    "market:2069647": "market:2069647",
+    "market:2069648": "market:2069648",
+    "market:2069649": "market:2069649",
+    "market:2069650": "market:2069650",
+    "market:2069651": "market:2069651",
+    "market:2069652": "market:2069652",
+    "market:2069653": "market:2069653",
+    "market:2069654": "market:2069654",
+    "market:2069655": "market:2069655",
+    "market:2069656": "market:2069656",
+    "market:2069657": "market:2069657",
+    "market:2069658": "market:2069658",
+    "market:2069659": "market:2069659",
+    "market:2069660": "market:2069660",
+    "market:2069661": "market:2069661",
+    "market:2069662": "market:2069662",
+    "market:2069663": "market:2069663",
+    "market:2069664": "market:2069664",
+    "market:2069665": "market:2069665",
+    "market:2069666": "market:2069666",
+    "market:2069667": "market:2069667",
+    "market:2069668": "market:2069668",
+    "market:2069669": "market:2069669",
+    "market:2069670": "market:2069670",
+    "market:2069672": "market:2069672",
+    "market:2069673": "market:2069673",
+    "market:2069674": "market:2069674",
+    "market:2069675": "market:2069675",
+    "market:2069676": "market:2069676",
+    "market:2069677": "market:2069677",
+    "market:2069678": "market:2069678",
+    "market:2069679": "market:2069679",
+    "market:2069680": "market:2069680",
+    "market:2069681": "market:2069681",
+    "market:2069687": "market:2069687",
+    "market:2069690": "market:2069690",
+    "market:2069691": "market:2069691",
+    "market:2069694": "market:2069694",
+    "market:2069704": "market:2069704",
+    "market:2069706": "market:2069706",
+    "market:2754869": "market:2754869",
+    "market:2817714": "market:2817714",
+    "market:2972624": "market:2972624",
+    "market:839420": "market:839420",
+    "market:839421": "market:839421",
+    "market:839422": "market:839422",
+    "market:839423": "market:839423",
+    "match:brazil-vs-norway-2026-07-05": "match:brazil-vs-norway-2026-07-05",
+    "match:spain-vs-saudi-arabia-2026-06-21": "match:spain-vs-saudi-arabia-2026-06-21",
+    "match:turkiye-vs-paraguay-2026-06-19": "match:turkiye-vs-paraguay-2026-06-19",
+    "outcome:1897127:no": "outcome:1897127:no",
+    "outcome:1897127:yes": "outcome:1897127:yes",
+    "outcome:1897130:no": "outcome:1897130:no",
+    "outcome:1897130:yes": "outcome:1897130:yes",
+    "outcome:1897133:no": "outcome:1897133:no",
+    "outcome:1897133:yes": "outcome:1897133:yes",
+    "outcome:1897161:no": "outcome:1897161:no",
+    "outcome:1897161:yes": "outcome:1897161:yes",
+    "outcome:1897162:no": "outcome:1897162:no",
+    "outcome:1897162:yes": "outcome:1897162:yes",
+    "outcome:1897163:no": "outcome:1897163:no",
+    "outcome:1897163:yes": "outcome:1897163:yes",
+    "outcome:2000239:no": "outcome:2000239:no",
+    "outcome:2000239:yes": "outcome:2000239:yes",
+    "outcome:2000240:no": "outcome:2000240:no",
+    "outcome:2000240:yes": "outcome:2000240:yes",
+    "outcome:2000241:no": "outcome:2000241:no",
+    "outcome:2000241:yes": "outcome:2000241:yes",
+    "outcome:2000242:no": "outcome:2000242:no",
+    "outcome:2000242:yes": "outcome:2000242:yes",
+    "outcome:2000243:no": "outcome:2000243:no",
+    "outcome:2000243:yes": "outcome:2000243:yes",
+    "outcome:2000244:no": "outcome:2000244:no",
+    "outcome:2000244:yes": "outcome:2000244:yes",
+    "outcome:2000245:no": "outcome:2000245:no",
+    "outcome:2000245:yes": "outcome:2000245:yes",
+    "outcome:2000246:no": "outcome:2000246:no",
+    "outcome:2000246:yes": "outcome:2000246:yes",
+    "outcome:2000247:no": "outcome:2000247:no",
+    "outcome:2000247:yes": "outcome:2000247:yes",
+    "outcome:2000248:no": "outcome:2000248:no",
+    "outcome:2000248:yes": "outcome:2000248:yes",
+    "outcome:2000249:no": "outcome:2000249:no",
+    "outcome:2000249:yes": "outcome:2000249:yes",
+    "outcome:2000250:no": "outcome:2000250:no",
+    "outcome:2000250:yes": "outcome:2000250:yes",
+    "outcome:2000251:no": "outcome:2000251:no",
+    "outcome:2000251:yes": "outcome:2000251:yes",
+    "outcome:2000252:no": "outcome:2000252:no",
+    "outcome:2000252:yes": "outcome:2000252:yes",
+    "outcome:2000253:no": "outcome:2000253:no",
+    "outcome:2000253:yes": "outcome:2000253:yes",
+    "outcome:2000254:no": "outcome:2000254:no",
+    "outcome:2000254:yes": "outcome:2000254:yes",
+    "outcome:2000255:no": "outcome:2000255:no",
+    "outcome:2000255:yes": "outcome:2000255:yes",
+    "outcome:2000256:no": "outcome:2000256:no",
+    "outcome:2000256:yes": "outcome:2000256:yes",
+    "outcome:2000257:no": "outcome:2000257:no",
+    "outcome:2000257:yes": "outcome:2000257:yes",
+    "outcome:2000258:no": "outcome:2000258:no",
+    "outcome:2000258:yes": "outcome:2000258:yes",
+    "outcome:2000259:no": "outcome:2000259:no",
+    "outcome:2000259:yes": "outcome:2000259:yes",
+    "outcome:2000260:no": "outcome:2000260:no",
+    "outcome:2000260:yes": "outcome:2000260:yes",
+    "outcome:2000261:no": "outcome:2000261:no",
+    "outcome:2000261:yes": "outcome:2000261:yes",
+    "outcome:2000262:no": "outcome:2000262:no",
+    "outcome:2000262:yes": "outcome:2000262:yes",
+    "outcome:2000263:no": "outcome:2000263:no",
+    "outcome:2000263:yes": "outcome:2000263:yes",
+    "outcome:2000264:no": "outcome:2000264:no",
+    "outcome:2000264:yes": "outcome:2000264:yes",
+    "outcome:2000265:no": "outcome:2000265:no",
+    "outcome:2000265:yes": "outcome:2000265:yes",
+    "outcome:2000266:no": "outcome:2000266:no",
+    "outcome:2000266:yes": "outcome:2000266:yes",
+    "outcome:2000267:no": "outcome:2000267:no",
+    "outcome:2000267:yes": "outcome:2000267:yes",
+    "outcome:2000268:no": "outcome:2000268:no",
+    "outcome:2000268:yes": "outcome:2000268:yes",
+    "outcome:2000269:no": "outcome:2000269:no",
+    "outcome:2000269:yes": "outcome:2000269:yes",
+    "outcome:2000270:no": "outcome:2000270:no",
+    "outcome:2000270:yes": "outcome:2000270:yes",
+    "outcome:2000271:no": "outcome:2000271:no",
+    "outcome:2000271:yes": "outcome:2000271:yes",
+    "outcome:2000272:no": "outcome:2000272:no",
+    "outcome:2000272:yes": "outcome:2000272:yes",
+    "outcome:2000273:no": "outcome:2000273:no",
+    "outcome:2000273:yes": "outcome:2000273:yes",
+    "outcome:2000274:no": "outcome:2000274:no",
+    "outcome:2000274:yes": "outcome:2000274:yes",
+    "outcome:2000275:no": "outcome:2000275:no",
+    "outcome:2000275:yes": "outcome:2000275:yes",
+    "outcome:2000276:no": "outcome:2000276:no",
+    "outcome:2000276:yes": "outcome:2000276:yes",
+    "outcome:2000277:no": "outcome:2000277:no",
+    "outcome:2000277:yes": "outcome:2000277:yes",
+    "outcome:2000278:no": "outcome:2000278:no",
+    "outcome:2000278:yes": "outcome:2000278:yes",
+    "outcome:2000279:no": "outcome:2000279:no",
+    "outcome:2000279:yes": "outcome:2000279:yes",
+    "outcome:2000280:no": "outcome:2000280:no",
+    "outcome:2000280:yes": "outcome:2000280:yes",
+    "outcome:2000281:no": "outcome:2000281:no",
+    "outcome:2000281:yes": "outcome:2000281:yes",
+    "outcome:2000282:no": "outcome:2000282:no",
+    "outcome:2000282:yes": "outcome:2000282:yes",
+    "outcome:2000283:no": "outcome:2000283:no",
+    "outcome:2000283:yes": "outcome:2000283:yes",
+    "outcome:2000284:no": "outcome:2000284:no",
+    "outcome:2000284:yes": "outcome:2000284:yes",
+    "outcome:2000285:no": "outcome:2000285:no",
+    "outcome:2000285:yes": "outcome:2000285:yes",
+    "outcome:2000286:no": "outcome:2000286:no",
+    "outcome:2000286:yes": "outcome:2000286:yes",
+    "outcome:2000287:no": "outcome:2000287:no",
+    "outcome:2000287:yes": "outcome:2000287:yes",
+    "outcome:2000288:no": "outcome:2000288:no",
+    "outcome:2000288:yes": "outcome:2000288:yes",
+    "outcome:2069635:no": "outcome:2069635:no",
+    "outcome:2069635:yes": "outcome:2069635:yes",
+    "outcome:2069636:no": "outcome:2069636:no",
+    "outcome:2069636:yes": "outcome:2069636:yes",
+    "outcome:2069637:no": "outcome:2069637:no",
+    "outcome:2069637:yes": "outcome:2069637:yes",
+    "outcome:2069638:no": "outcome:2069638:no",
+    "outcome:2069638:yes": "outcome:2069638:yes",
+    "outcome:2069639:no": "outcome:2069639:no",
+    "outcome:2069639:yes": "outcome:2069639:yes",
+    "outcome:2069640:no": "outcome:2069640:no",
+    "outcome:2069640:yes": "outcome:2069640:yes",
+    "outcome:2069641:no": "outcome:2069641:no",
+    "outcome:2069641:yes": "outcome:2069641:yes",
+    "outcome:2069642:no": "outcome:2069642:no",
+    "outcome:2069642:yes": "outcome:2069642:yes",
+    "outcome:2069643:no": "outcome:2069643:no",
+    "outcome:2069643:yes": "outcome:2069643:yes",
+    "outcome:2069644:no": "outcome:2069644:no",
+    "outcome:2069644:yes": "outcome:2069644:yes",
+    "outcome:2069645:no": "outcome:2069645:no",
+    "outcome:2069645:yes": "outcome:2069645:yes",
+    "outcome:2069646:no": "outcome:2069646:no",
+    "outcome:2069646:yes": "outcome:2069646:yes",
+    "outcome:2069647:no": "outcome:2069647:no",
+    "outcome:2069647:yes": "outcome:2069647:yes",
+    "outcome:2069648:no": "outcome:2069648:no",
+    "outcome:2069648:yes": "outcome:2069648:yes",
+    "outcome:2069649:no": "outcome:2069649:no",
+    "outcome:2069649:yes": "outcome:2069649:yes",
+    "outcome:2069650:no": "outcome:2069650:no",
+    "outcome:2069650:yes": "outcome:2069650:yes",
+    "outcome:2069651:no": "outcome:2069651:no",
+    "outcome:2069651:yes": "outcome:2069651:yes",
+    "outcome:2069652:no": "outcome:2069652:no",
+    "outcome:2069652:yes": "outcome:2069652:yes",
+    "outcome:2069653:no": "outcome:2069653:no",
+    "outcome:2069653:yes": "outcome:2069653:yes",
+    "outcome:2069654:no": "outcome:2069654:no",
+    "outcome:2069654:yes": "outcome:2069654:yes",
+    "outcome:2069655:no": "outcome:2069655:no",
+    "outcome:2069655:yes": "outcome:2069655:yes",
+    "outcome:2069656:no": "outcome:2069656:no",
+    "outcome:2069656:yes": "outcome:2069656:yes",
+    "outcome:2069657:no": "outcome:2069657:no",
+    "outcome:2069657:yes": "outcome:2069657:yes",
+    "outcome:2069658:no": "outcome:2069658:no",
+    "outcome:2069658:yes": "outcome:2069658:yes",
+    "outcome:2069659:no": "outcome:2069659:no",
+    "outcome:2069659:yes": "outcome:2069659:yes",
+    "outcome:2069660:no": "outcome:2069660:no",
+    "outcome:2069660:yes": "outcome:2069660:yes",
+    "outcome:2069661:no": "outcome:2069661:no",
+    "outcome:2069661:yes": "outcome:2069661:yes",
+    "outcome:2069662:no": "outcome:2069662:no",
+    "outcome:2069662:yes": "outcome:2069662:yes",
+    "outcome:2069663:no": "outcome:2069663:no",
+    "outcome:2069663:yes": "outcome:2069663:yes",
+    "outcome:2069664:no": "outcome:2069664:no",
+    "outcome:2069664:yes": "outcome:2069664:yes",
+    "outcome:2069665:no": "outcome:2069665:no",
+    "outcome:2069665:yes": "outcome:2069665:yes",
+    "outcome:2069666:no": "outcome:2069666:no",
+    "outcome:2069666:yes": "outcome:2069666:yes",
+    "outcome:2069667:no": "outcome:2069667:no",
+    "outcome:2069667:yes": "outcome:2069667:yes",
+    "outcome:2069668:no": "outcome:2069668:no",
+    "outcome:2069668:yes": "outcome:2069668:yes",
+    "outcome:2069669:no": "outcome:2069669:no",
+    "outcome:2069669:yes": "outcome:2069669:yes",
+    "outcome:2069670:no": "outcome:2069670:no",
+    "outcome:2069670:yes": "outcome:2069670:yes",
+    "outcome:2069672:no": "outcome:2069672:no",
+    "outcome:2069672:yes": "outcome:2069672:yes",
+    "outcome:2069673:no": "outcome:2069673:no",
+    "outcome:2069673:yes": "outcome:2069673:yes",
+    "outcome:2069674:no": "outcome:2069674:no",
+    "outcome:2069674:yes": "outcome:2069674:yes",
+    "outcome:2069675:no": "outcome:2069675:no",
+    "outcome:2069675:yes": "outcome:2069675:yes",
+    "outcome:2069676:no": "outcome:2069676:no",
+    "outcome:2069676:yes": "outcome:2069676:yes",
+    "outcome:2069677:no": "outcome:2069677:no",
+    "outcome:2069677:yes": "outcome:2069677:yes",
+    "outcome:2069678:no": "outcome:2069678:no",
+    "outcome:2069678:yes": "outcome:2069678:yes",
+    "outcome:2069679:no": "outcome:2069679:no",
+    "outcome:2069679:yes": "outcome:2069679:yes",
+    "outcome:2069680:no": "outcome:2069680:no",
+    "outcome:2069680:yes": "outcome:2069680:yes",
+    "outcome:2069681:no": "outcome:2069681:no",
+    "outcome:2069681:yes": "outcome:2069681:yes",
+    "outcome:2069687:no": "outcome:2069687:no",
+    "outcome:2069687:yes": "outcome:2069687:yes",
+    "outcome:2069690:no": "outcome:2069690:no",
+    "outcome:2069690:yes": "outcome:2069690:yes",
+    "outcome:2069691:no": "outcome:2069691:no",
+    "outcome:2069691:yes": "outcome:2069691:yes",
+    "outcome:2069694:no": "outcome:2069694:no",
+    "outcome:2069694:yes": "outcome:2069694:yes",
+    "outcome:2069704:no": "outcome:2069704:no",
+    "outcome:2069704:yes": "outcome:2069704:yes",
+    "outcome:2069706:no": "outcome:2069706:no",
+    "outcome:2069706:yes": "outcome:2069706:yes",
+    "outcome:2754869:brazil": "outcome:2754869:brazil",
+    "outcome:2754869:norway": "outcome:2754869:norway",
+    "outcome:2817714:no": "outcome:2817714:no",
+    "outcome:2817714:yes": "outcome:2817714:yes",
+    "outcome:2972624:no": "outcome:2972624:no",
+    "outcome:2972624:yes": "outcome:2972624:yes",
+    "outcome:839420:no": "outcome:839420:no",
+    "outcome:839420:yes": "outcome:839420:yes",
+    "outcome:839421:no": "outcome:839421:no",
+    "outcome:839421:yes": "outcome:839421:yes",
+    "outcome:839422:no": "outcome:839422:no",
+    "outcome:839422:yes": "outcome:839422:yes",
+    "outcome:839423:no": "outcome:839423:no",
+    "outcome:839423:yes": "outcome:839423:yes",
+    "team:australia": "team:australia",
+    "team:brazil": "team:brazil",
+    "team:norway": "team:norway",
+    "team:paraguay": "team:paraguay",
+    "team:saudi-arabia": "team:saudi-arabia",
+    "team:spain": "team:spain",
+    "team:turkiye": "team:turkiye",
+    "team:united-states": "team:united-states"
+  },
+  "tier_counts": {
+    "exact_id": 351,
+    "exact_slug": 19,
+    "new_entity": 17
+  }
+}

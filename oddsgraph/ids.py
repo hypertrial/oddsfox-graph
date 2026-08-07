@@ -12,6 +12,7 @@ _DATA_DIR = Path(__file__).resolve().parent / "data"
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
 
 
+@lru_cache(maxsize=None)
 def normalize_label(text: str) -> str:
     text = unicodedata.normalize("NFKD", text)
     text = "".join(ch for ch in text if not unicodedata.combining(ch))

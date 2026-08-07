@@ -12,6 +12,7 @@ local checkout: `docs/audiences/contributors.md` and
 
 ```bash
 uv sync --frozen --extra dev
+uv run ruff check .
 uv run pytest
 
 uv sync --extra docs

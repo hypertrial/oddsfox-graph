@@ -170,8 +170,16 @@ def single_match_winner_mutex(a: Proposition, b: Proposition) -> bool:
 
 
 def _index_key(prop: Proposition) -> list[str]:
+    """Return candidate-pair index keys for a proposition.
+
+    Only ``team`` and ``match`` are indexed. Competition/group keys were
+    dropped because every registered rule already requires equal team (via
+    ``_same_team_and_competition``) or equal match (``single_match_winner_mutex``).
+    Indexing on a shared competition alone forced an O(n²) pair scan over all
+    propositions in one tournament.
+    """
     keys: list[str] = []
-    for role in ("team", "match", "competition", "group"):
+    for role in ("team", "match"):
         value = prop.arguments.get(role)
         if value:
             keys.append(f"{role}:{value}")

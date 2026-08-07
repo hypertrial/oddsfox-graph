@@ -216,3 +216,39 @@ def test_match_dateful_id_upgrades_when_label_only_arrives_first() -> None:
     assert sorted(
         state.canonical_nodes["match:brazil-vs-morocco-2026-06-14"].evidence_market_ids
     ) == ["m1", "m2"]
+
+
+def test_resolve_fragments_output_unchanged_after_perf_refactor() -> None:
+    """Golden resolution snapshot must stay identical after hot-path optimizations."""
+    import json
+
+    from oddsgraph.deterministic import build_deterministic_fragments_by_event
+    from oddsgraph.propositions import compile_propositions
+    from tests.helpers import FIXTURES_DIR, load_golden_markets
+
+    baseline_path = FIXTURES_DIR / "resolution_golden_baseline.json"
+    baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
+
+    markets = load_golden_markets()
+    det = build_deterministic_fragments_by_event(
+        markets, include_topology=True, competition_label="World Cup 2026"
+    )
+    comp = compile_propositions(markets)
+    fragments = list(det.values())
+    methods = ["deterministic"] * len(det)
+    if comp.fragment.nodes or comp.fragment.edges:
+        fragments.append(comp.fragment)
+        methods.append("proposition_compiler")
+
+    state = resolve_fragments(fragments, Settings(), inference_methods=methods)
+    actual = {
+        "tier_counts": dict(sorted(state.tier_counts.items())),
+        "local_to_canonical": dict(sorted(state.local_to_canonical.items())),
+        "canonical_nodes": {
+            cid: node.model_dump(mode="json")
+            for cid, node in sorted(state.canonical_nodes.items())
+        },
+    }
+    assert actual["tier_counts"] == baseline["tier_counts"]
+    assert actual["local_to_canonical"] == baseline["local_to_canonical"]
+    assert actual["canonical_nodes"] == baseline["canonical_nodes"]
