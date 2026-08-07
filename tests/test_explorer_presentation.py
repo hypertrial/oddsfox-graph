@@ -9,6 +9,7 @@ from oddsgraph.explorer.presentation import (
     format_hour_label,
     short_match_label,
     stage_rank,
+    stamp_odds_motion,
 )
 
 
@@ -52,7 +53,8 @@ def test_phase_at_hour_covers_groups_gaps_and_final_weekend() -> None:
     windows = {w.stage_key: w for w in schedule_stage_windows()}
     groups = phase_at_hour(windows["group_stage"].start_epoch)
     assert groups.state == "active"
-    assert groups.tracker_step == "groups"
+    # Playback skips Groups; phase still resolves but tracker maps to R32.
+    assert groups.tracker_step == "r32"
     assert "projected" in groups.detail.lower()
 
     r32 = phase_at_hour(windows["round_of_32"].start_epoch)
@@ -76,7 +78,13 @@ def test_phase_at_hour_covers_groups_gaps_and_final_weekend() -> None:
     assert complete.state == "complete"
     steps = tracker_step_states(complete)
     assert steps[-1]["state"] == "completed"
-
+    assert [s["id"] for s in steps] == [
+        "r32",
+        "r16",
+        "qf",
+        "sf",
+        "final_weekend",
+    ]
 
 def test_apply_time_slice_stamps_timeline_state() -> None:
     from oddsgraph.bracket import schedule_stage_windows
@@ -131,6 +139,87 @@ def test_home_prob_at_hour_no_lookahead_before_first_point() -> None:
     }
     assert home_prob_at_hour(data, 100) is None
     assert home_prob_at_hour(data, 200) == 0.7
+
+
+def test_stamp_odds_motion_marks_ticks_and_favorite_flip() -> None:
+    previous = [
+        {
+            "data": {
+                "id": "match:a",
+                "type": "MATCH",
+                "home_team": "Brazil",
+                "away_team": "France",
+                "current_home_prob": 0.62,
+                "resolved": False,
+            },
+            "classes": "MATCH",
+        }
+    ]
+    current = [
+        {
+            "data": {
+                "id": "match:a",
+                "type": "MATCH",
+                "home_team": "Brazil",
+                "away_team": "France",
+                "current_home_prob": 0.47,
+                "resolved": False,
+            },
+            "classes": "MATCH",
+        }
+    ]
+    stamped = stamp_odds_motion(current, previous)
+    data = stamped[0]["data"]
+    assert data["home_prob_delta_pp"] == -15
+    assert data["odds_tick_home"] == "down"
+    assert data["odds_tick_away"] == "up"
+    assert data["favorite_flipped"] is True
+
+    # Team swap should not invent a delta on the new pairing.
+    swapped = [
+        {
+            "data": {
+                "id": "match:a",
+                "type": "MATCH",
+                "home_team": "Spain",
+                "away_team": "Germany",
+                "current_home_prob": 0.8,
+                "resolved": False,
+            },
+            "classes": "MATCH",
+        }
+    ]
+    quiet = stamp_odds_motion(swapped, previous)
+    assert "odds_tick_home" not in quiet[0]["data"]
+
+
+def test_apply_time_slice_stamps_odds_motion_vs_previous() -> None:
+    elements = [
+        {
+            "data": {
+                "id": "match:a",
+                "type": "MATCH",
+                "stage": "Round of 32",
+                "label": "Brazil vs. France",
+                "home_team": "Brazil",
+                "away_team": "France",
+                "schedule_home": "Brazil",
+                "schedule_away": "France",
+                "odds_series": [
+                    {"h": 100, "home": 0.4, "away": 0.6},
+                    {"h": 200, "home": 0.7, "away": 0.3},
+                ],
+            },
+            "classes": "MATCH",
+        }
+    ]
+    earlier = apply_time_slice(elements, 100)
+    later = apply_time_slice(elements, 200, previous_elements=earlier)
+    data = later[0]["data"]
+    assert data["current_home_prob"] == 0.7
+    assert data["home_prob_delta_pp"] == 30
+    assert data["odds_tick_home"] == "up"
+    assert data["favorite_flipped"] is True
 
 
 def test_apply_time_slice_stamps_current_home_prob() -> None:
@@ -278,6 +367,6 @@ def test_time_slider_marks_include_playback_milestones() -> None:
     assert marks[min_hour]["label"]
     unlabeled = [v for v in marks.values() if v == ""]
     assert unlabeled
-    assert "Groups" in {
-        v["label"] for v in marks.values() if isinstance(v, dict)
-    }
+    labels = {v["label"] for v in marks.values() if isinstance(v, dict)}
+    assert "R32" in labels
+    assert "Groups" not in labels

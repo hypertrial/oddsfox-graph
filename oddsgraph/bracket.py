@@ -180,8 +180,9 @@ def schedule_stage_windows() -> tuple[StageWindow, ...]:
 
 @lru_cache(maxsize=1)
 def schedule_playback_milestones() -> tuple[int, ...]:
-    """Sorted unique kickoff + full-time epochs across all schedule fixtures.
+    """Sorted unique kickoff + full-time epochs for knockout fixtures only.
 
+    Group Stage is omitted so explorer playback starts at Round of 32.
     Each entry is one playback step (a match starting or resolving).
     Simultaneous fixtures collapse into a shared epoch automatically.
     """
@@ -189,6 +190,9 @@ def schedule_playback_milestones() -> tuple[int, ...]:
     epochs: set[int] = set()
     for raw in schedule.get("fixtures") or []:
         if not isinstance(raw, dict):
+            continue
+        stage_key = str(raw.get("stage_key") or "")
+        if stage_key not in KNOCKOUT_STAGE_RANK:
             continue
         kickoff = _kickoff_epoch(raw.get("kickoff_at_utc"))
         if kickoff is None:
@@ -199,8 +203,10 @@ def schedule_playback_milestones() -> tuple[int, ...]:
 
 
 def tournament_playback_bounds() -> tuple[int | None, int | None]:
-    """Hour-aligned explorer slider bounds through Final full-time."""
-    windows = schedule_stage_windows()
+    """Hour-aligned explorer slider bounds from Round of 32 through Final full-time."""
+    windows = [
+        w for w in schedule_stage_windows() if w.stage_key in KNOCKOUT_STAGE_RANK
+    ]
     if not windows:
         return tournament_time_bounds()
     start = min(w.start_epoch for w in windows)

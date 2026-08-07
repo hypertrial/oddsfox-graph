@@ -65,8 +65,33 @@ def test_build_connector_paths_ltr_and_rtl() -> None:
     assert len(ltr) == 2
     assert len(rtl) == 2
     assert ltr[0].startswith("M 0")
+    assert "H 17" in ltr[0]
     assert rtl[0].startswith("M 20")
+    assert "H 3" in rtl[0]
     assert build_connector_paths(1, "ltr") == []
+
+
+def test_build_connector_arrow_paths_point_toward_center() -> None:
+    from oddsgraph.explorer.tree_render import build_connector_arrow_paths
+
+    ltr = build_connector_arrow_paths(4, "ltr")
+    rtl = build_connector_arrow_paths(4, "rtl")
+    assert len(ltr) == 2
+    assert len(rtl) == 2
+    assert "L 20 " in ltr[0] and ltr[0].endswith("Z")
+    assert "L 0 " in rtl[0] and rtl[0].endswith("Z")
+    assert build_connector_arrow_paths(1, "ltr") == []
+
+
+def test_render_connector_includes_progression_arrows() -> None:
+    from oddsgraph.explorer.tree_render import render_connector
+
+    markup = str(render_connector(2, "ltr"))
+    assert "L 20 " in markup
+    assert 'fill="currentColor"' in markup
+    semi = str(render_connector(1, "rtl", semi=True))
+    assert "L 0 " in semi
+    assert semi.count(" Z") >= 1 or "Z" in semi
 
 
 def test_match_grade_status_mapping() -> None:
@@ -120,6 +145,22 @@ def test_render_match_card_marks_just_finished() -> None:
     settled_text = str(render_match_card(settled, compact=True))
     assert "is-just-finished" not in settled_text
     assert "Just finished" not in settled_text
+
+
+def test_render_match_card_shows_odds_tick_delta() -> None:
+    moved = _match("m1", "Round of 32", fifa=1, home_prob=0.55)
+    moved["data"]["home_prob_delta_pp"] = 8
+    moved["data"]["odds_tick_home"] = "up"
+    moved["data"]["odds_tick_away"] = "down"
+    moved["data"]["favorite_flipped"] = True
+    text = str(render_match_card(moved, compact=True))
+    assert "is-tick-up" in text
+    assert "is-odds-up" in text
+    assert "is-tick-down" in text
+    assert "+8" in text
+    assert "-8" in text
+    assert "is-favorite-flip" in text
+    assert "8 points" in text
 
 
 def test_render_match_card_in_tree_smoke() -> None:

@@ -22,9 +22,9 @@ Opens `http://127.0.0.1:8050` by default. Options: `--host`, `--port`, `--debug`
 and `--build-dir` (also available as a root/global option before the subcommand).
 
 Requires `build/nodes.parquet` and `build/edges.parquet` from a prior
-`oddsgraph build` / `oddsgraph run`. The tournament time slider always spans
-official schedule kickoffs through Final full-time. Future-round projections
-and advance probabilities additionally need:
+`oddsgraph build` / `oddsgraph run`. The tournament time slider spans Round of
+32 kickoff through Final full-time (Group Stage is skipped). Future-round
+projections and advance probabilities additionally need:
 
 - `build/odds_history.parquet` (direct match advance odds)
 - `build/stage_odds_history.parquet` (team stage-reach / champion odds)
@@ -40,10 +40,11 @@ canvas (desktop ≥1400px). Narrower viewports use stacked rounds:
   official build)
 - Round of 32 on both outer edges → Round of 16 → Quarterfinals → Semifinals →
   centered Final / Third Place / predicted champion column
+- Taxi SVG connectors with arrowheads pointing toward the Final
 - Each card shows **country flags**, team names, and **both teams’ advance
   probabilities** (or `—` when unavailable)
 - Pill legend: Resolved / Pending / Diverged
-- A persistent **phase tracker** (Groups → Final weekend) highlights the
+- A persistent **phase tracker** (Round of 32 → Final weekend) highlights the
   schedule window for the selected hour, including intermissions
 - Bottom **playback dock** (full-width footer below the scrollable bracket):
   compact UTC time (`Jun 28 · 19:00 UTC`), phase badge, game-milestone slider,
@@ -73,22 +74,24 @@ At the selected hour:
 7. When the scrubbed hour lands exactly on a match’s full-time milestone, that
    card (and any simultaneous fixtures sharing the step) shows a **Just
    finished** badge and pulse highlight until the next milestone.
+8. When advance odds move between scrub/Play steps (same teams still on the
+   card), each side shows a short green/red tick, a signed point delta next to
+   the %, and a thin row accent. Crossing 50% also flashes the card border.
 
 ### Progressive controls
 
-- Primary: playback dock (tournament start → Final full-time), Play
-  (one kickoff or full-time per step; ~184 steps end-to-end; simultaneous
-  fixtures share a step), Reset view. Manual scrubbing snaps to the same
-  game milestones.
+- Primary: playback dock (Round of 32 kickoff → Final full-time), Play
+  (one kickoff or full-time per step; 64 knockout steps end-to-end; simultaneous
+  fixtures share a step; Group Stage is skipped), Reset view. Manual scrubbing
+  snaps to the same game milestones.
 - **Filters & legend** drawer (closed by default): confidence / inference
   filters, pill legend, projection help, and data-source metadata
 - Phase tracker stays visible on laptop and tablet widths; narrow viewports
   use abbreviated labels with full accessible names
 
-During Group Stage the tracker says the knockout bracket is projected. Between
-knockout rounds it shows the next stage (for example “Quarterfinals next”).
-Third Place and Final share the Final weekend tracker step, with the precise
-subphase in the playback badge.
+Between knockout rounds the tracker shows the next stage (for example
+“Quarterfinals next”). Third Place and Final share the Final weekend tracker
+step, with the precise subphase in the playback badge.
 
 ## See also
 

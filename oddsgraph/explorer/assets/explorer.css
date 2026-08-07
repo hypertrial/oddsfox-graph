@@ -845,7 +845,7 @@ button:disabled {
   width: 18px;
   align-self: stretch;
   align-items: stretch;
-  color: rgba(0, 229, 255, 0.45);
+  color: rgba(0, 229, 255, 0.55);
 }
 
 .bracket-connector.is-semi {
@@ -1189,6 +1189,9 @@ button:disabled {
 .match-team-prob {
   margin: 0;
   flex: 0 0 auto;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
   font-family: var(--of-mono);
   font-size: 12px;
   font-weight: 600;
@@ -1197,6 +1200,85 @@ button:disabled {
 
 .match-card.is-compact .match-team-prob {
   font-size: 9px;
+  gap: 3px;
+}
+
+.match-prob-delta {
+  font-size: 0.85em;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  opacity: 0.95;
+}
+
+.match-prob-delta.is-up {
+  color: var(--market-up);
+}
+
+.match-prob-delta.is-down {
+  color: var(--market-down);
+}
+
+.match-team-row.is-odds-up {
+  box-shadow: inset 2px 0 0 var(--market-up);
+}
+
+.match-team-row.is-odds-down {
+  box-shadow: inset 2px 0 0 var(--market-down);
+}
+
+@keyframes odds-tick-up {
+  0% {
+    color: var(--market-up);
+    transform: translateY(2px);
+    opacity: 0.55;
+  }
+  35% {
+    color: var(--market-up);
+    transform: translateY(0);
+    opacity: 1;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes odds-tick-down {
+  0% {
+    color: var(--market-down);
+    transform: translateY(-2px);
+    opacity: 0.55;
+  }
+  35% {
+    color: var(--market-down);
+    transform: translateY(0);
+    opacity: 1;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+.match-team-prob.is-tick-up {
+  animation: odds-tick-up 0.75s ease-out;
+  color: var(--market-up);
+}
+
+.match-team-prob.is-tick-down {
+  animation: odds-tick-down 0.75s ease-out;
+  color: var(--market-down);
+}
+
+@keyframes favorite-flip-flash {
+  0% {
+    border-color: rgba(0, 229, 255, 0.85);
+  }
+  100% {
+    border-color: rgba(51, 65, 85, 0.9);
+  }
+}
+
+.match-card.is-favorite-flip:not(.is-just-finished) {
+  animation: favorite-flip-flash 0.9s ease-out;
 }
 
 .prob-correct {
@@ -1504,6 +1586,12 @@ button:disabled {
   }
 
   .match-card.is-just-finished {
+    animation: none;
+  }
+
+  .match-team-prob.is-tick-up,
+  .match-team-prob.is-tick-down,
+  .match-card.is-favorite-flip {
     animation: none;
   }
 }

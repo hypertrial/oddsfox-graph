@@ -51,7 +51,10 @@ def _is_hidden(el: dict[str, Any] | None) -> bool:
 
 
 def build_connector_paths(feeder_count: int, direction: ConnectorDirection) -> list[str]:
-    """Port of website ``buildConnectorPaths`` / ``connectorPathD``."""
+    """Port of website ``buildConnectorPaths`` / ``connectorPathD``.
+
+    Stems stop short of the viewBox edge so arrowheads can sit on the tip.
+    """
     if feeder_count <= 1:
         return []
     pair_count = feeder_count // 2
@@ -61,17 +64,44 @@ def build_connector_paths(feeder_count: int, direction: ConnectorDirection) -> l
         bottom_y = ((pair_index * 2 + 1.5) / feeder_count) * 100
         mid_y = ((pair_index * 2 + 1) / feeder_count) * 100
         if direction == "ltr":
+            # Stem ends at x=17; arrow tip reaches x=20 toward the next round.
             paths.append(
-                f"M 0 {top_y} H 10 V {mid_y} H 20 M 0 {bottom_y} H 10 V {mid_y}"
+                f"M 0 {top_y} H 10 V {mid_y} H 17 M 0 {bottom_y} H 10 V {mid_y}"
             )
         else:
             paths.append(
-                f"M 20 {top_y} H 10 V {mid_y} H 0 M 20 {bottom_y} H 10 V {mid_y}"
+                f"M 20 {top_y} H 10 V {mid_y} H 3 M 20 {bottom_y} H 10 V {mid_y}"
             )
     return paths
 
 
-def _connector_svg_markup(paths: list[str]) -> str:
+def build_connector_arrow_paths(
+    feeder_count: int, direction: ConnectorDirection
+) -> list[str]:
+    """Filled chevrons at each connector stem tip (points toward the Final)."""
+    if feeder_count <= 1:
+        return []
+    pair_count = feeder_count // 2
+    arrows: list[str] = []
+    half = 1.35
+    for pair_index in range(pair_count):
+        mid_y = ((pair_index * 2 + 1) / feeder_count) * 100
+        if direction == "ltr":
+            arrows.append(
+                f"M 16.2 {mid_y - half} L 20 {mid_y} L 16.2 {mid_y + half} Z"
+            )
+        else:
+            arrows.append(
+                f"M 3.8 {mid_y - half} L 0 {mid_y} L 3.8 {mid_y + half} Z"
+            )
+    return arrows
+
+
+def _connector_svg_markup(
+    paths: list[str],
+    *,
+    arrow_paths: list[str] | None = None,
+) -> str:
     """Inline SVG markup (Dash has no html.Svg; Markdown allows HTML)."""
     path_xml = "".join(
         (
@@ -81,10 +111,17 @@ def _connector_svg_markup(paths: list[str]) -> str:
         )
         for d in paths
     )
+    arrow_xml = "".join(
+        (
+            f'<path d="{d}" fill="currentColor" stroke="none" '
+            f'vector-effect="non-scaling-stroke" />'
+        )
+        for d in (arrow_paths or [])
+    )
     return (
         '<svg class="bracket-connector-svg" viewBox="0 0 20 100" '
         'preserveAspectRatio="none" role="presentation" '
-        f'xmlns="http://www.w3.org/2000/svg">{path_xml}</svg>'
+        f'xmlns="http://www.w3.org/2000/svg">{path_xml}{arrow_xml}</svg>'
     )
 
 
@@ -94,20 +131,26 @@ def render_connector(
     *,
     semi: bool = False,
 ) -> html.Div:
-    """SVG bracket connector between round columns."""
+    """SVG bracket connector between round columns, with progression arrows."""
     if semi:
-        path = "M 0 50 H 20" if direction == "ltr" else "M 20 50 H 0"
-        paths = [path]
+        if direction == "ltr":
+            paths = ["M 0 50 H 17"]
+            arrow_paths = ["M 16.2 48.65 L 20 50 L 16.2 51.35 Z"]
+        else:
+            paths = ["M 20 50 H 3"]
+            arrow_paths = ["M 3.8 48.65 L 0 50 L 3.8 51.35 Z"]
         width_class = "bracket-connector is-semi"
     else:
-        paths = build_connector_paths(max(feeder_count, 0), direction)
+        count = max(feeder_count, 0)
+        paths = build_connector_paths(count, direction)
+        arrow_paths = build_connector_arrow_paths(count, direction)
         width_class = "bracket-connector"
     return html.Div(
         className=width_class,
         **{"aria-hidden": "true"},
         children=[
             dcc.Markdown(
-                _connector_svg_markup(paths),
+                _connector_svg_markup(paths, arrow_paths=arrow_paths),
                 dangerously_allow_html=True,
                 className="bracket-connector-md",
             )
@@ -124,6 +167,8 @@ def _team_row(
     show_prob: bool,
     grade_status: GradeStatus | None,
     compact: bool,
+    odds_tick: str | None = None,
+    delta_pp: int | None = None,
 ) -> html.Div:
     name = team_name or "TBD"
     classes = ["match-team-row"]
@@ -135,6 +180,10 @@ def _team_row(
         classes.append("is-loser")
     else:
         classes.append("is-neutral")
+    if odds_tick == "up":
+        classes.append("is-odds-up")
+    elif odds_tick == "down":
+        classes.append("is-odds-down")
     children: list[Any] = []
     if flag_url:
         children.append(
@@ -147,10 +196,26 @@ def _team_row(
         )
     children.append(html.P(name, className="match-team-name"))
     if show_prob:
+        prob_classes = ["match-team-prob", probability_grade_class(grade_status)]
+        if odds_tick == "up":
+            prob_classes.append("is-tick-up")
+        elif odds_tick == "down":
+            prob_classes.append("is-tick-down")
+        prob_children: list[Any] = [format_prob_label(probability)]
+        if delta_pp is not None and delta_pp != 0:
+            sign = "+" if delta_pp > 0 else ""
+            tick_class = "match-prob-delta is-up" if delta_pp > 0 else "match-prob-delta is-down"
+            prob_children.append(
+                html.Span(
+                    f"{sign}{delta_pp}",
+                    className=tick_class,
+                    **{"aria-hidden": "true"},
+                )
+            )
         children.append(
             html.P(
-                format_prob_label(probability),
-                className=f"match-team-prob {probability_grade_class(grade_status)}",
+                prob_children,
+                className=" ".join(prob_classes),
             )
         )
     return html.Div(className=" ".join(classes), children=children)
@@ -177,6 +242,8 @@ def render_match_card(
         frame.append("is-just-finished")
     if data.get("projected"):
         frame.append("is-projected")
+    if data.get("favorite_flipped"):
+        frame.append("is-favorite-flip")
     timeline = data.get("timeline_state")
     if timeline:
         frame.append(f"is-timeline-{timeline}")
@@ -200,6 +267,12 @@ def render_match_card(
     # Always show a mark when teams are present: numeric % or "—" when unavailable.
     show_prob = bool(home or away)
     just_finished = bool(data.get("just_finished"))
+    home_delta_pp = data.get("home_prob_delta_pp")
+    home_tick = data.get("odds_tick_home")
+    away_tick = data.get("odds_tick_away")
+    away_delta_pp = (
+        None if home_delta_pp is None else -int(home_delta_pp)
+    )
 
     # Highlight locked/favored side only when a probability or locked winner exists.
     home_wins: bool | None = None
@@ -217,6 +290,9 @@ def render_match_card(
             f"{aria}; {home_label} {format_prob_label(home_prob)}, "
             f"{away_label} {format_prob_label(away_prob)}"
         )
+        if home_delta_pp is not None and int(home_delta_pp) != 0:
+            sign = "+" if int(home_delta_pp) > 0 else ""
+            aria = f"{aria}; {home_label} {sign}{int(home_delta_pp)} points"
     if just_finished:
         aria = f"{aria}; just finished"
 
@@ -239,6 +315,8 @@ def render_match_card(
                 show_prob=show_prob,
                 grade_status=grade,
                 compact=compact,
+                odds_tick=str(home_tick) if home_tick else None,
+                delta_pp=int(home_delta_pp) if home_delta_pp is not None else None,
             ),
             _team_row(
                 team_name=str(away) if away else None,
@@ -250,6 +328,8 @@ def render_match_card(
                 show_prob=show_prob,
                 grade_status=grade,
                 compact=compact,
+                odds_tick=str(away_tick) if away_tick else None,
+                delta_pp=away_delta_pp,
             ),
         ]
     )
@@ -643,6 +723,7 @@ def elements_to_bracket_children(
 
 
 __all__ = [
+    "build_connector_arrow_paths",
     "build_connector_paths",
     "elements_to_bracket_children",
     "match_grade_status",

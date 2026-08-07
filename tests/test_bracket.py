@@ -50,7 +50,10 @@ def test_tournament_playback_bounds_extend_through_final_full_time() -> None:
     ]
     kickoff_start, kickoff_end = tournament_time_bounds()
     play_start, play_end = tournament_playback_bounds()
-    assert play_start == kickoff_start
+    r32 = next(w for w in windows if w.stage_key == "round_of_32")
+    assert play_start == r32.start_hour
+    assert play_start is not None and kickoff_start is not None
+    assert play_start > kickoff_start
     assert play_end is not None and kickoff_end is not None
     assert play_end > kickoff_end
     assert play_end == windows[-1].end_hour
@@ -68,23 +71,24 @@ def test_schedule_playback_milestones_are_kickoffs_and_full_times() -> None:
 
     milestones = schedule_playback_milestones()
     play_start, play_end = tournament_playback_bounds()
-    assert len(milestones) == 184
+    assert len(milestones) == 64
     assert milestones == tuple(sorted(set(milestones)))
     assert milestones[0] == play_start
     assert milestones[-1] == play_end
 
-    # Simultaneous group kickoffs collapse into one milestone epoch.
-    simultaneous = int(
+    # Simultaneous knockout kickoffs collapse into one milestone epoch.
+    # Group Stage kickoffs are excluded from playback.
+    group_simultaneous = int(
         datetime(2026, 6, 24, 19, 0, tzinfo=timezone.utc).timestamp()
     )
-    assert milestones.count(simultaneous) == 1
+    assert group_simultaneous not in milestones
     fixtures = [
         f
         for f in load_wc2026_schedule()["fixtures"]
         if f.get("kickoff_at_utc") == "2026-06-24T19:00:00"
     ]
     assert len(fixtures) == 2
-
+    assert all(f.get("stage_key") == "group_stage" for f in fixtures)
 
 def test_schedule_has_104_fixtures_with_expected_stage_counts() -> None:
     schedule = load_wc2026_schedule()

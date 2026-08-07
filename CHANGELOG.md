@@ -22,8 +22,8 @@ flags and output schema as pre-1.0 and subject to change.
 - Schedule-derived tournament phase model with active, intermission, Final
   weekend, and complete states; compact UTC timestamps (`Jun 28 · 19:00 UTC`)
   plus full tooltip/ISO forms.
-- Explorer playback bounds extend through Final full-time so Champion lock is
-  reachable on the slider.
+- Explorer playback bounds span Round of 32 kickoff through Final full-time so
+  Champion lock is reachable on the slider (Group Stage is omitted).
 - `stage_odds_history.parquet` from `oddsgraph odds-history` / `run`: hourly
   team stage-reach and World Cup Winner probabilities for explorer projection.
 - Explorer projects unresolved future matchups from feeder-branch leaders,
@@ -38,11 +38,19 @@ flags and output schema as pre-1.0 and subject to change.
 
 ### Changed
 
+- Explorer bracket connectors include filled arrowheads pointing toward the
+  Final so tournament progression reads clearly left→center and right→center.
+- Explorer playback skips Group Stage entirely: the slider and Play steps run
+  from Round of 32 kickoff through Final full-time (64 knockout milestones),
+  and the phase tracker starts at Round of 32.
+- Explorer odds motion: when Play/scrub changes a card’s advance %, the
+  probability flashes green/red, shows a signed point delta (`+8` / `−3`), and
+  a thin row accent; favorite flips get a brief border flash.
 - Explorer UI is a mirrored HTML/CSS knockout tree (website-style cards and SVG
   connectors) instead of Dash Cytoscape; Inspector / path-highlight / hide-match
   interactions were removed with that migration.
 - Explorer match cards use a wider dark layout with aligned probability
-  columns, row-aligned flags, and taxi connectors without arrowheads.
+  columns, row-aligned flags, and taxi connectors with progression arrowheads.
 - Explorer Controls moved into a closed-by-default utility drawer; playback
   lives in a full-width footer dock below the bracket stage (not an overlay).
   Action status stays in the dock.
@@ -51,12 +59,12 @@ flags and output schema as pre-1.0 and subject to change.
 - Explorer match-card tint encodes resolution, not favorite: teal fill means
   the match is resolved at the selected tournament hour; unfinished cards
   rely on numeric percentages and dashed borders when projected.
-- Explorer time slider spans official tournament kickoffs through Final
-  full-time, not the full early Champion-market odds-history window.
+- Explorer time slider spans Round of 32 kickoff through Final full-time, not
+  the full early Champion-market odds-history window (Group Stage omitted).
 - Explorer Play / time scrubbing advances by schedule kickoff and full-time
-  milestones (~184 steps end-to-end) instead of one hour at a time;
-  simultaneous fixtures share a step. Manual scrubbing snaps to the same
-  milestones.
+  milestones (64 knockout steps end-to-end; Group Stage omitted) instead of
+  one hour at a time; simultaneous fixtures share a step. Manual scrubbing
+  snaps to the same milestones.
 
 ### Fixed
 

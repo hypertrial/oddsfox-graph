@@ -18,18 +18,46 @@ CanvasMutation = tuple[Any, Any]
 _BRACKET_TYPES = ["MATCH"]
 
 
+def _project_elements(
+    settings: Settings,
+    hour_epoch: int | None,
+    *,
+    previous_hour_epoch: int | None = None,
+) -> list[dict[str, Any]]:
+    slice_ = bracket_elements(settings)
+    base = slice_.to_elements()
+    stage_odds = stage_odds_by_team(settings)
+    previous_elements = None
+    if (
+        previous_hour_epoch is not None
+        and hour_epoch is not None
+        and int(previous_hour_epoch) != int(hour_epoch)
+    ):
+        previous_elements = apply_time_slice(
+            base,
+            previous_hour_epoch,
+            stage_odds=stage_odds,
+        )
+    return apply_time_slice(
+        base,
+        hour_epoch,
+        stage_odds=stage_odds,
+        previous_elements=previous_elements,
+    )
+
+
 def _project_and_render(
     settings: Settings,
     min_confidence: float,
     inference_method: str,
     *,
     hour_epoch: int | None = None,
+    previous_hour_epoch: int | None = None,
 ) -> Any:
-    slice_ = bracket_elements(settings)
-    elements = apply_time_slice(
-        slice_.to_elements(),
+    elements = _project_elements(
+        settings,
         hour_epoch,
-        stage_odds=stage_odds_by_team(settings),
+        previous_hour_epoch=previous_hour_epoch,
     )
     filtered = apply_filters(elements, _BRACKET_TYPES, min_confidence, inference_method)
     return elements_to_bracket_children(filtered)
@@ -78,6 +106,8 @@ def apply_time_slider(
     hour_epoch: int | None,
     min_confidence: float,
     inference_method: str,
+    *,
+    previous_hour_epoch: int | None = None,
 ) -> CanvasMutation:
     """Update projected teams and advance probabilities for the selected hour."""
     return (
@@ -86,6 +116,7 @@ def apply_time_slider(
             min_confidence,
             inference_method,
             hour_epoch=hour_epoch,
+            previous_hour_epoch=previous_hour_epoch,
         ),
         no_update,
     )

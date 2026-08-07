@@ -51,7 +51,7 @@ def next_play_toggle(
 
     Returns
     ``(interval_disabled, button_label, playing, restart_hour, aria_label, aria_pressed)``.
-    ``restart_hour`` is set when playback should jump back to tournament start;
+    ``restart_hour`` is set when playback should jump back to Round of 32 start;
     otherwise it is ``None`` (leave the slider unchanged).
     """
     if slider_disabled:
@@ -315,21 +315,26 @@ def register_callbacks(app: Dash, settings: Settings) -> None:
 
     @app.callback(
         *_canvas_callback_outputs(allow_duplicate=True),
+        Output("previous-hour", "data"),
         Input("time-slider", "value"),
         State("confidence-filter", "value"),
         State("inference-filter", "value"),
+        State("previous-hour", "data"),
         prevent_initial_call=True,
     )
     def scrub_time(
         hour_epoch: int | None,
         min_confidence: float | None,
         inference_method: str | None,
-    ) -> CanvasMutation:
+        previous_hour: int | None,
+    ) -> tuple[Any, Any, Any]:
         if not callback_context.triggered:
             raise PreventUpdate
-        return apply_time_slider(
+        children, status = apply_time_slider(
             settings,
             hour_epoch,
             float(min_confidence or 0.0),
             inference_method or "",
+            previous_hour_epoch=previous_hour,
         )
+        return children, status, hour_epoch

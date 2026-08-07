@@ -459,11 +459,11 @@ class ExplorerDataStore:
             return slice_
 
     def odds_time_bounds(self) -> tuple[int | None, int | None]:
-        """Return hour-aligned tournament start/end for the time slider.
+        """Return hour-aligned Round of 32 start through Final full-time for the slider.
 
-        Bounds come from the official schedule through Final full-time so the
-        Champion lock remains reachable. Falls back to kickoff bounds, then
-        odds-history extrema when the schedule is empty.
+        Bounds come from the official knockout schedule through Final full-time so
+        the Champion lock remains reachable. Group Stage is omitted. Falls back to
+        kickoff bounds, then odds-history extrema when the schedule is empty.
         """
         with self._lock:
             self.refresh_if_stale()
@@ -630,7 +630,7 @@ def bracket_elements(settings: Settings) -> GraphSlice:
 
 
 def odds_time_bounds(settings: Settings) -> tuple[int | None, int | None]:
-    """Return hour-aligned tournament start through Final full-time for the slider."""
+    """Return hour-aligned Round of 32 through Final full-time for the slider."""
     return get_store(settings).odds_time_bounds()
 
 

@@ -23,9 +23,8 @@ STAGE_LABEL_TO_RANK: dict[str, int] = {
     STAGE_KEY_TO_LABEL[key]: rank for key, rank in KNOCKOUT_STAGE_RANK.items()
 }
 
-# Fixed tracker steps (Third Place + Final collapse into Final weekend).
+# Fixed tracker steps for knockout playback (Group Stage is not scrubbable).
 TRACKER_STEPS: tuple[tuple[str, str, str], ...] = (
-    ("groups", "Groups", "Group Stage"),
     ("r32", "Round of 32", "R32"),
     ("r16", "Round of 16", "R16"),
     ("qf", "Quarterfinals", "QF"),
@@ -76,6 +75,7 @@ def apply_time_slice(
     hour_epoch: int | None,
     *,
     stage_odds: dict[str, dict[str, list[dict[str, Any]]]] | None = None,
+    previous_elements: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Project teams/probs at ``hour_epoch`` and stamp card presentation fields."""
     from oddsgraph.bracket_projection import apply_bracket_projection
@@ -87,7 +87,8 @@ def apply_time_slice(
         stage_odds or {},
         flag_url_for_team=flag_url_for_team,
     )
-    return stamp_timeline_states(projected, hour_epoch)
+    stamped = stamp_timeline_states(projected, hour_epoch)
+    return stamp_odds_motion(stamped, previous_elements)
 
 
 def format_hour_label(hour_epoch: int | None) -> str:
@@ -119,9 +120,7 @@ def _window_contains(window: StageWindow, hour_epoch: int) -> bool:
 
 
 def _tracker_step_for_stage_key(stage_key: str) -> str:
-    if stage_key == "group_stage":
-        return "groups"
-    if stage_key == "round_of_32":
+    if stage_key in {"group_stage", "round_of_32"}:
         return "r32"
     if stage_key == "round_of_16":
         return "r16"
@@ -131,7 +130,7 @@ def _tracker_step_for_stage_key(stage_key: str) -> str:
         return "sf"
     if stage_key in {"third_place", "final"}:
         return "final_weekend"
-    return "groups"
+    return "r32"
 
 
 def _stage_label_for_key(stage_key: str) -> str:
@@ -149,7 +148,7 @@ def phase_at_hour(hour_epoch: int | None) -> TournamentPhase:
             state="intermission",
             active_stage_labels=(),
             next_stage=None,
-            tracker_step="groups",
+            tracker_step="r32",
         )
 
     hour = int(hour_epoch)
@@ -317,17 +316,10 @@ def timeline_state_for_stage(
         return "future"
     if active_ranks and stage_rank_value < min(active_ranks):
         return "past"
-    if phase.next_stage and order.get(phase.next_stage, 99) > stage_rank_value:
-        if phase.state == "intermission" and stage_rank_value < order.get(
-            phase.next_stage, 99
-        ):
-            return "past"
     if phase.state == "intermission" and phase.next_stage:
         next_rank = order.get(phase.next_stage)
         if next_rank is not None and stage_rank_value < next_rank:
             return "past"
-    if phase.state == "active" and active_ranks and stage_rank_value < min(active_ranks):
-        return "past"
     if "Group Stage" in phase.active_stage_labels:
         return "up-next"
     if phase.state == "active" and active_ranks and stage_rank_value > max(active_ranks):
@@ -367,6 +359,80 @@ def stamp_timeline_states(
     return updated
 
 
+def _match_index(elements: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    indexed: dict[str, dict[str, Any]] = {}
+    for el in elements:
+        if is_edge(el):
+            continue
+        data = el.get("data") or {}
+        match_id = str(data.get("id") or "")
+        if match_id and (
+            str(data.get("type") or "") == "MATCH" or data.get("stage")
+        ):
+            indexed[match_id] = data
+    return indexed
+
+
+def stamp_odds_motion(
+    elements: list[dict[str, Any]],
+    previous_elements: list[dict[str, Any]] | None,
+) -> list[dict[str, Any]]:
+    """Stamp per-match odds ticks vs the previously displayed hour.
+
+    Only compares when the same two teams remain on the card (avoids misleading
+    deltas when projected participants swap). Resolved cards stay quiet so
+    just-finished remains the dominant full-time cue.
+    """
+    if not previous_elements:
+        return elements
+    previous_by_id = _match_index(previous_elements)
+    if not previous_by_id:
+        return elements
+
+    updated: list[dict[str, Any]] = []
+    for el in elements:
+        if is_edge(el):
+            updated.append(el)
+            continue
+        data = dict(el.get("data") or {})
+        match_id = str(data.get("id") or "")
+        prev = previous_by_id.get(match_id)
+        if (
+            not prev
+            or data.get("resolved")
+            or str(data.get("home_team") or "") != str(prev.get("home_team") or "")
+            or str(data.get("away_team") or "") != str(prev.get("away_team") or "")
+        ):
+            updated.append({**el, "data": data})
+            continue
+
+        cur_raw = data.get("current_home_prob")
+        prev_raw = prev.get("current_home_prob")
+        if cur_raw is None or prev_raw is None:
+            updated.append({**el, "data": data})
+            continue
+
+        cur = float(cur_raw)
+        prev_prob = float(prev_raw)
+        delta = cur - prev_prob
+        # Ignore sub-percentage-point noise from float / rounding.
+        if abs(delta) < 0.005:
+            updated.append({**el, "data": data})
+            continue
+
+        delta_pp = int(round(delta * 100))
+        if delta_pp == 0:
+            updated.append({**el, "data": data})
+            continue
+
+        data["home_prob_delta_pp"] = delta_pp
+        data["odds_tick_home"] = "up" if delta_pp > 0 else "down"
+        data["odds_tick_away"] = "down" if delta_pp > 0 else "up"
+        data["favorite_flipped"] = (prev_prob >= 0.5) != (cur >= 0.5)
+        updated.append({**el, "data": data})
+    return updated
+
+
 def time_slider_marks(min_hour: int, max_hour: int) -> dict[int, dict[str, str] | str]:
     """Stage-boundary labels plus unlabeled kickoff/full-time snaps for ``step=None``."""
     marks: dict[int, dict[str, str] | str] = {}
@@ -376,14 +442,15 @@ def time_slider_marks(min_hour: int, max_hour: int) -> dict[int, dict[str, str] 
         if hour < int(min_hour) or hour > int(max_hour):
             continue
         abbr = {
-            "group_stage": "Groups",
             "round_of_32": "R32",
             "round_of_16": "R16",
             "quarterfinal": "QF",
             "semifinal": "SF",
             "third_place": "3rd",
             "final": "Final",
-        }.get(window.stage_key, window.label)
+        }.get(window.stage_key)
+        if abbr is None:
+            continue
         marks[hour] = {
             "label": abbr,
             "style": {"fontSize": "10px", "color": "#94a3b8", "whiteSpace": "nowrap"},

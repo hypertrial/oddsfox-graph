@@ -89,8 +89,9 @@ matches between the build and explore invocations.
 
 ### Explorer time slider shows no probabilities / cards stay uncolored
 
-The tournament time slider always spans official schedule kickoffs through
-Final full-time and snaps to kickoff / full-time milestones. Advance
+The tournament time slider spans Round of 32 kickoff through Final full-time
+(Group Stage is skipped) and snaps to knockout kickoff / full-time milestones.
+Advance
 probabilities and future-round projection need
 `build/odds_history.parquet` and `build/stage_odds_history.parquet` from
 `oddsgraph odds-history` (also produced by `oddsgraph run`). Without those
