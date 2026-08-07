@@ -81,6 +81,16 @@ body {
   background:
     radial-gradient(circle at top, rgba(34, 211, 238, 0.05), transparent 34%),
     var(--of-bg);
+  /* Dash 4 design tokens used by Slider (default inverse fill is white). */
+  --Dash-Fill-Interactive-Strong: var(--of-cyan);
+  --Dash-Fill-Disabled: #1e293b;
+  --Dash-Fill-Primary-Active: rgba(34, 211, 238, 0.35);
+  --Dash-Text-Strong: var(--of-muted);
+  --Dash-Text-Disabled: var(--of-faint);
+  --Dash-Stroke-Strong: var(--of-border-strong);
+  --Dash-Stroke-Weak: var(--of-border);
+  --Dash-Shading-Weak: rgba(2, 6, 23, 0.35);
+  --Dash-Shading-Strong: rgba(2, 6, 23, 0.55);
 }
 
 .visually-hidden {
@@ -731,7 +741,44 @@ button:disabled {
   font-size: 13px;
 }
 
-/* Dash slider / dropdown dark theme overrides */
+/*
+ * Dash 4 slider theme (replaces legacy rc-slider). Default Dash tokens use a
+ * white inverse fill for number inputs/tooltips — hide inputs in app props and
+ * restyle the track/thumb/tooltip here.
+ */
+.dash-slider-track {
+  background-color: #1e293b !important;
+}
+
+.dash-slider-range {
+  background-color: var(--of-cyan) !important;
+}
+
+.dash-slider-thumb {
+  border: 2px solid var(--of-cyan) !important;
+  background-color: #082f49 !important;
+  box-shadow: none !important;
+}
+
+.dash-slider-mark,
+.dash-slider-mark-outside-selection {
+  color: var(--of-faint) !important;
+}
+
+.dash-slider-tooltip {
+  background-color: #0b1220 !important;
+  color: var(--of-text) !important;
+  border: 1px solid var(--of-border-strong);
+  fill: #0b1220 !important;
+}
+
+/* Belt-and-suspenders: never show direct-entry boxes in the dark shell. */
+.explorer-root .dash-range-slider-input,
+.explorer-root .dash-input-container.dash-range-slider-input {
+  display: none !important;
+}
+
+/* Legacy rc-slider hooks (older Dash) */
 .rc-slider-rail {
   background-color: #1e293b !important;
 }

@@ -156,6 +156,30 @@ def test_build_app_registers_layout_assets_and_callbacks(tmp_path: Path) -> None
     assert (ASSETS_DIR / "inter-latin-variable.woff2").exists()
     assert (ASSETS_DIR / "jetbrains-mono-latin-variable.woff2").exists()
 
+    def _find_component(node: object, target: str) -> object | None:
+        if getattr(node, "id", None) == target:
+            return node
+        children = getattr(node, "children", None)
+        if children is None:
+            return None
+        if not isinstance(children, (list, tuple)):
+            children = [children]
+        for child in children:
+            if child is None or isinstance(child, (str, int, float, bool)):
+                continue
+            found = _find_component(child, target)
+            if found is not None:
+                return found
+        return None
+
+    time_slider = _find_component(layout, "time-slider")
+    confidence = _find_component(layout, "confidence-filter")
+    assert time_slider is not None and confidence is not None
+    assert getattr(time_slider, "allow_direct_input") is False
+    assert getattr(confidence, "allow_direct_input") is False
+    assert getattr(time_slider, "tooltip") is False
+    assert getattr(confidence, "tooltip") is False
+
     for removed_id in (
         "view-mode",
         "search-input",

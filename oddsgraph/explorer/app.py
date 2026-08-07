@@ -190,7 +190,10 @@ def build_app(settings: Settings) -> Dash:
                                         step=0.05,
                                         value=0,
                                         marks={0: "0", 0.5: "0.5", 1: "1"},
-                                        tooltip={"placement": "bottom"},
+                                        # Dash 4 defaults allow_direct_input=True, which
+                                        # renders white number fields beside the track.
+                                        allow_direct_input=False,
+                                        tooltip=False,
                                     ),
                                     html.P(
                                         id="confidence-value",
@@ -412,10 +415,10 @@ def build_app(settings: Settings) -> Dash:
                                                 value=slider_value,
                                                 marks=marks,
                                                 disabled=slider_disabled,
-                                                tooltip={
-                                                    "placement": "top",
-                                                    "always_visible": False,
-                                                },
+                                                # Hide Dash 4's default white epoch
+                                                # number inputs; time is shown above.
+                                                allow_direct_input=False,
+                                                tooltip=False,
                                             ),
                                             html.P(
                                                 (

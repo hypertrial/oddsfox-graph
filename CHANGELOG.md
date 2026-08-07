@@ -51,6 +51,9 @@ flags and output schema as pre-1.0 and subject to change.
 
 ### Fixed
 
+- Explorer Dash 4 sliders no longer show white direct-entry number fields or
+  white value tooltips in the playback dock and Filters drawer (set
+  ``allow_direct_input=False`` and restyle ``.dash-slider-*`` for the dark shell).
 - Explorer match-card flag SVGs use node-relative sizes so they scale with
   zoom instead of shrinking when zooming in.
 - Flag SVG assets now declare explicit ``width`` / ``height`` (Cytoscape
