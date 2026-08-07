@@ -204,6 +204,7 @@ def _enrich_match_with_odds(
     element: dict[str, Any],
     odds_by_match: dict[str, dict[str, Any]],
     odds_by_teams: dict[frozenset[str], dict[str, Any]],
+    schedule_outcomes: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     from oddsgraph.flags import flag_url_or_blank
 
@@ -236,6 +237,25 @@ def _enrich_match_with_odds(
         prob = home_prob_at_hour(data, initial_hour)
         if prob is not None:
             data["current_home_prob"] = prob
+
+    schedule = (schedule_outcomes or {}).get(match_id)
+    if schedule:
+        data.setdefault("match_start_epoch", schedule.get("match_start_epoch"))
+        # Curated schedule outcomes win over soft odds-history locks so Final /
+        # Third Place (and derived knockout results) stay authoritative.
+        if schedule.get("winner_team"):
+            data["winner_team"] = schedule["winner_team"]
+            if schedule.get("match_end_epoch") is not None:
+                data["match_end_epoch"] = schedule["match_end_epoch"]
+        elif (
+            data.get("match_end_epoch") is None
+            and schedule.get("match_end_epoch") is not None
+        ):
+            data["match_end_epoch"] = schedule["match_end_epoch"]
+        if not data.get("home_team") and schedule.get("home_team"):
+            data["home_team"] = schedule["home_team"]
+        if not data.get("away_team") and schedule.get("away_team"):
+            data["away_team"] = schedule["away_team"]
 
     if data.get("home_team") or data.get("away_team"):
         data["home_flag"] = flag_url_or_blank(data.get("home_team"))
@@ -398,11 +418,15 @@ class ExplorerDataStore:
                 [*match_ids, *match_ids],
             )
 
+            from oddsgraph.bracket import schedule_knockout_outcomes
+
+            outcomes = schedule_knockout_outcomes()
             node_els = [
                 _enrich_match_with_odds(
                     node_element(n, bracket=True),
                     self._odds_by_match,
                     self._odds_by_teams,
+                    schedule_outcomes=outcomes,
                 )
                 for n in nodes
             ]

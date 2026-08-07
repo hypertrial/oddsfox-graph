@@ -654,5 +654,23 @@ def bracket_stylesheet() -> list[dict[str, Any]]:
                 "border-style": "dashed",
             },
         },
+        {
+            "selector": "node[?is_champion]",
+            "style": {
+                "border-color": "#ca8a04",
+                "border-width": 3,
+                "background-color": "#fffbeb",
+                "font-weight": 700,
+            },
+        },
+        {
+            "selector": "node[?is_third_place_winner]",
+            "style": {
+                "border-color": "#475569",
+                "border-width": 2.5,
+                "background-color": "#f8fafc",
+                "font-weight": 700,
+            },
+        },
     ]
     return styles

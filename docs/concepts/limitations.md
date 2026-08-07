@@ -51,7 +51,9 @@ favorites; if both are unavailable the slot stays unresolved. That is **not** a
 coherent joint bracket model: independence is assumed, Third Place has no
 dedicated reach market, and missing/zero stage odds mark probabilities
 unavailable rather than inventing 50/50. Prefer resolved match results and
-direct advance series when both exist.
+direct advance series when both exist. Curated schedule `winner_team` overlays
+(Final champion / Third Place) take precedence over soft odds-history locks in
+the explorer so Spain / England remain authoritative once those cards lock.
 
 ## Scope is WC2026 / Polymarket only
 

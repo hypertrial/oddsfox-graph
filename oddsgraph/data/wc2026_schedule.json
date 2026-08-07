@@ -1041,7 +1041,8 @@
       "away_team": "England",
       "kickoff_at_utc": "2026-07-18T21:00:00",
       "venue": "Miami (Miami Gardens)",
-      "match_status": "completed"
+      "match_status": "completed",
+      "winner_team": "England"
     },
     {
       "fifa_match_id": 104,
@@ -1051,7 +1052,8 @@
       "away_team": "Argentina",
       "kickoff_at_utc": "2026-07-19T19:00:00",
       "venue": "New York/New Jersey (East Rutherford)",
-      "match_status": "completed"
+      "match_status": "completed",
+      "winner_team": "Spain"
     }
   ]
 }

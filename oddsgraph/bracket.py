@@ -107,6 +107,102 @@ def tournament_time_bounds() -> tuple[int | None, int | None]:
     return start_hour, end_hour
 
 
+# Approximate lock time after kickoff for completed schedule fixtures.
+_SCHEDULE_MATCH_DURATION_SECONDS = 2 * 3600
+
+
+@lru_cache(maxsize=1)
+def schedule_knockout_outcomes() -> dict[str, dict[str, object]]:
+    """Return knockout MATCH outcomes keyed by match local id.
+
+    Explicit ``winner_team`` on a fixture wins. Otherwise winners are derived
+    from team continuity into the next knockout rank (a team that appears in
+    the next round won its feeder). Final / Third Place need an explicit
+    winner because there is no later MATCH.
+    """
+    schedule = load_wc2026_schedule()
+    fixtures = [f for f in (schedule.get("fixtures") or []) if isinstance(f, dict)]
+
+    by_id: dict[str, dict[str, object]] = {}
+    team_appearances: dict[str, list[tuple[int, str, str, str]]] = defaultdict(list)
+
+    for raw in fixtures:
+        stage_key = str(raw.get("stage_key") or "")
+        rank = KNOCKOUT_STAGE_RANK.get(stage_key)
+        if rank is None:
+            continue
+        home = ids.canonical_team_name(str(raw.get("home_team") or ""))
+        away = ids.canonical_team_name(str(raw.get("away_team") or ""))
+        if not home or not away:
+            continue
+        kickoff = raw.get("kickoff_at_utc")
+        match_id = _match_local_id(home, away, kickoff if isinstance(kickoff, str) else None)
+        kickoff_epoch = _kickoff_epoch(kickoff if isinstance(kickoff, str) else None)
+        explicit = raw.get("winner_team")
+        winner = (
+            ids.canonical_team_name(str(explicit))
+            if explicit
+            else None
+        )
+        if winner and winner not in {home, away}:
+            winner = None
+        completed = str(raw.get("match_status") or "").casefold() == "completed"
+        end_epoch = None
+        # Explicit curated winners (Final / Third Place) lock at kickoff+2h even
+        # when match_status is still ``scheduled``; derived winners still require
+        # completed status so unfinished feeders stay open on the slider.
+        if winner is not None and kickoff_epoch is not None and (
+            completed or explicit
+        ):
+            end_epoch = kickoff_epoch + _SCHEDULE_MATCH_DURATION_SECONDS
+        by_id[match_id] = {
+            "home_team": home,
+            "away_team": away,
+            "stage_key": stage_key,
+            "match_start_epoch": kickoff_epoch,
+            "match_end_epoch": end_epoch,
+            "winner_team": winner,
+            "match_status": raw.get("match_status"),
+        }
+        for team in (home, away):
+            team_appearances[ids.normalize_label(team)].append(
+                (rank, match_id, home, away)
+            )
+
+    # Derive feeder winners from continuity into the next rank.
+    # Skip Third Place appearances: losing semifinalists also "advance" in rank
+    # to Third Place without having won their semifinal.
+    for team_key, appearances in team_appearances.items():
+        ordered = sorted(appearances, key=lambda item: item[0])
+        for idx in range(len(ordered) - 1):
+            prev_rank, prev_id, prev_home, prev_away = ordered[idx]
+            next_rank, next_id, _nh, _na = ordered[idx + 1]
+            if next_rank != prev_rank + 1:
+                continue
+            next_entry = by_id.get(next_id)
+            if next_entry is not None and next_entry.get("stage_key") == "third_place":
+                continue
+            entry = by_id.get(prev_id)
+            if entry is None or entry.get("winner_team"):
+                continue
+            if ids.normalize_label(prev_home) == team_key:
+                winner = prev_home
+            elif ids.normalize_label(prev_away) == team_key:
+                winner = prev_away
+            else:
+                continue
+            entry["winner_team"] = winner
+            start = entry.get("match_start_epoch")
+            if (
+                entry.get("match_end_epoch") is None
+                and isinstance(start, int)
+                and str(entry.get("match_status") or "").casefold() == "completed"
+            ):
+                entry["match_end_epoch"] = start + _SCHEDULE_MATCH_DURATION_SECONDS
+
+    return by_id
+
+
 def _match_local_id(team_a: str, team_b: str, kickoff_at_utc: str | None) -> str:
     return match_local_id(team_a, team_b, date=_kickoff_date(kickoff_at_utc))
 

@@ -26,6 +26,9 @@ flags and output schema as pre-1.0 and subject to change.
   selection), softer probability tints, dashed borders for projected cards.
 - Explorer Play control advances tournament time one hour at a time at a rate
   of one day every two seconds.
+- Explorer Final / Third Place cards mark schedule winners as **Champion** /
+  **3rd** (Spain and England in the curated WC2026 schedule) with distinct
+  card styling once the match is locked.
 
 ### Changed
 

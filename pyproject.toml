@@ -44,6 +44,9 @@ oddsgraph = ["data/*.json", "explorer/assets/*", "explorer/assets/flags/*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+# Avoid prepend-import mode: putting ``tests/`` on sys.path breaks
+# ``from tests.helpers import …`` (looks for tests/tests/helpers).
+addopts = ["--import-mode=importlib"]
 markers = [
     "integration: live model integration tests",
 ]

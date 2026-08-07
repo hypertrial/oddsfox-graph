@@ -72,6 +72,24 @@ def test_tournament_time_bounds_span_first_to_last_kickoff() -> None:
     assert end % 3600 == 0
 
 
+def test_schedule_knockout_outcomes_mark_spain_champion_and_england_third() -> None:
+    from oddsgraph.bracket import schedule_knockout_outcomes
+
+    outcomes = schedule_knockout_outcomes()
+    final = outcomes["match:spain-vs-argentina-2026-07-19"]
+    third = outcomes["match:france-vs-england-2026-07-18"]
+    assert final["winner_team"] == "Spain"
+    assert third["winner_team"] == "England"
+    assert isinstance(final.get("match_end_epoch"), int)
+    assert isinstance(third.get("match_end_epoch"), int)
+    assert outcomes["match:france-vs-spain-2026-07-14"]["winner_team"] == "Spain"
+    assert outcomes["match:england-vs-argentina-2026-07-15"]["winner_team"] == "Argentina"
+    assert all(entry.get("winner_team") for entry in outcomes.values())
+    assert all(
+        isinstance(entry.get("match_end_epoch"), int) for entry in outcomes.values()
+    )
+
+
 def test_official_bracket_stage_ladder_and_match_placement() -> None:
     fragment = build_official_bracket_fragment()
     stages = {n.label for n in fragment.nodes if n.type == NodeType.STAGE}

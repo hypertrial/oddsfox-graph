@@ -61,6 +61,9 @@ At the selected hour:
    unavailable probability (`—`) rather than inventing 50/50 odds.
 5. Dashed borders mark projected (not yet locked) matchups. Soft mint/rose
    tints remain a secondary cue; the numeric percentages are the primary signal.
+6. When a match is locked, the winner is marked on the card (`W`). The Final
+   shows **Champion** and Third Place shows **3rd** (Spain / England in the
+   curated schedule), with stronger card borders once those results lock.
 
 ### Progressive controls
 

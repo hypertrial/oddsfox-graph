@@ -469,11 +469,29 @@ def card_short_label(
     away: str,
     home_prob: float | None,
     away_prob: float | None,
+    *,
+    winner: str | None = None,
+    stage: str | None = None,
 ) -> str:
-    return (
-        f"{home}  {format_prob_label(home_prob)}\n"
-        f"{away}  {format_prob_label(away_prob)}"
-    )
+    """Build the two-line match card text, marking Final/Third Place winners."""
+    home_mark = format_prob_label(home_prob)
+    away_mark = format_prob_label(away_prob)
+    if winner and stage == "Final":
+        if winner == home:
+            home_mark = "Champion"
+        elif winner == away:
+            away_mark = "Champion"
+    elif winner and stage == "Third Place":
+        if winner == home:
+            home_mark = "3rd"
+        elif winner == away:
+            away_mark = "3rd"
+    elif winner:
+        if winner == home:
+            home_mark = "W"
+        elif winner == away:
+            away_mark = "W"
+    return f"{home}  {home_mark}\n{away}  {away_mark}"
 
 
 _STAGE_PROCESS_ORDER: dict[str, int] = {
@@ -567,9 +585,24 @@ def apply_bracket_projection(
 
         data["home_team"] = home
         data["away_team"] = away
+        winner = None
+        if (
+            home
+            and away
+            and _match_resolved(data, hour_epoch)
+            and data.get("winner_team")
+        ):
+            winner = str(data["winner_team"])
         if home and away:
             data["label"] = f"{home} vs. {away}"
-            data["short_label"] = card_short_label(home, away, home_prob, away_prob)
+            data["short_label"] = card_short_label(
+                home,
+                away,
+                home_prob,
+                away_prob,
+                winner=winner,
+                stage=str(data.get("stage") or ""),
+            )
         else:
             data["label"] = str(
                 data.get("schedule_label") or data.get("label") or "TBD vs. TBD"
@@ -578,6 +611,13 @@ def apply_bracket_projection(
         data["projected"] = projected.projected
         data["projection_method"] = projected.projection_method
         data["probability_available"] = projected.probability_available
+        stage = str(data.get("stage") or "")
+        data["is_champion"] = bool(
+            winner and stage == "Final" and winner in {home, away}
+        )
+        data["is_third_place_winner"] = bool(
+            winner and stage == "Third Place" and winner in {home, away}
+        )
         data["home_prob_label"] = format_prob_label(home_prob)
         data["away_prob_label"] = format_prob_label(away_prob)
         if home_prob is None:

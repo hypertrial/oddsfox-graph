@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from oddsgraph.bracket_projection import (
     apply_bracket_projection,
+    card_short_label,
     conditional_advance_score,
     normalize_pair,
     project_match_at_hour,
@@ -33,6 +34,66 @@ def test_normalize_and_conditional_ratio() -> None:
     }
     assert conditional_advance_score("Brazil", "Round of 16", 100, stage_odds) == 0.5
     assert reach_prob_for_rank("Brazil", "Round of 16", 100, stage_odds) == 0.8
+
+
+def test_card_short_label_marks_champion_and_third() -> None:
+    assert "Champion" in card_short_label(
+        "Spain", "Argentina", 1.0, 0.0, winner="Spain", stage="Final"
+    )
+    assert card_short_label(
+        "Spain", "Argentina", 1.0, 0.0, winner="Spain", stage="Final"
+    ).startswith("Spain  Champion")
+    assert "3rd" in card_short_label(
+        "France", "England", 0.0, 1.0, winner="England", stage="Third Place"
+    )
+    assert card_short_label(
+        "France", "England", 0.0, 1.0, winner="England", stage="Third Place"
+    ).endswith("England  3rd")
+
+
+def test_apply_projection_flags_champion_and_third_place_winner() -> None:
+    final_end = 1_784_494_800
+    third_end = 1_784_415_600
+    elements = [
+        {
+            "data": {
+                "id": "final",
+                "type": "MATCH",
+                "stage": "Final",
+                "label": "Spain vs. Argentina",
+                "schedule_home": "Spain",
+                "schedule_away": "Argentina",
+                "home_team": "Spain",
+                "away_team": "Argentina",
+                "winner_team": "Spain",
+                "match_start_epoch": final_end - 7200,
+                "match_end_epoch": final_end,
+            },
+            "classes": "MATCH",
+        },
+        {
+            "data": {
+                "id": "third",
+                "type": "MATCH",
+                "stage": "Third Place",
+                "label": "France vs. England",
+                "schedule_home": "France",
+                "schedule_away": "England",
+                "home_team": "France",
+                "away_team": "England",
+                "winner_team": "England",
+                "match_start_epoch": third_end - 7200,
+                "match_end_epoch": third_end,
+            },
+            "classes": "MATCH",
+        },
+    ]
+    out = apply_bracket_projection(elements, final_end, {})
+    by_id = {el["data"]["id"]: el["data"] for el in out}
+    assert by_id["final"]["is_champion"] is True
+    assert "Champion" in by_id["final"]["short_label"]
+    assert by_id["third"]["is_third_place_winner"] is True
+    assert "3rd" in by_id["third"]["short_label"]
 
 
 def test_project_match_picks_branch_winners_and_normalizes() -> None:

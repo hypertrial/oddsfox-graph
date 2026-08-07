@@ -62,6 +62,22 @@ def export(db_path: Path, out_path: Path) -> dict:
     if len(rows) != 104:
         raise SystemExit(f"Expected 104 fixtures, got {len(rows)}")
 
+    # Preserve curated local overlays (e.g. Final / Third Place winners) when
+    # re-exporting from the pipeline DuckDB, which does not store winners.
+    prior_winners: dict[int, str] = {}
+    if out_path.exists():
+        try:
+            prior = json.loads(out_path.read_text(encoding="utf-8"))
+            for raw in prior.get("fixtures") or []:
+                if not isinstance(raw, dict):
+                    continue
+                winner = raw.get("winner_team")
+                fifa_id = raw.get("fifa_match_id")
+                if winner and fifa_id is not None:
+                    prior_winners[int(fifa_id)] = _remap(str(winner))
+        except (OSError, json.JSONDecodeError, TypeError, ValueError):
+            prior_winners = {}
+
     fixtures = []
     for (
         fifa_match_id,
@@ -73,20 +89,22 @@ def export(db_path: Path, out_path: Path) -> dict:
         venue,
         match_status,
     ) in rows:
-        fixtures.append(
-            {
-                "fifa_match_id": int(fifa_match_id),
-                "stage_key": stage_key,
-                "group_label": group_label,
-                "home_team": _remap(home_team),
-                "away_team": _remap(away_team),
-                "kickoff_at_utc": kickoff_at_utc.isoformat(sep="T")
-                if kickoff_at_utc is not None
-                else None,
-                "venue": venue,
-                "match_status": match_status,
-            }
-        )
+        fixture = {
+            "fifa_match_id": int(fifa_match_id),
+            "stage_key": stage_key,
+            "group_label": group_label,
+            "home_team": _remap(home_team),
+            "away_team": _remap(away_team),
+            "kickoff_at_utc": kickoff_at_utc.isoformat(sep="T")
+            if kickoff_at_utc is not None
+            else None,
+            "venue": venue,
+            "match_status": match_status,
+        }
+        winner = prior_winners.get(int(fifa_match_id))
+        if winner:
+            fixture["winner_team"] = _remap(winner)
+        fixtures.append(fixture)
 
     payload = {
         "_provenance": {

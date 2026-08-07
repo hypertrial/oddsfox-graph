@@ -501,6 +501,43 @@ def test_bracket_elements_enrich_odds_series(tmp_path: Path) -> None:
     assert "odds_series" not in by_id["match:final"]
 
 
+def test_schedule_winner_overrides_odds_history_soft_lock() -> None:
+    """Curated schedule winners beat soft odds-history locks on MATCH nodes."""
+    from oddsgraph.explorer.data import _enrich_match_with_odds
+
+    element = {
+        "data": {
+            "id": "match:spain-vs-argentina-2026-07-19",
+            "label": "Spain vs. Argentina",
+            "type": "MATCH",
+        }
+    }
+    odds_by_match = {
+        "match:spain-vs-argentina-2026-07-19": {
+            "home_team": "Spain",
+            "away_team": "Argentina",
+            "winner_team": "Argentina",
+            "match_start_epoch": 1_000,
+            "match_end_epoch": 2_000,
+            "odds_series": [{"h": 1000, "home": 0.2, "away": 0.8}],
+        }
+    }
+    schedule_outcomes = {
+        "match:spain-vs-argentina-2026-07-19": {
+            "home_team": "Spain",
+            "away_team": "Argentina",
+            "winner_team": "Spain",
+            "match_start_epoch": 1_784_487_600,
+            "match_end_epoch": 1_784_494_800,
+        }
+    }
+    enriched = _enrich_match_with_odds(
+        element, odds_by_match, {}, schedule_outcomes=schedule_outcomes
+    )
+    assert enriched["data"]["winner_team"] == "Spain"
+    assert enriched["data"]["match_end_epoch"] == 1_784_494_800
+
+
 def test_odds_time_bounds_prefer_tournament_schedule(tmp_path: Path) -> None:
     import pyarrow as pa
     import pyarrow.parquet as pq
