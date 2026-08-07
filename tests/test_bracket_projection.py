@@ -283,3 +283,147 @@ def test_all_schedule_teams_have_local_flags() -> None:
         for raw in schedule.get("fixtures") or []
     }
     assert missing_flag_teams(teams) == []
+
+
+def test_projection_falls_back_to_feeder_advance_odds_without_stage_odds() -> None:
+    """Without stage-reach series, use feeder advance odds — not schedule homes."""
+    elements = [
+        {
+            "data": {
+                "id": "r32a",
+                "type": "MATCH",
+                "stage": "Round of 32",
+                "label": "Brazil vs. France",
+                "schedule_home": "Brazil",
+                "schedule_away": "France",
+                "home_team": "Brazil",
+                "away_team": "France",
+                "match_start_epoch": 1000,
+                "match_end_epoch": None,
+                "winner_team": None,
+                "odds_series": [{"h": 1000, "home": 0.2, "away": 0.8}],
+            },
+            "classes": "MATCH",
+        },
+        {
+            "data": {
+                "id": "r32b",
+                "type": "MATCH",
+                "stage": "Round of 32",
+                "label": "Spain vs. Germany",
+                "schedule_home": "Spain",
+                "schedule_away": "Germany",
+                "home_team": "Spain",
+                "away_team": "Germany",
+                "match_start_epoch": 1000,
+                "match_end_epoch": None,
+                "winner_team": None,
+                "odds_series": [{"h": 1000, "home": 0.1, "away": 0.9}],
+            },
+            "classes": "MATCH",
+        },
+        {
+            "data": {
+                "id": "r16",
+                "type": "MATCH",
+                "stage": "Round of 16",
+                "label": "Winner R32a vs Winner R32b",
+                "schedule_home": "Brazil",
+                "schedule_away": "Spain",
+                "match_start_epoch": 5000,
+                "match_end_epoch": None,
+                "winner_team": None,
+            },
+            "classes": "MATCH",
+        },
+        {
+            "data": {
+                "id": "e1",
+                "source": "r32a",
+                "target": "r16",
+                "edge_type": "ADVANCES_TO",
+            },
+            "classes": "ADVANCES_TO",
+        },
+        {
+            "data": {
+                "id": "e2",
+                "source": "r32b",
+                "target": "r16",
+                "edge_type": "ADVANCES_TO",
+            },
+            "classes": "ADVANCES_TO",
+        },
+    ]
+    out = apply_bracket_projection(elements, 1000, {})
+    r16 = next(el["data"] for el in out if el["data"].get("id") == "r16")
+    assert r16["home_team"] == "France"
+    assert r16["away_team"] == "Germany"
+    assert r16.get("projected") is True
+
+    # With neither stage odds nor advance series, do not invent schedule homes.
+    bare = [
+        {
+            "data": {
+                "id": "r32a",
+                "type": "MATCH",
+                "stage": "Round of 32",
+                "label": "Brazil vs. France",
+                "schedule_home": "Brazil",
+                "schedule_away": "France",
+                "home_team": "Brazil",
+                "away_team": "France",
+                "match_start_epoch": 1000,
+            },
+            "classes": "MATCH",
+        },
+        {
+            "data": {
+                "id": "r32b",
+                "type": "MATCH",
+                "stage": "Round of 32",
+                "label": "Spain vs. Germany",
+                "schedule_home": "Spain",
+                "schedule_away": "Germany",
+                "home_team": "Spain",
+                "away_team": "Germany",
+                "match_start_epoch": 1000,
+            },
+            "classes": "MATCH",
+        },
+        {
+            "data": {
+                "id": "r16",
+                "type": "MATCH",
+                "stage": "Round of 16",
+                "label": "Winner R32a vs Winner R32b",
+                "schedule_home": "Brazil",
+                "schedule_away": "Spain",
+                "match_start_epoch": 5000,
+            },
+            "classes": "MATCH",
+        },
+        {
+            "data": {
+                "id": "e1",
+                "source": "r32a",
+                "target": "r16",
+                "edge_type": "ADVANCES_TO",
+            },
+            "classes": "ADVANCES_TO",
+        },
+        {
+            "data": {
+                "id": "e2",
+                "source": "r32b",
+                "target": "r16",
+                "edge_type": "ADVANCES_TO",
+            },
+            "classes": "ADVANCES_TO",
+        },
+    ]
+    out_bare = apply_bracket_projection(bare, 1000, {})
+    r16_bare = next(el["data"] for el in out_bare if el["data"].get("id") == "r16")
+    assert r16_bare.get("home_team") is None
+    assert r16_bare.get("away_team") is None
+    assert not r16_bare.get("projected")

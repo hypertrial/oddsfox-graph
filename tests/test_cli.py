@@ -62,6 +62,8 @@ def test_cli_run_help_includes_infer_and_build_options() -> None:
     help_result = runner.invoke(app, ["run", "--help"])
     assert help_result.exit_code == 0
     output = _plain_output(help_result.output)
+    assert "odds-history" in output
+    assert "reduce" in output and "infer" in output and "build" in output
     assert "--llm-backend" in output
     assert "--concurrency" in output
     assert "official-brack" in output
@@ -71,6 +73,39 @@ def test_cli_run_help_includes_infer_and_build_options() -> None:
     assert "mlx" in output.lower() or "--mlx-model-path" in output
     assert "propositions" in output
     assert "reasoning" in output
+
+
+def test_cli_root_help_run_mentions_odds_history() -> None:
+    root = runner.invoke(app, ["--help"])
+    assert root.exit_code == 0
+    root_out = _plain_output(root.output)
+    assert "odds-history" in root_out
+
+    run_help = runner.invoke(app, ["run", "--help"])
+    assert run_help.exit_code == 0
+    run_out = _plain_output(run_help.output)
+    assert "odds-history" in run_out
+    # Docstring stage list, not only the standalone command name elsewhere.
+    assert "build" in run_out and "validate" in run_out
+
+
+def test_cli_explore_accepts_build_dir_after_subcommand(tmp_path: Path) -> None:
+    build_dir = tmp_path / "build"
+    build_dir.mkdir()
+    result = runner.invoke(app, ["explore", "--build-dir", str(build_dir)])
+    assert result.exit_code == 1
+    assert "No exported graph found" in result.output
+    assert "No such option" not in result.output
+
+
+def test_cli_explore_help_includes_build_dir() -> None:
+    result = runner.invoke(app, ["explore", "--help"])
+    assert result.exit_code == 0
+    output = _plain_output(result.output)
+    assert "--build-dir" in output
+    assert "--host" in output
+    assert "--port" in output
+    assert "--debug" in output
 
 
 def test_cli_build_help_includes_proposition_flags() -> None:

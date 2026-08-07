@@ -75,6 +75,8 @@ build/fragments/
 build/nodes.parquet
 build/edges.parquet
 build/rejected_edges.parquet
+build/odds_history.parquet          # from oddsgraph odds-history / run
+build/stage_odds_history.parquet    # from oddsgraph odds-history / run
 build/implies_closure.parquet   # from oddsgraph closure
 build/inference_report.json
 build/ontology.json

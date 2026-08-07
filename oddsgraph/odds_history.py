@@ -224,7 +224,11 @@ def build_odds_history_rows(
 
         if not series:
             continue
-        series.sort(key=lambda item: item[0])
+        # Multi-file input globs can repeat the same market hour; keep one point.
+        by_hour: dict[int, tuple[int, float, float]] = {}
+        for hour, home_prob, away_prob in series:
+            by_hour[hour] = (hour, home_prob, away_prob)
+        series = sorted(by_hour.values(), key=lambda item: item[0])
 
         kickoff_epoch = _to_epoch(fixture.kickoff_at_utc)
         start_epoch = (

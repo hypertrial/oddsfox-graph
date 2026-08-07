@@ -333,9 +333,15 @@ def explore(
         bool,
         typer.Option(help="Enable Dash debug/hot-reload"),
     ] = False,
+    build_dir: Annotated[
+        Optional[Path],
+        typer.Option(help="Directory for build artifacts"),
+    ] = None,
 ) -> None:
     """Launch a local, read-only graph explorer over exported artifacts."""
     settings = _base_settings(ctx)
+    if build_dir is not None:
+        settings.configure_build_dir(build_dir)
     if not settings.nodes_path.exists() or not settings.edges_path.exists():
         typer.echo(
             f"No exported graph found under {settings.build_dir}. "
@@ -386,7 +392,7 @@ def run(
     propositions: PropositionsOpt = None,
     reasoning: ReasoningOpt = None,
 ) -> None:
-    """Run the full pipeline: reduce → infer → build → validate."""
+    """Run the full pipeline: reduce → infer → build → odds-history → validate."""
     settings = _apply_build_options(
         _apply_infer_options(
             _base_settings(ctx),

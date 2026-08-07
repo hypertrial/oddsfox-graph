@@ -106,3 +106,17 @@ def test_build_stage_odds_history_writes_parquet(tmp_path: Path) -> None:
     assert table.num_rows == 2
     teams = set(table.column("team").to_pylist())
     assert teams == {"Brazil", "France"}
+
+
+def test_build_stage_odds_history_rows_dedupes_duplicate_hours() -> None:
+    rows = build_stage_odds_history_rows(
+        [
+            _stage_row(close_odds=0.4, odds_hour_epoch=1_780_000_000),
+            _stage_row(close_odds=0.55, odds_hour_epoch=1_780_000_000),
+        ]
+    )
+    brazil = [
+        r for r in rows if r["team"] == "Brazil" and r["stage_label"] == "Round of 16"
+    ]
+    assert len(brazil) == 1
+    assert brazil[0]["reach_prob"] == 0.55

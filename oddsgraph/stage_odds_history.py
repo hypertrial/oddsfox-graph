@@ -118,7 +118,15 @@ def build_stage_odds_history_rows(
                 "market_id": str(row.get("market_id") or ""),
             }
         )
-    out.sort(key=lambda r: (r["team"], r["stage_label"], r["odds_hour_epoch"]))
+    # Multi-file globs can emit duplicate (team, stage, hour) points.
+    deduped: dict[tuple[str, str, int], dict[str, Any]] = {}
+    for row in out:
+        key = (row["team"], row["stage_label"], int(row["odds_hour_epoch"]))
+        deduped[key] = row
+    out = sorted(
+        deduped.values(),
+        key=lambda r: (r["team"], r["stage_label"], r["odds_hour_epoch"]),
+    )
     return out
 
 

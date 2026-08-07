@@ -222,8 +222,14 @@ def _pick_branch_team(
             continue
         scored.append((score, team))
     if not scored:
-        return teams[0] if not prefer_loser else teams[1]
-    if prefer_loser and unscored:
+        # Stage-reach unavailable: fall back to feeder advance-market odds.
+        # Do not invent schedule-home favorites when those are also missing.
+        home_prob = _home_prob_at_hour(feeder_data, hour_epoch)
+        if home_prob is None:
+            return None
+        home, away = teams
+        scored = [(home_prob, home), (1.0 - home_prob, away)]
+    elif prefer_loser and unscored:
         # Incomplete markets: treat the missing-odds side as the likelier loser.
         return unscored[0]
     scored.sort(key=lambda item: item[0], reverse=not prefer_loser)
@@ -350,7 +356,7 @@ def project_match_at_hour(
                 prefer_loser=True,
             )
             if len(predecessors) >= 1
-            else schedule_teams[0]
+            else None
         )
         away_team = (
             _pick_branch_team(
@@ -361,10 +367,17 @@ def project_match_at_hour(
                 prefer_loser=True,
             )
             if len(predecessors) >= 2
-            else schedule_teams[1]
+            else None
         )
-        home_team = home_team or schedule_teams[0]
-        away_team = away_team or schedule_teams[1]
+        if home_team is None or away_team is None:
+            return ProjectedMatch(
+                home=ProjectedSide("", None),
+                away=ProjectedSide("", None),
+                current_home_prob=None,
+                projected=False,
+                projection_method="feeder_odds_unavailable",
+                probability_available=False,
+            )
         series_home = str(data.get("schedule_home") or schedule_teams[0])
         series_away = str(data.get("schedule_away") or schedule_teams[1])
         if direct is not None and {home_team, away_team} == {series_home, series_away}:
@@ -387,14 +400,11 @@ def project_match_at_hour(
         )
 
     if predecessors:
-        home_team = (
-            _pick_branch_team(
-                predecessors[0],
-                match_stage=stage,
-                hour_epoch=hour_epoch,
-                stage_odds=stage_odds,
-            )
-            or schedule_teams[0]
+        home_team = _pick_branch_team(
+            predecessors[0],
+            match_stage=stage,
+            hour_epoch=hour_epoch,
+            stage_odds=stage_odds,
         )
         away_team = (
             _pick_branch_team(
@@ -404,9 +414,17 @@ def project_match_at_hour(
                 stage_odds=stage_odds,
             )
             if len(predecessors) >= 2
-            else schedule_teams[1]
+            else None
         )
-        away_team = away_team or schedule_teams[1]
+        if home_team is None or away_team is None:
+            return ProjectedMatch(
+                home=ProjectedSide("", None),
+                away=ProjectedSide("", None),
+                current_home_prob=None,
+                projected=False,
+                projection_method="feeder_odds_unavailable",
+                probability_available=False,
+            )
         method = "stage_conditional"
         projected = not all(_match_resolved(p, hour_epoch) for p in predecessors)
     else:
@@ -542,15 +560,21 @@ def apply_bracket_projection(
             predecessors=feeder_datas,
             stage_odds=stage_odds,
         )
-        home = projected.home.team
-        away = projected.away.team
+        home = projected.home.team or None
+        away = projected.away.team or None
         home_prob = projected.current_home_prob
         away_prob = None if home_prob is None else 1.0 - home_prob
 
         data["home_team"] = home
         data["away_team"] = away
-        data["label"] = f"{home} vs. {away}"
-        data["short_label"] = card_short_label(home, away, home_prob, away_prob)
+        if home and away:
+            data["label"] = f"{home} vs. {away}"
+            data["short_label"] = card_short_label(home, away, home_prob, away_prob)
+        else:
+            data["label"] = str(
+                data.get("schedule_label") or data.get("label") or "TBD vs. TBD"
+            )
+            data["short_label"] = "TBD"
         data["projected"] = projected.projected
         data["projection_method"] = projected.projection_method
         data["probability_available"] = projected.probability_available
@@ -562,8 +586,10 @@ def apply_bracket_projection(
             data["current_home_prob"] = home_prob
         if flag_url_for_team is not None:
             # Prefer caller helper, but always keep two aligned image slots.
-            home_flag = flag_url_for_team(home) or BLANK_FLAG_URL
-            away_flag = flag_url_for_team(away) or BLANK_FLAG_URL
+            home_flag = flag_url_for_team(home) if home else BLANK_FLAG_URL
+            away_flag = flag_url_for_team(away) if away else BLANK_FLAG_URL
+            home_flag = home_flag or BLANK_FLAG_URL
+            away_flag = away_flag or BLANK_FLAG_URL
             data["home_flag"] = home_flag
             data["away_flag"] = away_flag
             data["flag_images"] = f"{home_flag} {away_flag}"

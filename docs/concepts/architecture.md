@@ -10,8 +10,8 @@ logical knowledge graph, exported as `nodes.parquet` / `edges.parquet`.
 
 The compiler framing is an analogy for how stages transform source market
 records into typed graph artifacts. The CLI still exposes a pipeline
-(`reduce` → `infer` → `build` → `validate`); the table below maps those stages
-to compiler phases.
+(`reduce` → `infer` → `build` → `odds-history` → `validate`); the table below
+maps those stages to compiler phases.
 
 ## Compiler phases
 
@@ -69,9 +69,12 @@ flowchart LR
   fragments["event fragments"]
   build["build"]
   export["nodes + edges"]
+  oddsHistory["odds-history"]
+  oddsArtifacts["match + stage odds"]
   closure["closure optional"]
 
   parquet --> reduce --> semantic --> infer --> fragments --> build --> export
+  export --> oddsHistory --> oddsArtifacts
   export --> closure
 ```
 
@@ -88,8 +91,12 @@ flowchart LR
    filters (type checking), apply deterministic logical rules, then export
    parquet / JSON (code generation). Toggle with `--propositions/--no-propositions`
    and `--reasoning/--no-reasoning`.
-4. **validate** — Re-check exported artifacts for consistency.
-5. **closure** — Optionally compute transitive `IMPLIES` edges on demand into
+4. **odds-history** — Build `odds_history.parquet` and
+   `stage_odds_history.parquet` for explorer time scrubbing and projection
+   (also available as a standalone `oddsgraph odds-history` command; included
+   in `oddsgraph run`).
+5. **validate** — Re-check exported artifacts for consistency.
+6. **closure** — Optionally compute transitive `IMPLIES` edges on demand into
    `build/implies_closure.parquet` (not materialized by default).
 
 ## Performance note

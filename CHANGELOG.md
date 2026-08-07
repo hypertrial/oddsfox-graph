@@ -45,6 +45,18 @@ flags and output schema as pre-1.0 and subject to change.
 - Entity resolution coalesces Polymarket slug dates with FIFA kickoff dates
   within ±1 day for the same MATCH team pair, and stamps merged MATCH nodes
   `inference_method=official_bracket` when the schedule fragment binds.
+- `reduce` normalizes real `timestamp` `game_start_time` / `end_time` values
+  instead of crashing with ArrowTypeError on schema-faithful source parquet.
+- Match-result `EXACTLY_ONE` requires both team moneylines and the draw market
+  (draw + a single team moneyline no longer emits a false partition).
+- Explorer projection falls back to feeder advance odds when stage-reach
+  markets are missing, instead of inventing schedule-home favorites.
+- Odds-history / stage-odds-history dedupe repeated `(match,hour)` /
+  `(team,stage,hour)` rows from multi-file input globs.
+- `oddsgraph run --help` and architecture docs include the `odds-history`
+  stage that `run` already executes.
+- `oddsgraph explore --build-dir` is accepted (in addition to the global
+  prefix form).
 - `load_all_fragments` honors `--no-resume` and skips `__verified.json`.
 - Residual `--resume` re-infers when market membership changes (chunk
   manifest), not only when chunk budget settings change.

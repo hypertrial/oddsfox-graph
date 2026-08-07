@@ -44,6 +44,42 @@ def test_match_moneylines_without_draw_skip_exactly_one() -> None:
     assert not any(n.type == NodeType.CONSTRAINT for n in result.fragment.nodes)
 
 
+def test_match_draw_plus_single_team_skips_exactly_one() -> None:
+    """Draw + only one team moneyline is an incomplete winA/winB/draw partition."""
+    brazil_draw = [
+        _market(
+            market_id="10",
+            group_item_title="Brazil",
+            sports_market_type="moneyline",
+            question="Will Brazil win on 2026-06-13?",
+        ),
+        _market(
+            market_id="12",
+            group_item_title="Draw (Brazil vs. Morocco)",
+            sports_market_type="moneyline",
+            question="Will Brazil vs. Morocco end in a draw?",
+        ),
+    ]
+    morocco_draw = [
+        _market(
+            market_id="11",
+            group_item_title="Morocco",
+            sports_market_type="moneyline",
+            question="Will Morocco win on 2026-06-13?",
+        ),
+        _market(
+            market_id="12",
+            group_item_title="Draw (Brazil vs. Morocco)",
+            sports_market_type="moneyline",
+            question="Will Brazil vs. Morocco end in a draw?",
+        ),
+    ]
+    for markets in (brazil_draw, morocco_draw):
+        result = compile_propositions_by_event(markets)["100"]
+        assert not any(e.type == EdgeType.EXACTLY_ONE for e in result.fragment.edges)
+        assert not any(n.type == NodeType.CONSTRAINT for n in result.fragment.nodes)
+
+
 def test_match_moneyline_and_draw_compile_with_exactly_one() -> None:
     markets = [
         _market(

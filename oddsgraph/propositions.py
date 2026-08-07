@@ -196,6 +196,7 @@ def _build_match_propositions(
     partition_outcome_ids: list[str] = []
     partition_evidence: set[str] = set()
     partition_has_draw = False
+    partition_team_wins = 0
     advance_outcome_ids: list[str] = []
     advance_evidence: set[str] = set()
 
@@ -255,6 +256,7 @@ def _build_match_propositions(
             edges.extend(new_edges)
             partition_outcome_ids.append(ids.outcome_id(market.market_id, yes_label))
             partition_evidence.add(market.market_id)
+            partition_team_wins += 1
             continue
 
         if smt == "soccer_team_to_advance":
@@ -297,9 +299,9 @@ def _build_match_propositions(
     if not propositions:
         return EventPropositionResult(fragment=GraphFragment(), fully_covered=False)
 
-    # Soccer match-result EXACTLY_ONE is winA/winB/draw. Without a draw market the
-    # partition is incomplete (a match can still draw), so do not emit it.
-    if partition_has_draw and len(partition_outcome_ids) >= 2:
+    # Soccer match-result EXACTLY_ONE is winA/winB/draw. Without both team
+    # moneylines and a draw market the partition is incomplete.
+    if partition_has_draw and partition_team_wins >= 2:
         constraint_local = ids.constraint_id(
             "exact-match-result", competition_label, match_local
         )

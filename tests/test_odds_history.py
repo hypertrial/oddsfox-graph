@@ -210,3 +210,48 @@ def test_build_odds_history_writes_parquet(tmp_path: Path) -> None:
     ids = set(table.column("match_canonical_id").to_pylist())
     assert ids == {"match:paraguay-vs-france-2026-07-04"}
     assert table.column("winner_team").to_pylist() == ["France", "France"]
+
+
+def test_build_odds_history_dedupes_multi_file_glob(tmp_path: Path) -> None:
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    row = _advance_row(
+        odds_hour_epoch=1_783_200_000,
+        close_odds=0.25,
+        event_finished_at=None,
+        winning_outcome=None,
+    )
+    _write_hourly(data_dir / "a_market_hourly_odds.parquet", [row])
+    _write_hourly(data_dir / "b_market_hourly_odds.parquet", [row])
+
+    settings = Settings()
+    settings.configure_build_dir(tmp_path / "build")
+    settings.configure_data_dir(data_dir)
+    settings.ensure_dirs()
+
+    table = pq.read_table(build_odds_history(settings))
+    assert table.num_rows == 1
+    assert table.column("odds_hour_epoch").to_pylist() == [1_783_200_000]
+    assert table.column("home_prob").to_pylist() == [0.25]
+
+
+def test_build_odds_history_rows_dedupes_duplicate_hours() -> None:
+    fixtures = [
+        KnockoutFixture(
+            fifa_match_id=89,
+            stage_key="round_of_16",
+            home_team="Paraguay",
+            away_team="France",
+            kickoff_at_utc="2026-07-04T21:00:00",
+            match_canonical_id="match:paraguay-vs-france-2026-07-04",
+        )
+    ]
+    rows = build_odds_history_rows(
+        fixtures,
+        [
+            _advance_row(close_odds=0.2, odds_hour_epoch=1_783_200_000, event_finished_at=None),
+            _advance_row(close_odds=0.3, odds_hour_epoch=1_783_200_000, event_finished_at=None),
+        ],
+    )
+    assert len(rows) == 1
+    assert rows[0]["home_prob"] == 0.3

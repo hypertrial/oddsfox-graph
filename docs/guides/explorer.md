@@ -13,14 +13,17 @@ artifacts.
 uv sync --extra explore
 oddsgraph odds-history   # optional; enables projections on the tournament time slider
 oddsgraph explore
+# or: oddsgraph explore --build-dir path/to/build
+# shared globals also work before the subcommand: oddsgraph --build-dir path/to/build explore
 ```
 
 Opens `http://127.0.0.1:8050` by default. Options: `--host`, `--port`, `--debug`,
-plus the shared `--build-dir`.
+and `--build-dir` (also available as a root/global option before the subcommand).
 
 Requires `build/nodes.parquet` and `build/edges.parquet` from a prior
-`oddsgraph build` / `oddsgraph run`. The temporal slider and future-round
-projections additionally need:
+`oddsgraph build` / `oddsgraph run`. The tournament time slider always spans
+official schedule kickoffs. Future-round projections and advance probabilities
+additionally need:
 
 - `build/odds_history.parquet` (direct match advance odds)
 - `build/stage_odds_history.parquet` (team stage-reach / champion odds)
@@ -47,7 +50,9 @@ At the selected hour:
 
 1. Resolved matches keep actual participants and lock the winner to probability 1.
 2. Unresolved future slots pick the most likely team from each feeder branch
-   using `P(reach displayed round)`.
+   using `P(reach displayed round)`. When stage-reach odds are missing, the
+   feeder's direct advance series is used instead; if both are unavailable the
+   slot stays unresolved rather than inventing schedule-home favorites.
 3. Each displayed team’s advance score is
    `P(reach next round) / P(reach displayed round)`, then the pair is
    normalized to 100%. The Final uses `P(win tournament) / P(reach Final)`.

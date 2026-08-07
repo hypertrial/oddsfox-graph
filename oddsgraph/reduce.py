@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -39,6 +40,17 @@ def _semantic_markets_arrow_schema() -> pa.Schema:
         "end_time": "",
     }
     return pa.Table.from_pylist([sample]).schema
+
+
+def _timestamp_for_parquet(value: Any) -> str | None:
+    """Normalize DuckDB/PyArrow timestamps to ISO strings for the string schema."""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        dt = value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+        return dt.isoformat()
+    text = str(value).strip()
+    return text or None
 
 
 def quote_sql_literal(value: str) -> str:
@@ -112,6 +124,8 @@ def _market_row_for_parquet(market: SemanticMarket) -> dict[str, Any]:
         if row.get(key) is None:
             # Keep list typed across batches (None would infer as Arrow null).
             row[key] = []
+    for key in ("game_start_time", "end_time"):
+        row[key] = _timestamp_for_parquet(row.get(key))
     return row
 
 

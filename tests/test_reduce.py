@@ -190,3 +190,30 @@ def test_reduce_batches_tolerate_null_then_list_optional_fields(
     out = reduce_semantic_markets(settings)
     markets = load_semantic_markets(out)
     assert {m.market_id for m in markets} == {"m1", "m2"}
+
+
+def test_reduce_accepts_real_timestamp_game_start_and_end(tmp_path: Path) -> None:
+    """Source schema uses timestamp[us]; reduce must not crash on datetime values."""
+    from datetime import datetime, timezone
+
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    row = _market_row(market_id="m-ts", event_id="evt-ts")
+    row["game_start_time"] = datetime(2026, 6, 13, 19, 0, tzinfo=timezone.utc)
+    row["end_time"] = datetime(2026, 6, 13, 21, 0, tzinfo=timezone.utc)
+    _write_markets(
+        data_dir / "polymarket_wc2026_market_hourly_odds_test.parquet",
+        [row],
+    )
+
+    settings = Settings()
+    settings.configure_build_dir(tmp_path / "build")
+    settings.configure_data_dir(data_dir)
+    settings.ensure_dirs()
+
+    out = reduce_semantic_markets(settings)
+    markets = load_semantic_markets(out)
+    assert len(markets) == 1
+    assert markets[0].market_id == "m-ts"
+    assert markets[0].game_start_time is not None
+    assert "2026-06-13" in str(markets[0].game_start_time)

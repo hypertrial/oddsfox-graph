@@ -32,8 +32,8 @@ dataset.
     duckdb -c "SELECT type, count(*) FROM 'build/nodes.parquet' GROUP BY 1 ORDER BY 2 DESC"
     ```
 
-    Or launch the local explorer (run `odds-history` first if the temporal
-    slider artifact is missing):
+    Or launch the local explorer (run `odds-history` first if projection odds
+    are missing; the time slider itself uses the bundled schedule):
 
     ```bash
     uv sync --extra explore

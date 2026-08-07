@@ -4,7 +4,10 @@ description: Complete oddsgraph CLI reference for reduce, infer, build, validate
 
 # CLI
 
-Entry point: `oddsgraph` (Typer). Shared options apply to every command.
+Entry point: `oddsgraph` (Typer). Shared options apply to every command and
+must appear **before** the subcommand (for example
+`oddsgraph --build-dir build explore`). `-v` / `--verbose` follows the same
+rule. `explore` also accepts `--build-dir` after the subcommand.
 
 ## Global options
 
@@ -81,6 +84,7 @@ Launch a local, read-only graph explorer.
 | `--host` | Bind host (default `127.0.0.1`) |
 | `--port` | Port (default `8050`) |
 | `--debug` | Enable Dash debug / hot-reload |
+| `--build-dir` | Build artifacts directory (also available as a global option) |
 
 Requires `--extra explore`.
 
