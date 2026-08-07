@@ -195,8 +195,8 @@ def test_apply_time_slider_locks_winner(tmp_path: Path) -> None:
     )
 
     elements, *_ = load_view(settings, 0.0, "", hour_epoch=100)
-    mid = apply_time_slider(elements, 150, 0.0, "")
-    locked = apply_time_slider(elements, 250, 0.0, "")
+    mid = apply_time_slider(elements, 150, 0.0, "", settings=settings)
+    locked = apply_time_slider(elements, 250, 0.0, "", settings=settings)
     by_mid = {
         el["data"]["id"]: el["data"]
         for el in mid[0]

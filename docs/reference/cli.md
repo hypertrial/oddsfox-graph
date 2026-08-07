@@ -54,8 +54,12 @@ Resolve entities, compile propositions, apply logical rules, and export artifact
 
 ## `oddsgraph odds-history`
 
-Build hourly knockout win-probability history from Polymarket
-`soccer_team_to_advance` markets into `build/odds_history.parquet`.
+Build hourly probability histories for the explorer:
+
+- `build/odds_history.parquet` from Polymarket `soccer_team_to_advance`
+  markets (direct knockout matchups)
+- `build/stage_odds_history.parquet` from nation/team reaches-stage markets
+  plus World Cup Winner markets
 
 No command-specific flags. Reads the same hourly-odds parquet as `reduce`.
 

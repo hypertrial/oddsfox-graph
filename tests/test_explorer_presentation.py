@@ -251,6 +251,8 @@ def test_bracket_stylesheet_and_layout_contract() -> None:
     node_style = next(rule["style"] for rule in styles if rule["selector"] == "node")
     assert node_style["shape"] == "round-rectangle"
     assert node_style["label"] == "data(short_label)"
+    assert node_style["background-image"] == "data(flag_images)"
+    assert node_style["width"] >= 200
     header_style = next(
         rule["style"] for rule in styles if rule["selector"] == ".stage-header"
     )
@@ -299,8 +301,12 @@ def test_apply_time_slice_stamps_current_home_prob() -> None:
             "data": {
                 "id": "match:a",
                 "type": "MATCH",
+                "stage": "Round of 32",
+                "label": "Brazil vs. France",
                 "home_team": "Brazil",
                 "away_team": "France",
+                "schedule_home": "Brazil",
+                "schedule_away": "France",
                 "match_end_epoch": 200,
                 "winner_team": "France",
                 "odds_series": [{"h": 100, "home": 0.3, "away": 0.7}],
@@ -310,6 +316,7 @@ def test_apply_time_slice_stamps_current_home_prob() -> None:
     ]
     stamped = apply_time_slice(elements, 100)
     assert stamped[0]["data"]["current_home_prob"] == 0.3
+    assert "30%" in stamped[0]["data"]["short_label"]
     locked = apply_time_slice(elements, 300)
     assert locked[0]["data"]["current_home_prob"] == 0.0
     assert "2026" not in format_hour_label(None)

@@ -9,7 +9,12 @@ from dash import Dash, dcc, html
 import dash_cytoscape as cyto
 
 from oddsgraph.config import Settings
-from oddsgraph.explorer.data import bracket_elements, graph_counts, odds_time_bounds
+from oddsgraph.explorer.data import (
+    bracket_elements,
+    graph_counts,
+    odds_time_bounds,
+    stage_odds_by_team,
+)
 from oddsgraph.explorer.presentation import (
     BRACKET_COLUMN_HEADERS,
     apply_time_slice,
@@ -56,7 +61,11 @@ def build_app(settings: Settings) -> Dash:
         slider_value = min_hour
         marks = _time_slider_marks(min_hour, max_hour)
 
-    initial_elements = apply_time_slice(initial.to_elements(), slider_value)
+    initial_elements = apply_time_slice(
+        initial.to_elements(),
+        slider_value,
+        stage_odds=stage_odds_by_team(settings),
+    )
 
     app = Dash(
         __name__,
@@ -155,9 +164,11 @@ def build_app(settings: Settings) -> Dash:
                                         },
                                     ),
                                     html.P(
-                                        "Hourly team-to-advance probability colors "
-                                        "each match (green = home favored, red = away). "
-                                        "After kickoff ends, the winner locks to 1.",
+                                        "Each card shows projected participants and the "
+                                        "probability each advances from that round "
+                                        "(normalized from stage markets). Green tint = "
+                                        "top team favored; dashed borders mark projected "
+                                        "future matchups. Resolved games lock to the winner.",
                                         className="panel-hint",
                                     ),
                                 ],
@@ -251,7 +262,7 @@ def build_app(settings: Settings) -> Dash:
                     ),
                     html.Aside(
                         id="inspector-rail",
-                        className="explorer-inspector is-open",
+                        className="explorer-inspector",
                         children=[
                             html.H2("Inspector", className="inspector-title"),
                             html.Div(
@@ -287,7 +298,7 @@ def build_app(settings: Settings) -> Dash:
             dcc.Store(id="selected-node-id", data=None),
             dcc.Store(id="selected-edge-id", data=None),
             dcc.Store(id="controls-open", data=True),
-            dcc.Store(id="inspector-open", data=True),
+            dcc.Store(id="inspector-open", data=False),
         ],
     )
 

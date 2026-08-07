@@ -7,7 +7,7 @@ from typing import Any
 from dash import Output, no_update
 
 from oddsgraph.config import Settings
-from oddsgraph.explorer.data import bracket_elements
+from oddsgraph.explorer.data import bracket_elements, stage_odds_by_team
 from oddsgraph.explorer.filters import (
     apply_filters,
     clear_interaction_classes,
@@ -68,7 +68,11 @@ def load_view(
 ) -> CanvasMutation:
     """Reload the knockout bracket view."""
     slice_ = bracket_elements(settings)
-    elements = apply_time_slice(slice_.to_elements(), hour_epoch)
+    elements = apply_time_slice(
+        slice_.to_elements(),
+        hour_epoch,
+        stage_odds=stage_odds_by_team(settings),
+    )
     status = "Reset knockout bracket view." if reset else "Loaded knockout bracket view."
     return (
         apply_filters(elements, _BRACKET_TYPES, min_confidence, inference_method),
@@ -84,9 +88,12 @@ def apply_time_slider(
     hour_epoch: int | None,
     min_confidence: float,
     inference_method: str,
+    *,
+    settings: Settings | None = None,
 ) -> CanvasMutation:
-    """Update MATCH ``current_home_prob`` for the selected hour."""
-    stamped = apply_time_slice(elements or [], hour_epoch)
+    """Update projected teams and advance probabilities for the selected hour."""
+    stage_odds = stage_odds_by_team(settings) if settings is not None else {}
+    stamped = apply_time_slice(elements or [], hour_epoch, stage_odds=stage_odds)
     return (
         apply_filters(stamped, _BRACKET_TYPES, min_confidence, inference_method),
         no_update,

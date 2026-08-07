@@ -14,7 +14,7 @@ OddsFox Graph exposes a Typer CLI named `oddsgraph`. Every command shares
 | `oddsgraph reduce` | Reduce hourly odds parquet to semantic market records |
 | `oddsgraph infer` | Infer graph fragments per event (deterministic + residual LLM) |
 | `oddsgraph build` | Resolve entities, compile propositions, apply rules, export |
-| `oddsgraph odds-history` | Build hourly knockout win-probability history |
+| `oddsgraph odds-history` | Build match + stage probability histories for the explorer |
 | `oddsgraph validate` | Validate exported artifacts |
 | `oddsgraph closure` | On-demand transitive `IMPLIES` closure |
 | `oddsgraph explore` | Local Dash explorer over exported parquet |

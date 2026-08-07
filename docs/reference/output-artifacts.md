@@ -84,6 +84,24 @@ markets.
 | `match_end_epoch` | int64 \| null | Match finished epoch when known; null for live series |
 | `winner_team` | string \| null | Locked winner when finished/resolved; null while live |
 
+## `stage_odds_history.parquet`
+
+Optional sibling export from the same `oddsgraph odds-history` command.
+Hourly team probabilities for reaching knockout stages and winning the
+tournament (World Cup Winner markets, stored as stage label `Champion`).
+
+| Column | Type | Description |
+| --- | --- | --- |
+| `team` | string | Canonical team display name |
+| `stage_label` | string | Reach stage (`Round of 32` … `Final`) or `Champion` |
+| `odds_hour_epoch` | int64 | Hour bucket start (UTC epoch seconds) |
+| `reach_prob` | float | Probability the team reaches that stage / wins |
+| `market_id` | string | Source Polymarket market id |
+
+The explorer uses these series to project unresolved future matchups and to
+estimate conditional advance probabilities when direct head-to-head advance
+markets are unavailable.
+
 ## `ontology.json`
 
 Dump of node types, edge types, allowed patterns, progression edge types, and

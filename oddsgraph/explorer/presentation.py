@@ -34,20 +34,20 @@ BRACKET_COLUMN_HEADERS: tuple[tuple[int, str], ...] = (
 STAGE_HEADER_CLASS = "stage-header"
 STAGE_HEADER_TYPE = "STAGE_HEADER"
 
-COLUMN_X_SPACING = 260
-ROW_Y_SPACING = 72
-BRACKET_ORIGIN_X = 80
+COLUMN_X_SPACING = 300
+ROW_Y_SPACING = 86
+BRACKET_ORIGIN_X = 100
 # Match cards sit below column headers.
-BRACKET_ORIGIN_Y = 72
-BRACKET_HEADER_Y = 12
+BRACKET_ORIGIN_Y = 80
+BRACKET_HEADER_Y = 16
 # Offset Third Place below Final in the terminal column.
-THIRD_PLACE_Y_OFFSET = 160
+THIRD_PLACE_Y_OFFSET = 180
 
 _FIFA_ALIAS_RE = re.compile(r"^fifa-match-(\d+)$")
 _VS_SPLIT_RE = re.compile(r"\s+vs\.?\s+", re.IGNORECASE)
 
 # Interaction / visibility classes preserved independently of type classes.
-PRESERVED_CLASSES = frozenset({"hidden", "path-active", "path-muted", "hovered"})
+PRESERVED_CLASSES = frozenset({"hidden", "path-active", "path-muted"})
 
 
 def short_match_label(label: str) -> str:
@@ -113,24 +113,19 @@ def home_prob_at_hour(
 def apply_time_slice(
     elements: list[dict[str, Any]],
     hour_epoch: int | None,
+    *,
+    stage_odds: dict[str, dict[str, list[dict[str, Any]]]] | None = None,
 ) -> list[dict[str, Any]]:
-    """Stamp ``current_home_prob`` onto MATCH nodes from their odds series."""
-    updated: list[dict[str, Any]] = []
-    for el in elements:
-        if is_stage_header(el) or is_edge(el):
-            updated.append(el)
-            continue
-        data = dict(el.get("data") or {})
-        if str(data.get("type") or "") != "MATCH":
-            updated.append(el)
-            continue
-        prob = home_prob_at_hour(data, hour_epoch)
-        if prob is None:
-            data.pop("current_home_prob", None)
-        else:
-            data["current_home_prob"] = prob
-        updated.append({**el, "data": data})
-    return updated
+    """Project teams/probs at ``hour_epoch`` and stamp card presentation fields."""
+    from oddsgraph.bracket_projection import apply_bracket_projection
+    from oddsgraph.flags import flag_url_for_team
+
+    return apply_bracket_projection(
+        elements,
+        hour_epoch,
+        stage_odds or {},
+        flag_url_for_team=flag_url_for_team,
+    )
 
 
 def format_hour_label(hour_epoch: int | None) -> str:
@@ -503,20 +498,36 @@ def bracket_stylesheet() -> list[dict[str, Any]]:
                 "text-valign": "center",
                 "text-halign": "center",
                 "text-wrap": "wrap",
-                "text-max-width": 140,
+                "text-max-width": 150,
                 "font-size": "11px",
                 "font-weight": 600,
-                "color": "#1a1d23",
-                "background-color": "#fff7ed",
+                "color": "#0f172a",
+                "background-color": "#ffffff",
                 "border-width": 1.5,
-                "border-color": "#f0a56b",
+                "border-color": "#cbd5e1",
                 "shape": "round-rectangle",
-                "width": 150,
-                "height": 48,
-                "padding": "6px",
+                "width": 210,
+                "height": 64,
+                "padding": "8px",
                 "min-zoomed-font-size": 8,
                 "transition-property": "opacity, border-width, background-color",
                 "transition-duration": "150ms",
+                "background-image": "data(flag_images)",
+                "background-fit": "none none",
+                "background-clip": "none none",
+                "background-repeat": "no-repeat no-repeat",
+                "background-width": "22px 22px",
+                "background-height": "16px 16px",
+                "background-position-x": "10px 178px",
+                "background-position-y": "14px 34px",
+                "text-margin-x": 0,
+                "text-margin-y": 0,
+                "overlay-padding": 4,
+                "shadow-blur": 8,
+                "shadow-color": "#0f172a",
+                "shadow-opacity": 0.08,
+                "shadow-offset-x": 0,
+                "shadow-offset-y": 2,
             },
         },
         {
@@ -525,22 +536,22 @@ def bracket_stylesheet() -> list[dict[str, Any]]:
                 "label": "",
                 "curve-style": "taxi",
                 "taxi-direction": "horizontal",
-                "taxi-turn": 24,
+                "taxi-turn": 28,
                 "target-arrow-shape": "triangle",
-                "arrow-scale": 0.7,
-                "width": 1.75,
-                "line-color": "#9aa3ad",
-                "target-arrow-color": "#9aa3ad",
-                "opacity": 0.9,
+                "arrow-scale": 0.75,
+                "width": 2,
+                "line-color": "#94a3b8",
+                "target-arrow-color": "#94a3b8",
+                "opacity": 0.85,
             },
         },
         {
             "selector": ":selected",
             "style": {
                 "border-width": 3,
-                "border-color": "#111827",
-                "line-color": "#111827",
-                "target-arrow-color": "#111827",
+                "border-color": "#0f766e",
+                "line-color": "#0f766e",
+                "target-arrow-color": "#0f766e",
                 "z-index": 999,
             },
         },
@@ -550,13 +561,13 @@ def bracket_stylesheet() -> list[dict[str, Any]]:
         },
         {
             "selector": ".path-muted",
-            "style": {"opacity": 0.22},
+            "style": {"opacity": 0.18},
         },
         {
             "selector": ".path-active",
             "style": {
                 "opacity": 1,
-                "border-width": 2.5,
+                "border-width": 2.75,
                 "border-color": "#0f766e",
                 "line-color": "#0f766e",
                 "target-arrow-color": "#0f766e",
@@ -567,7 +578,7 @@ def bracket_stylesheet() -> list[dict[str, Any]]:
         {
             "selector": "node.path-active",
             "style": {
-                "background-color": "#ecfdf5",
+                "background-color": "#f0fdfa",
                 "border-color": "#0f766e",
             },
         },
@@ -575,62 +586,72 @@ def bracket_stylesheet() -> list[dict[str, Any]]:
             "selector": f".{STAGE_HEADER_CLASS}",
             "style": {
                 "label": "data(label)",
-                "shape": "rectangle",
-                "background-opacity": 0,
+                "shape": "round-rectangle",
+                "background-color": "#f8fafc",
+                "background-opacity": 1,
                 "border-width": 0,
-                "width": 168,
-                "height": 28,
+                "width": 190,
+                "height": 30,
                 "font-size": "12px",
                 "font-weight": 700,
-                "color": "#64748b",
+                "color": "#475569",
                 "text-valign": "center",
                 "text-halign": "center",
                 "text-wrap": "wrap",
-                "text-max-width": 168,
+                "text-max-width": 180,
                 "padding": "0px",
                 "events": "no",
+                "background-image": "none",
+                "shadow-opacity": 0,
             },
         },
         # Stage accent borders.
         {
             "selector": 'node[stage = "Round of 32"]',
-            "style": {"border-color": "#fb923c"},
+            "style": {"border-color": "#38bdf8"},
         },
         {
             "selector": 'node[stage = "Round of 16"]',
-            "style": {"border-color": "#f97316"},
+            "style": {"border-color": "#0ea5e9"},
         },
         {
             "selector": 'node[stage = "Quarterfinals"]',
-            "style": {"border-color": "#ea580c"},
+            "style": {"border-color": "#0284c7"},
         },
         {
             "selector": 'node[stage = "Semifinals"]',
-            "style": {"border-color": "#c2410c"},
+            "style": {"border-color": "#0369a1"},
         },
         {
             "selector": 'node[stage = "Final"]',
             "style": {
-                "border-color": "#9a3412",
+                "border-color": "#0f766e",
                 "border-width": 2.5,
-                "width": 160,
-                "height": 52,
+                "width": 220,
+                "height": 68,
                 "font-size": "12px",
+                "background-position-x": "10px 188px",
             },
         },
         {
             "selector": 'node[stage = "Third Place"]',
             "style": {
-                "border-color": "#78716c",
+                "border-color": "#64748b",
             },
         },
         {
-            # Away-favored (red) → home-favored (green). Stage borders stay orthogonal.
+            # Subtle away-favored (rose) → home-favored (mint). Numbers carry the signal.
             "selector": "node[current_home_prob]",
             "style": {
                 "background-color": (
-                    "mapData(current_home_prob, 0, 1, #fecaca, #bbf7d0)"
+                    "mapData(current_home_prob, 0, 1, #fff1f2, #ecfdf5)"
                 ),
+            },
+        },
+        {
+            "selector": "node[?projected]",
+            "style": {
+                "border-style": "dashed",
             },
         },
     ]

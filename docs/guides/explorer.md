@@ -11,7 +11,7 @@ artifacts.
 
 ```bash
 uv sync --extra explore
-oddsgraph odds-history   # optional; enables the Knockout time slider
+oddsgraph odds-history   # optional; enables the Knockout time slider + projections
 oddsgraph explore
 ```
 
@@ -19,9 +19,13 @@ Opens `http://127.0.0.1:8050` by default. Options: `--host`, `--port`, `--debug`
 plus the shared `--build-dir`.
 
 Requires `build/nodes.parquet` and `build/edges.parquet` from a prior
-`oddsgraph build` / `oddsgraph run`. The temporal color slider additionally
-needs `build/odds_history.parquet` from `oddsgraph odds-history` (also
-produced by `oddsgraph run`).
+`oddsgraph build` / `oddsgraph run`. The temporal slider and future-round
+projections additionally need:
+
+- `build/odds_history.parquet` (direct match advance odds)
+- `build/stage_odds_history.parquet` (team stage-reach / champion odds)
+
+Both are produced by `oddsgraph odds-history` and by `oddsgraph run`.
 
 ## Default view
 
@@ -29,21 +33,35 @@ The **knockout bracket** is a classic left-to-right tournament:
 
 - Exactly 32 `MATCH` cards connected by `ADVANCES_TO` edges
 - Round of 32 → Round of 16 → Quarterfinals → Semifinals → Final / Third Place
+- Each card shows **country flags**, team names, and **advance probabilities**
 - Non-interactive column headers label each stage across the canvas
 - Deterministic `preset` layout (not a force-directed hairball)
 - Orthogonal taxi edges without repeated `ADVANCES_TO` labels
-- Click a match to highlight its path through the DAG and inspect features
-- Hourly **Knockout time** slider colors each match by team-to-advance
-  probability (green = home favored, red = away). After a finished/resolved
-  match, the winner locks to probability 1; live series keep market odds
-  (no lock from the last observed hour alone)
+- Click a match to open the inspector and highlight its path through the DAG
+- Hourly **Knockout time** slider reprojects unresolved future matchups
+
+### Projection rules
+
+At the selected hour:
+
+1. Resolved matches keep actual participants and lock the winner to probability 1.
+2. Unresolved future slots pick the most likely team from each feeder branch
+   using `P(reach displayed round)`.
+3. Each displayed team’s advance score is
+   `P(reach next round) / P(reach displayed round)`, then the pair is
+   normalized to 100%. The Final uses `P(win tournament) / P(reach Final)`.
+4. Third Place projects the most likely semifinal loser from each branch; it
+   uses direct matchup odds when available, otherwise shows an explicit
+   unavailable probability (`—`) rather than inventing 50/50 odds.
+5. Dashed borders mark projected (not yet locked) matchups. Soft mint/rose
+   tints remain a secondary cue; the numeric percentages are the primary signal.
 
 ### Progressive controls
 
 - Primary: Knockout time slider, Reset
 - Advanced (collapsed by default): confidence and inference-method filters
-- Hover a card for a compact preview; the inspector shows identity, provenance,
-  and evidence (long market-id lists stay collapsed)
+- Hover a card for a compact preview; the inspector opens on selection and
+  shows identity, provenance, and evidence
 
 Use the **Controls** / **Inspector** toggles on any viewport width so the
 canvas can reclaim space when a sidebar is collapsed.
@@ -53,3 +71,4 @@ canvas can reclaim space when a sidebar is collapsed.
 - [Analysts](../audiences/analysts.md)
 - [Output artifacts](../reference/output-artifacts.md)
 - [Running the pipeline](running-the-pipeline.md)
+- [Known limitations](../concepts/limitations.md)

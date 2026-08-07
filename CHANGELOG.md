@@ -15,8 +15,22 @@ flags and output schema as pre-1.0 and subject to change.
 
 ## [Unreleased]
 
+### Added
+
+- `stage_odds_history.parquet` from `oddsgraph odds-history` / `run`: hourly
+  team stage-reach and World Cup Winner probabilities for explorer projection.
+- Explorer projects unresolved future matchups from feeder-branch leaders,
+  shows numeric advance probabilities on every card, and renders local SVG
+  country flags on both sides of each match node.
+- Modernized explorer shell: denser spacing, contextual inspector (opens on
+  selection), softer probability tints, dashed borders for projected cards.
+
 ### Fixed
 
+- Explorer projection maps feeder branches onto schedule home/away slots
+  (not alphabetical feeder labels) and ranks Third Place candidates by
+  `P(reach Final)`.
+- Missing flag assets no longer shift the opposite flag into the wrong slot.
 - Odds-history no longer treats the last observed hour of a live
   `soccer_team_to_advance` series as match end / winner lock.
 - Explorer time scrub returns no probability before the first odds point

@@ -165,6 +165,7 @@ def register_callbacks(app: Dash, settings: Settings) -> None:
             hour_epoch,
             float(min_confidence or 0.0),
             inference_method or "",
+            settings=settings,
         )
 
     @app.callback(
@@ -198,6 +199,8 @@ def register_callbacks(app: Dash, settings: Settings) -> None:
         Output("selected-node-id", "data"),
         Output("selected-edge-id", "data"),
         Output("remove-button", "disabled"),
+        Output("inspector-rail", "className", allow_duplicate=True),
+        Output("inspector-open", "data", allow_duplicate=True),
         Input("graph-cyto", "tapNodeData"),
         Input("graph-cyto", "tapEdgeData"),
         prevent_initial_call=True,
@@ -205,10 +208,11 @@ def register_callbacks(app: Dash, settings: Settings) -> None:
     def inspect_selection(
         node_data: dict[str, Any] | None,
         edge_data: dict[str, Any] | None,
-    ) -> tuple[Any, Any, Any, bool]:
+    ) -> tuple[Any, Any, Any, bool, str, bool]:
         if not callback_context.triggered:
             raise PreventUpdate
         triggered = callback_context.triggered[0]["prop_id"]
+        open_classes = "explorer-inspector is-open"
 
         if triggered.startswith("graph-cyto.tapNodeData") and node_data:
             node_id = node_data.get("id")
@@ -220,12 +224,16 @@ def register_callbacks(app: Dash, settings: Settings) -> None:
                     node_id,
                     None,
                     False,
+                    open_classes,
+                    True,
                 )
             return (
                 _inspector_sheet("Node", row, stage=stage),
                 node_id,
                 None,
                 False,
+                open_classes,
+                True,
             )
 
         if triggered.startswith("graph-cyto.tapEdgeData") and edge_data:
@@ -244,7 +252,16 @@ def register_callbacks(app: Dash, settings: Settings) -> None:
                     None,
                     edge_id,
                     True,
+                    open_classes,
+                    True,
                 )
-            return _inspector_sheet("Edge", row), None, edge_id, True
+            return (
+                _inspector_sheet("Edge", row),
+                None,
+                edge_id,
+                True,
+                open_classes,
+                True,
+            )
 
         raise PreventUpdate

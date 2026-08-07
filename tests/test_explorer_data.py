@@ -425,7 +425,13 @@ def test_bracket_elements_on_real_build_if_present() -> None:
         with_odds = [n for n in matches if n["data"].get("odds_series")]
         assert len(with_odds) == 32
         assert all("current_home_prob" in n["data"] for n in with_odds)
-        assert all(n["data"].get("winner_team") for n in with_odds)
+        locked = [
+            n for n in with_odds if n["data"].get("match_end_epoch") is not None
+        ]
+        assert locked
+        assert all(n["data"].get("winner_team") for n in locked)
+        assert all(n["data"].get("home_flag") for n in with_odds)
+        assert all(n["data"].get("away_flag") for n in with_odds)
     graph = rx.PyDiGraph()
     index: dict[str, int] = {}
     for node in matches:

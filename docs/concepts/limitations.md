@@ -40,6 +40,16 @@ WC2026 rule registry — not from LLM judgment. Transitive `IMPLIES` closure is
 `edges.parquet` by default. See [Logical layer](../guides/logical-layer.md)
 for the registry table and flag interactions.
 
+## Explorer future-round projection is a heuristic
+
+Unresolved future match cards are populated by picking the most likely team
+from each feeder branch (`P(reach displayed round)`), then normalizing
+conditional stage ratios `P(reach next) / P(reach current)` for the displayed
+pair. That is **not** a coherent joint bracket model: independence is assumed,
+Third Place has no dedicated reach market, and missing/zero stage odds mark
+probabilities unavailable rather than inventing 50/50. Prefer resolved
+match results and direct `soccer_team_to_advance` series when both exist.
+
 ## Scope is WC2026 / Polymarket only
 
 Deterministic templates, team alias/code tables, proposition predicates, and

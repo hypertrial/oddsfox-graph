@@ -32,8 +32,8 @@ def apply_filters(
     An empty ``visible_types`` list hides all nodes (and therefore all edges).
     ``None`` is treated the same as an empty list.
 
-    Preserves non-hidden interaction classes (``path-active``, ``path-muted``,
-    ``hovered``) across filter passes.
+    Preserves non-hidden interaction classes (``path-active``, ``path-muted``)
+    across filter passes.
     """
     visible = set(visible_types or [])
     method = (inference_method or "").strip()
@@ -96,7 +96,7 @@ def clear_interaction_classes(
     *,
     keep_hidden: bool = True,
 ) -> list[dict[str, Any]]:
-    """Strip path/hover classes; optionally keep ``hidden``."""
+    """Strip path interaction classes; optionally keep ``hidden``."""
     result: list[dict[str, Any]] = []
     for el in elements:
         semantic, preserved = split_classes(el.get("classes"))

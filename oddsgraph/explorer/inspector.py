@@ -141,10 +141,16 @@ def _hover_card_children(data: dict[str, Any] | None) -> tuple[Any, dict[str, st
         return [], {"display": "none"}
     label = data.get("label") or data.get("id") or ""
     stage = data.get("stage") or data.get("type") or ""
-    conf = data.get("confidence")
+    home_prob = data.get("home_prob_label")
+    away_prob = data.get("away_prob_label")
+    method = data.get("projection_method")
     meta_bits = [str(stage)] if stage else []
-    if conf is not None:
-        meta_bits.append(f"confidence {conf}")
+    if home_prob or away_prob:
+        meta_bits.append(f"{home_prob or '—'} / {away_prob or '—'}")
+    if data.get("projected"):
+        meta_bits.append("projected")
+    elif method == "resolved":
+        meta_bits.append("resolved")
     return (
         [
             html.P(str(label), className="hover-card-title"),

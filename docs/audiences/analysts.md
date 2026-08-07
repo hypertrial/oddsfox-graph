@@ -20,6 +20,7 @@ dataset.
     build/nodes.parquet
     build/edges.parquet
     build/odds_history.parquet
+    build/stage_odds_history.parquet
     build/rejected_edges.parquet
     build/ontology.json
     build/inference_report.json
@@ -52,9 +53,9 @@ dataset.
 ## Knockout bracket explorer
 
 The explorer is a left-to-right knockout bracket (32 `MATCH` cards, stage
-column headers, `ADVANCES_TO` edges, path highlight on click) with an hourly
-time slider over Polymarket `soccer_team_to_advance` probabilities when
-`build/odds_history.parquet` is present.
+column headers, `ADVANCES_TO` edges, path highlight on click) with projected
+future matchups and advance probabilities when `build/odds_history.parquet`
+and `build/stage_odds_history.parquet` are present.
 
 Compiled market outcomes still bridge into the exported graph via `REFERS_TO`
 (and related logical edges) when the proposition compiler covers the market
