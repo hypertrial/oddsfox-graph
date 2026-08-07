@@ -163,6 +163,48 @@ def test_render_match_card_shows_odds_tick_delta() -> None:
     assert "8 points" in text
 
 
+def test_render_match_card_embeds_sparkline_and_clickable_id() -> None:
+    el = _match("m1", "Round of 32", fifa=1, home_prob=0.6)
+    el["data"]["home_sparkline"] = [(100, 0.5), (200, 0.6)]
+    el["data"]["away_sparkline"] = [(100, 0.5), (200, 0.4)]
+    card = render_match_card(el, compact=True, surface="desktop")
+    text = str(card)
+    assert "match-team-sparkline" in text
+    assert "polyline" in text or "match-team-sparkline-svg" in text
+    assert card.id == {
+        "type": "match-card",
+        "match_id": "m1",
+        "surface": "desktop",
+    }
+    assert "is-clickable" in card.className
+
+    # Without a surface (dual-tree bootstrap) cards stay non-clickable.
+    bootstrap = render_match_card(el, compact=True)
+    assert getattr(bootstrap, "id", None) in (None, {})
+    assert "is-clickable" not in bootstrap.className
+
+
+def test_render_match_card_ripple_target_class() -> None:
+    el = _match("m1", "Round of 16", fifa=10, home_prob=0.55)
+    text = str(render_match_card(el, compact=True, ripple_target=True))
+    assert "is-ripple-target" in text
+
+
+def test_render_connector_emits_ripple_overlay_only_for_active_pairs() -> None:
+    from oddsgraph.explorer.tree_render import render_connector
+
+    quiet = str(render_connector(4, "ltr"))
+    assert "bracket-connector-ripple" not in quiet
+
+    active = str(
+        render_connector(4, "ltr", active_pair_indices=frozenset({0}))
+    )
+    assert "bracket-connector-ripple" in active
+    assert "has-ripple" in active
+    # Only one of the two pair paths should be overlaid.
+    assert active.count("bracket-connector-ripple") == 1
+
+
 def test_render_match_card_in_tree_smoke() -> None:
     elements = [
         _match("l-sf", "Semifinals", fifa=30),

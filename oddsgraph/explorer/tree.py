@@ -19,6 +19,13 @@ RIGHT_ROUNDS_IN_TO_OUT: tuple[tuple[str, str, str], ...] = tuple(
     reversed(LEFT_ROUNDS_OUT_TO_IN)
 )
 
+# Feeder round → next round for one-hop ripple animation.
+_RIPPLE_ROUND_HOPS: tuple[tuple[str, str], ...] = (
+    ("r32", "r16"),
+    ("r16", "qf"),
+    ("qf", "sf"),
+)
+
 
 @dataclass(frozen=True)
 class BracketHalf:
@@ -247,3 +254,101 @@ def build_knockout_tree(elements: list[dict[str, Any]]) -> BracketTree:
         final=final_el,
         third_place=third_el,
     )
+
+
+@dataclass(frozen=True)
+class RippleState:
+    """One-hop ripple animation targets for just-finished matches.
+
+    ``active_pairs`` keys are ``"{half}:{round_id}"`` (e.g. ``"left:r32"``,
+    ``"right:sf"``) mapping to feeder-pair indices whose connector overlay
+    should animate. ``target_ids`` are downstream MATCH ids to highlight.
+    """
+
+    active_pairs: dict[str, frozenset[int]]
+    target_ids: frozenset[str]
+
+
+def _match_just_finished(el: dict[str, Any] | None) -> bool:
+    if not el:
+        return False
+    return bool(_node_data(el).get("just_finished"))
+
+
+def _ripple_half(
+    half: BracketHalf,
+    *,
+    half_key: str,
+) -> tuple[dict[str, frozenset[int]], set[str]]:
+    """Compute feeder-pair ripples within one bracket half."""
+    active: dict[str, frozenset[int]] = {}
+    targets: set[str] = set()
+    for feeder_round, next_round in _RIPPLE_ROUND_HOPS:
+        feeders = half.by_round(feeder_round)
+        next_matches = half.by_round(next_round)
+        if not feeders or not next_matches:
+            continue
+        pair_indices: set[int] = set()
+        for pair_index in range(len(feeders) // 2):
+            top = feeders[pair_index * 2] if pair_index * 2 < len(feeders) else None
+            bottom = (
+                feeders[pair_index * 2 + 1]
+                if pair_index * 2 + 1 < len(feeders)
+                else None
+            )
+            if not (_match_just_finished(top) or _match_just_finished(bottom)):
+                continue
+            pair_indices.add(pair_index)
+            if pair_index < len(next_matches):
+                target_id = _node_id(next_matches[pair_index])
+                if target_id:
+                    targets.add(target_id)
+        if pair_indices:
+            active[f"{half_key}:{feeder_round}"] = frozenset(pair_indices)
+    return active, targets
+
+
+def compute_ripple(tree: BracketTree) -> RippleState:
+    """Return one-hop ripple pairs/targets from just-finished matches.
+
+    Animates only the immediate next-round slot(s) a just-finished match
+    feeds. Semifinal finishes also highlight Final and Third Place cards.
+    """
+    active: dict[str, frozenset[int]] = {}
+    targets: set[str] = set()
+
+    for half, half_key in ((tree.left, "left"), (tree.right, "right")):
+        half_active, half_targets = _ripple_half(half, half_key=half_key)
+        active.update(half_active)
+        targets.update(half_targets)
+
+    # Semi → Final / Third Place hop.
+    left_sf = tree.left.sf[0] if tree.left.sf else None
+    right_sf = tree.right.sf[0] if tree.right.sf else None
+    left_done = _match_just_finished(left_sf)
+    right_done = _match_just_finished(right_sf)
+    if left_done:
+        active["left:sf"] = frozenset({0})
+    if right_done:
+        active["right:sf"] = frozenset({0})
+    if left_done or right_done:
+        final_id = _node_id(tree.final) if tree.final else None
+        if final_id:
+            targets.add(final_id)
+        # Third Place shares the same two Semifinal feeders (loser slots).
+        third_id = _node_id(tree.third_place) if tree.third_place else None
+        if third_id:
+            targets.add(third_id)
+
+    return RippleState(active_pairs=active, target_ids=frozenset(targets))
+
+
+__all__ = [
+    "BracketHalf",
+    "BracketTree",
+    "LEFT_ROUNDS_OUT_TO_IN",
+    "RIGHT_ROUNDS_IN_TO_OUT",
+    "RippleState",
+    "build_knockout_tree",
+    "compute_ripple",
+]

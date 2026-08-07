@@ -277,8 +277,6 @@ def test_bracket_elements_enrich_stage_labels(tmp_path: Path) -> None:
     assert final["data"]["stage"] == "Final"
     assert r16["data"]["stage_rank"] == 2
     assert final["data"]["stage_rank"] == 5
-    assert r16["data"]["short_label"] == "Brazil\nFrance"
-    assert final["data"]["short_label"] == "Brazil\nSpain"
     assert "position" not in r16
     assert "position" not in final
 
@@ -385,7 +383,6 @@ def test_bracket_elements_on_real_build_if_present() -> None:
     assert {n["data"]["type"] for n in slice_.nodes} == {"MATCH"}
     assert {e["data"]["edge_type"] for e in slice_.edges} == {"ADVANCES_TO"}
     assert all(n["data"].get("stage") for n in matches)
-    assert all(n["data"].get("short_label") for n in matches)
     assert all("position" not in n for n in slice_.nodes)
 
     stages = {n["data"]["stage"] for n in matches}

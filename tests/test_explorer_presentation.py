@@ -244,7 +244,6 @@ def test_apply_time_slice_stamps_current_home_prob() -> None:
     assert stamped[0]["data"]["current_home_prob"] == 0.3
     assert stamped[0]["data"]["resolved"] is False
     assert stamped[0]["data"]["just_finished"] is False
-    assert "30%" in stamped[0]["data"]["short_label"]
     at_full_time = apply_time_slice(elements, 200)
     assert at_full_time[0]["data"]["resolved"] is True
     assert at_full_time[0]["data"]["just_finished"] is True

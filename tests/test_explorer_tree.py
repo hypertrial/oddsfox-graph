@@ -5,6 +5,7 @@ from __future__ import annotations
 from oddsgraph.explorer.tree import (
     BracketHalf,
     build_knockout_tree,
+    compute_ripple,
 )
 
 
@@ -135,3 +136,48 @@ def test_build_knockout_tree_fallback_without_final_feeders() -> None:
     assert tree.final is None
     assert len(tree.left.r32) + len(tree.right.r32) == 4
     assert len(tree.left.sf) + len(tree.right.sf) == 2
+
+
+def test_compute_ripple_empty_without_just_finished() -> None:
+    tree = build_knockout_tree(_full_bracket_elements())
+    ripple = compute_ripple(tree)
+    assert ripple.active_pairs == {}
+    assert ripple.target_ids == frozenset()
+
+
+def test_compute_ripple_single_r32_finish() -> None:
+    elements = _full_bracket_elements()
+    for el in elements:
+        if el.get("data", {}).get("id") == "l-r32-1":
+            el["data"]["just_finished"] = True
+            break
+    tree = build_knockout_tree(elements)
+    ripple = compute_ripple(tree)
+    assert ripple.active_pairs.get("left:r32") == frozenset({0})
+    assert "l-r16-1" in ripple.target_ids
+    assert "final" not in ripple.target_ids
+
+
+def test_compute_ripple_simultaneous_finishes() -> None:
+    elements = _full_bracket_elements()
+    for el in elements:
+        mid = el.get("data", {}).get("id")
+        if mid in {"l-r32-1", "l-r32-2", "r-r32-5"}:
+            el["data"]["just_finished"] = True
+    tree = build_knockout_tree(elements)
+    ripple = compute_ripple(tree)
+    assert ripple.active_pairs.get("left:r32") == frozenset({0})
+    assert ripple.active_pairs.get("right:r32") == frozenset({0})
+    assert {"l-r16-1", "r-r16-1"} <= set(ripple.target_ids)
+
+
+def test_compute_ripple_semifinal_targets_final_and_third() -> None:
+    elements = _full_bracket_elements()
+    for el in elements:
+        if el.get("data", {}).get("id") == "l-sf":
+            el["data"]["just_finished"] = True
+            break
+    tree = build_knockout_tree(elements)
+    ripple = compute_ripple(tree)
+    assert ripple.active_pairs.get("left:sf") == frozenset({0})
+    assert {"final", "third"} <= set(ripple.target_ids)

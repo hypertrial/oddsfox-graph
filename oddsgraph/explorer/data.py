@@ -14,7 +14,7 @@ from oddsgraph.bracket import tournament_playback_bounds, tournament_time_bounds
 from oddsgraph.bracket_projection import home_prob_at_hour, split_match_teams
 from oddsgraph.config import Settings
 from oddsgraph.explorer import KNOCKOUT_STAGE_LABELS
-from oddsgraph.explorer.bracket_view import short_match_label, stage_rank
+from oddsgraph.explorer.bracket_view import stage_rank
 from oddsgraph.export import EDGE_SCHEMA, NODE_SCHEMA, table_with_schema
 from oddsgraph.reduce import quote_path
 
@@ -57,7 +57,6 @@ def node_element(row: dict[str, Any], *, bracket: bool = False) -> dict[str, Any
         stage = str(row.get("stage") or "")
         data["stage"] = stage
         data["stage_rank"] = stage_rank(stage)
-        data["short_label"] = short_match_label(str(row["label"]))
     element: dict[str, Any] = {
         "data": data,
         "classes": row["type"],
@@ -619,7 +618,7 @@ def clear_stores() -> None:
 def bracket_elements(settings: Settings) -> GraphSlice:
     """Return the knockout MATCH DAG for the mirrored tree UI.
 
-    Each MATCH node is enriched with ``stage``, ``stage_rank``, ``short_label``,
+    Each MATCH node is enriched with ``stage``, ``stage_rank``,
     and optional hourly ``odds_series`` / ``current_home_prob`` when
     ``odds_history.parquet`` exists.
     """

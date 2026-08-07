@@ -45,6 +45,13 @@ than both HTML trees on every scrub:
 - Taxi SVG connectors with arrowheads pointing toward the Final
 - Each card shows **country flags**, team names, and **both teams’ advance
   probabilities** (or `—` when unavailable)
+- Inline **sparklines** under each probability show the hourly trend up to the
+  selected tournament hour (direct match advance odds when available; otherwise
+  the team’s stage-reach series)
+- Click a match card to open a **full odds history chart** for that matchup
+- When a match becomes **Just finished**, a one-hop **ripple highlight**
+  animates along the connector into the next-round slot(s) it feeds (Final and
+  Third Place when a Semifinal locks)
 - Pill legend: Resolved / Pending / Diverged
 - A persistent **phase tracker** (Round of 32 → Final weekend) highlights the
   schedule window for the selected hour, including intermissions
@@ -79,6 +86,11 @@ At the selected hour:
 8. When advance odds move between scrub/Play steps (same teams still on the
    card), each side shows a short green/red tick, a signed point delta next to
    the %, and a thin row accent. Crossing 50% also flashes the card border.
+9. Sparklines and the click-to-expand chart never look ahead of the selected
+   hour. When the direct match series has no points yet at the scrub hour
+   (missing or entirely in the future), each projected team falls back to its
+   stage-reach probability series for the displayed round. After a match locks,
+   sparklines end at the same 100% / 0% winner probabilities shown on the card.
 
 ### Progressive controls
 

@@ -64,13 +64,15 @@ def apply_time_slice(
     from oddsgraph.bracket_projection import apply_bracket_projection
     from oddsgraph.flags import flag_url_for_team
 
+    odds = stage_odds or {}
     projected = apply_bracket_projection(
         elements,
         hour_epoch,
-        stage_odds or {},
+        odds,
         flag_url_for_team=flag_url_for_team,
     )
     stamped = stamp_timeline_states(projected, hour_epoch)
+    stamped = stamp_sparkline_series(stamped, hour_epoch, odds)
     return stamp_odds_motion(stamped, previous_elements)
 
 
@@ -339,6 +341,43 @@ def stamp_timeline_states(
             updated.append({**el, "data": data})
             continue
         updated.append(el)
+    return updated
+
+
+def stamp_sparkline_series(
+    elements: list[dict[str, Any]],
+    hour_epoch: int | None,
+    stage_odds: dict[str, dict[str, list[dict[str, Any]]]],
+) -> list[dict[str, Any]]:
+    """Stamp ``home_sparkline`` / ``away_sparkline`` point lists onto MATCH nodes."""
+    from oddsgraph.bracket_projection import sparkline_points_for_side
+
+    updated: list[dict[str, Any]] = []
+    for el in elements:
+        if is_edge(el):
+            updated.append(el)
+            continue
+        data = dict(el.get("data") or {})
+        if str(data.get("type") or "") != "MATCH" and not data.get("stage"):
+            updated.append(el)
+            continue
+        home = data.get("home_team")
+        away = data.get("away_team")
+        data["home_sparkline"] = sparkline_points_for_side(
+            data,
+            str(home) if home else None,
+            "home",
+            hour_epoch,
+            stage_odds,
+        )
+        data["away_sparkline"] = sparkline_points_for_side(
+            data,
+            str(away) if away else None,
+            "away",
+            hour_epoch,
+            stage_odds,
+        )
+        updated.append({**el, "data": data})
     return updated
 
 

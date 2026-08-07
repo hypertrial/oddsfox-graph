@@ -144,6 +144,56 @@ def build_app(settings: Settings) -> Dash:
                                 n_clicks=0,
                                 role="presentation",
                             ),
+                            html.Div(
+                                id="match-modal-scrim",
+                                className="match-modal-scrim",
+                                n_clicks=0,
+                                role="presentation",
+                            ),
+                            html.Div(
+                                id="match-modal",
+                                className="match-modal",
+                                role="dialog",
+                                **{
+                                    "aria-modal": "true",
+                                    "aria-labelledby": "match-modal-title",
+                                    "aria-hidden": "true",
+                                },
+                                children=[
+                                    html.Div(
+                                        className="match-modal-header",
+                                        children=[
+                                            html.H2(
+                                                id="match-modal-title",
+                                                className="match-modal-title",
+                                                children="Match odds",
+                                            ),
+                                            html.Button(
+                                                "Close",
+                                                id="match-modal-close",
+                                                n_clicks=0,
+                                                className="btn btn-ghost btn-icon",
+                                                type="button",
+                                            ),
+                                        ],
+                                    ),
+                                    dcc.Graph(
+                                        id="match-modal-graph",
+                                        config={
+                                            "displayModeBar": False,
+                                            "responsive": True,
+                                        },
+                                        className="match-modal-graph",
+                                    ),
+                                    html.P(
+                                        "Hourly market odds up to the selected "
+                                        "tournament time. Pre-kickoff trends use "
+                                        "stage-reach probabilities when head-to-head "
+                                        "advance markets are not yet available.",
+                                        className="match-modal-hint",
+                                    ),
+                                ],
+                            ),
                             html.Aside(
                                 id="controls-panel",
                                 className="explorer-drawer explorer-controls",

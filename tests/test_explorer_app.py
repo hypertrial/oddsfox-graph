@@ -136,6 +136,11 @@ def test_build_app_registers_layout_assets_and_callbacks(tmp_path: Path) -> None
         "controls-panel",
         "phase-key",
         "close-controls",
+        "match-modal",
+        "match-modal-scrim",
+        "match-modal-close",
+        "match-modal-graph",
+        "match-modal-title",
     ):
         assert component_id in rendered
 

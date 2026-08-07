@@ -17,6 +17,13 @@ flags and output schema as pre-1.0 and subject to change.
 
 ### Added
 
+- Explorer odds-change visualization: always-on per-card SVG probability
+  sparklines, click-to-expand full match odds chart (Plotly), and a one-hop
+  ripple highlight from a just-finished match into the next-round slot(s) it
+  feeds. When the direct match series has no points yet at the scrub hour,
+  sparklines/charts fall back to stage-reach series; after full-time they lock
+  to the same 100%/0% endpoints as the card. Charts never look ahead of the
+  selected scrub hour.
 - Shared hourly parquet scan for `odds-history` (one pass writes match + stage
   series) plus `scripts/benchmark_scrub.py` and
   `scripts/benchmark_odds_history.py`.

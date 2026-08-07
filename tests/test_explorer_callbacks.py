@@ -292,3 +292,120 @@ def test_phase_view_update_skips_tracker_when_unchanged() -> None:
     assert second[2] is no_update
     assert second[3] == first[3]
     assert "Selected time" in second[4]
+
+
+def test_match_modal_update_open_and_close(tmp_path: Path) -> None:
+    from dash.exceptions import PreventUpdate
+
+    from oddsgraph.explorer.callbacks import match_modal_update
+    from oddsgraph.explorer.canvas_actions import find_projected_match
+
+    settings = make_settings(tmp_path)
+    _write_fixture(settings.build_dir)
+    pq.write_table(
+        pa.Table.from_pylist(
+            [
+                {
+                    "match_canonical_id": "match:a",
+                    "home_team": "Brazil",
+                    "away_team": "France",
+                    "odds_hour_epoch": 100,
+                    "home_prob": 0.55,
+                    "away_prob": 0.45,
+                    "match_start_epoch": 100,
+                    "match_end_epoch": 200,
+                    "winner_team": None,
+                },
+                {
+                    "match_canonical_id": "match:a",
+                    "home_team": "Brazil",
+                    "away_team": "France",
+                    "odds_hour_epoch": 150,
+                    "home_prob": 0.62,
+                    "away_prob": 0.38,
+                    "match_start_epoch": 100,
+                    "match_end_epoch": 200,
+                    "winner_team": None,
+                },
+            ],
+            schema=ODDS_HISTORY_SCHEMA,
+        ),
+        settings.odds_history_path,
+    )
+
+    data = find_projected_match(settings, "match:a", 150)
+    assert data is not None
+    assert data["home_team"] == "Brazil"
+
+    opened = match_modal_update(
+        triggered_id={
+            "type": "match-card",
+            "match_id": "match:a",
+            "surface": "desktop",
+        },
+        settings=settings,
+        hour_epoch=150,
+    )
+    assert opened[0] == "match-modal is-open"
+    assert "Brazil vs France" in opened[1]
+    assert opened[3] == "false"
+    assert len(opened[2].data) == 2
+
+    closed = match_modal_update(
+        triggered_id="match-modal-close",
+        settings=settings,
+        hour_epoch=150,
+    )
+    assert closed[0] == "match-modal"
+    assert closed[3] == "true"
+
+    with pytest.raises(PreventUpdate):
+        match_modal_update(
+            triggered_id={"type": "match-card", "match_id": ""},
+            settings=settings,
+            hour_epoch=150,
+        )
+
+    with pytest.raises(PreventUpdate):
+        match_modal_update(
+            triggered_id={"type": "match-card", "match_id": "missing"},
+            settings=settings,
+            hour_epoch=150,
+        )
+
+
+def test_apply_time_slider_stamps_sparklines(tmp_path: Path) -> None:
+    settings = make_settings(tmp_path)
+    _write_fixture(settings.build_dir)
+    pq.write_table(
+        pa.Table.from_pylist(
+            [
+                {
+                    "match_canonical_id": "match:a",
+                    "home_team": "Brazil",
+                    "away_team": "France",
+                    "odds_hour_epoch": 100,
+                    "home_prob": 0.55,
+                    "away_prob": 0.45,
+                    "match_start_epoch": 100,
+                    "match_end_epoch": None,
+                    "winner_team": None,
+                },
+                {
+                    "match_canonical_id": "match:a",
+                    "home_team": "Brazil",
+                    "away_team": "France",
+                    "odds_hour_epoch": 160,
+                    "home_prob": 0.60,
+                    "away_prob": 0.40,
+                    "match_start_epoch": 100,
+                    "match_end_epoch": None,
+                    "winner_team": None,
+                },
+            ],
+            schema=ODDS_HISTORY_SCHEMA,
+        ),
+        settings.odds_history_path,
+    )
+    children, _ = apply_time_slider(settings, 160, 0.0, "")
+    assert "match-team-sparkline" in str(children)

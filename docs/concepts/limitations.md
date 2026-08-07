@@ -56,6 +56,18 @@ direct advance series when both exist. Curated schedule `winner_team` overlays
 (Final champion / Third Place) take precedence over soft odds-history locks in
 the explorer so Spain / England remain authoritative once those cards lock.
 
+## Explorer odds charts are hourly-grain
+
+Match-card sparklines and the click-to-expand odds chart sample the same hourly
+parquet series used for projection (`odds_history.parquet` /
+`stage_odds_history.parquet`). A live ~2–3 hour match therefore yields only a
+handful of points, and there are **no in-play goal-event markers** in the data
+model. When the direct match series has no points at or before the selected
+hour (missing, or only future points), trends fall back to each projected
+team's stage-reach probability for the displayed round — that is **not** the
+eventual head-to-head advance market. After full-time, sparkline endpoints lock
+to the same 100% / 0% winner probabilities shown on the card.
+
 ## Scope is WC2026 / Polymarket only
 
 Deterministic templates, team alias/code tables, proposition predicates, and

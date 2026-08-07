@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any, Callable, Literal
 
 from oddsgraph.flags import BLANK_FLAG_URL, flag_url_or_blank
 
@@ -145,6 +145,65 @@ def latest_reach_prob(
         return float(point["p"])
     except (KeyError, TypeError, ValueError):
         return None
+
+
+def sparkline_points_for_side(
+    data: dict[str, Any],
+    team: str | None,
+    side: Literal["home", "away"],
+    hour_epoch: int | None,
+    stage_odds: dict[str, dict[str, list[dict[str, Any]]]],
+) -> list[tuple[int, float]]:
+    """Return ``(hour, probability)`` points for one side of a match card.
+
+    Prefer the match's direct ``odds_series`` (home/away advance probs). When
+    that series has no points at or before ``hour_epoch`` (pre-kickoff / projected
+    slot), fall back to the team's stage-reach series for
+    ``REACH_RANK_STAGE[stage]``. Points after ``hour_epoch`` are never included.
+    When the match is resolved at ``hour_epoch``, the series ends at the locked
+    1.0 / 0.0 winner probability (matching card %).
+    """
+
+    def _slice(
+        series: list[dict[str, Any]],
+        value_key: str,
+    ) -> list[tuple[int, float]]:
+        points: list[tuple[int, float]] = []
+        for point in series:
+            try:
+                hour = int(point["h"])
+                value = float(point[value_key])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if hour_epoch is not None and hour > int(hour_epoch):
+                break
+            points.append((hour, value))
+        return points
+
+    points: list[tuple[int, float]] = []
+    series = data.get("odds_series") or []
+    if isinstance(series, list) and series:
+        points = _slice(series, "home" if side == "home" else "away")
+
+    if not points and team:
+        stage = str(data.get("stage") or "")
+        rank_stage = REACH_RANK_STAGE.get(stage)
+        if rank_stage is not None:
+            reach_series = (stage_odds.get(str(team)) or {}).get(rank_stage) or []
+            if isinstance(reach_series, list) and reach_series:
+                points = _slice(reach_series, "p")
+
+    if not points:
+        return []
+
+    if _match_resolved(data, hour_epoch) and team:
+        end_epoch = int(data["match_end_epoch"])
+        locked = 1.0 if str(data.get("winner_team") or "") == str(team) else 0.0
+        if points[-1][0] >= end_epoch:
+            points[-1] = (points[-1][0], locked)
+        else:
+            points.append((end_epoch, locked))
+    return points
 
 
 def conditional_advance_score(
@@ -484,59 +543,6 @@ def format_prob_label(prob: float | None) -> str:
     return f"{round(prob * 100):d}%"
 
 
-# Visual team-name budget for short_label probability column.
-_CARD_TEAM_NAME_WIDTH = 14
-_FIGURE_SPACE = "\u2007"
-_NBSP = "\u00a0"
-
-
-def truncate_team_name(name: str, *, width: int = _CARD_TEAM_NAME_WIDTH) -> str:
-    """Truncate a display team name for the match card without losing identity."""
-    text = str(name or "").strip()
-    if len(text) <= width:
-        return text
-    if width <= 1:
-        return text[:width]
-    return text[: width - 1].rstrip() + "…"
-
-
-def _pad_team_name(name: str, *, width: int = _CARD_TEAM_NAME_WIDTH) -> str:
-    truncated = truncate_team_name(name, width=width)
-    return truncated + (_FIGURE_SPACE * max(0, width - len(truncated)))
-
-
-def _pad_mark(mark: str, *, width: int = 8) -> str:
-    """Right-align a probability / winner mark in a fixed-width column."""
-    text = str(mark)
-    if len(text) >= width:
-        return text
-    return (_FIGURE_SPACE * (width - len(text))) + text
-
-
-def card_short_label(
-    home: str,
-    away: str,
-    home_prob: float | None,
-    away_prob: float | None,
-    *,
-    winner: str | None = None,
-    stage: str | None = None,
-) -> str:
-    """Build the two-line match card text with a fixed probability column.
-
-    Resolved Final / Third Place (and other knockout) winners keep numeric
-    ``100%`` / ``0%`` on the card. Champion / 3rd meaning is carried by
-    ``is_champion`` / ``is_third_place_winner``. ``winner`` / ``stage`` remain
-    for call-site compatibility.
-    """
-    del winner, stage
-    home_mark = format_prob_label(home_prob)
-    away_mark = format_prob_label(away_prob)
-    home_row = f"{_pad_team_name(home)}{_NBSP}{_pad_mark(home_mark)}"
-    away_row = f"{_pad_team_name(away)}{_NBSP}{_pad_mark(away_mark)}"
-    return f"{home_row}\n{away_row}"
-
-
 _STAGE_PROCESS_ORDER: dict[str, int] = {
     "Round of 32": 1,
     "Round of 16": 2,
@@ -622,7 +628,6 @@ def apply_bracket_projection(
         home = projected.home.team or None
         away = projected.away.team or None
         home_prob = projected.current_home_prob
-        away_prob = None if home_prob is None else 1.0 - home_prob
 
         data["home_team"] = home
         data["away_team"] = away
@@ -636,19 +641,10 @@ def apply_bracket_projection(
             winner = str(data["winner_team"])
         if home and away:
             data["label"] = f"{home} vs. {away}"
-            data["short_label"] = card_short_label(
-                home,
-                away,
-                home_prob,
-                away_prob,
-                winner=winner,
-                stage=str(data.get("stage") or ""),
-            )
         else:
             data["label"] = str(
                 data.get("schedule_label") or data.get("label") or "TBD vs. TBD"
             )
-            data["short_label"] = "TBD"
         data["projected"] = projected.projected
         data["resolved"] = _match_resolved(data, hour_epoch)
         data["projection_method"] = projected.projection_method
@@ -660,8 +656,6 @@ def apply_bracket_projection(
         data["is_third_place_winner"] = bool(
             winner and stage == "Third Place" and winner in {home, away}
         )
-        data["home_prob_label"] = format_prob_label(home_prob)
-        data["away_prob_label"] = format_prob_label(away_prob)
         if home_prob is None:
             data.pop("current_home_prob", None)
         else:

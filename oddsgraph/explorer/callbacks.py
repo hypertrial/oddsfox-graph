@@ -6,18 +6,22 @@ import bisect
 from collections.abc import Sequence
 from typing import Any
 
-from dash import Dash, Input, Output, State, callback_context, no_update
+from dash import ALL, Dash, Input, Output, State, callback_context, no_update
 from dash.exceptions import PreventUpdate
 
 from oddsgraph.bracket import schedule_playback_milestones
+from oddsgraph.bracket_projection import sparkline_points_for_side
 from oddsgraph.config import Settings
 from oddsgraph.explorer.canvas_actions import (
     CanvasMutation,
     _canvas_callback_outputs,
     apply_time_slider,
     filter_canvas,
+    find_projected_match,
     load_view,
 )
+from oddsgraph.explorer.data import stage_odds_by_team
+from oddsgraph.explorer.match_chart import build_match_chart_figure
 from oddsgraph.explorer.presentation import (
     bracket_summary_text,
     phase_at_hour,
@@ -36,6 +40,7 @@ from oddsgraph.explorer.tree_render import (
 __all__ = [
     "apply_time_slider",
     "load_view",
+    "match_modal_update",
     "next_play_advance",
     "next_play_toggle",
     "phase_view_update",
@@ -126,6 +131,77 @@ def _drawer_classes(base: str, is_open: bool) -> str:
     return f"{base} is-open" if is_open else base
 
 
+def _modal_classes(*, is_open: bool) -> str:
+    return "match-modal is-open" if is_open else "match-modal"
+
+
+def match_modal_update(
+    *,
+    triggered_id: Any,
+    settings: Settings,
+    hour_epoch: int | None,
+) -> tuple[str, Any, Any, str]:
+    """Compute match-modal open/close state and figure.
+
+    Returns ``(modal_class, title, figure, aria_hidden)``.
+    """
+    if isinstance(triggered_id, str) and triggered_id in {
+        "match-modal-scrim",
+        "match-modal-close",
+    }:
+        return _modal_classes(is_open=False), no_update, no_update, "true"
+
+    match_id: str | None = None
+    if isinstance(triggered_id, dict) and triggered_id.get("type") == "match-card":
+        match_id = str(triggered_id.get("match_id") or "")
+    if not match_id:
+        raise PreventUpdate
+
+    data = find_projected_match(settings, match_id, hour_epoch)
+    if data is None:
+        raise PreventUpdate
+    home = data.get("home_team")
+    away = data.get("away_team")
+    if not home and not away:
+        raise PreventUpdate
+
+    stage_odds = stage_odds_by_team(settings)
+    home_points = sparkline_points_for_side(
+        data,
+        str(home) if home else None,
+        "home",
+        hour_epoch,
+        stage_odds,
+    )
+    away_points = sparkline_points_for_side(
+        data,
+        str(away) if away else None,
+        "away",
+        hour_epoch,
+        stage_odds,
+    )
+    home_label = str(home) if home else "Home"
+    away_label = str(away) if away else "Away"
+    title = f"{home_label} vs {away_label} — Full match odds"
+    figure = build_match_chart_figure(
+        home_points,
+        away_points,
+        home_label=home_label,
+        away_label=away_label,
+        match_start_epoch=(
+            int(data["match_start_epoch"])
+            if data.get("match_start_epoch") is not None
+            else None
+        ),
+        match_end_epoch=(
+            int(data["match_end_epoch"])
+            if data.get("match_end_epoch") is not None
+            else None
+        ),
+    )
+    return _modal_classes(is_open=True), title, figure, "false"
+
+
 def register_callbacks(app: Dash, settings: Settings) -> None:
     """Wire explorer interactions against ``settings`` artifacts."""
 
@@ -160,6 +236,41 @@ def register_callbacks(app: Dash, settings: Settings) -> None:
             next_open,
             "true" if next_open else "false",
             root,
+        )
+
+    @app.callback(
+        Output("match-modal", "className"),
+        Output("match-modal-title", "children"),
+        Output("match-modal-graph", "figure"),
+        Output("match-modal", "aria-hidden"),
+        Input({"type": "match-card", "match_id": ALL, "surface": ALL}, "n_clicks"),
+        Input("match-modal-scrim", "n_clicks"),
+        Input("match-modal-close", "n_clicks"),
+        State("time-slider", "value"),
+        prevent_initial_call=True,
+    )
+    def toggle_match_modal(
+        card_clicks: list[int | None] | None,
+        scrim_clicks: int | None,
+        close_clicks: int | None,
+        hour_epoch: int | None,
+    ) -> tuple[Any, Any, Any, str]:
+        del card_clicks, scrim_clicks, close_clicks
+        if not callback_context.triggered:
+            raise PreventUpdate
+        # Ignore spurious ALL-input fires when the canvas re-renders with fresh
+        # n_clicks=0 cards (no real user click yet).
+        triggered = callback_context.triggered[0]
+        if (
+            isinstance(callback_context.triggered_id, dict)
+            and callback_context.triggered_id.get("type") == "match-card"
+            and triggered.get("value") in (None, 0)
+        ):
+            raise PreventUpdate
+        return match_modal_update(
+            triggered_id=callback_context.triggered_id,
+            settings=settings,
+            hour_epoch=hour_epoch,
         )
 
     @app.callback(

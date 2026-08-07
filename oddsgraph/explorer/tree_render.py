@@ -2,17 +2,24 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any, Literal, Sequence
 
 from dash import dcc, html
 
 from oddsgraph.bracket_projection import format_prob_label
+from oddsgraph.explorer.match_chart import (
+    SPARKLINE_AWAY_COLOR,
+    SPARKLINE_HOME_COLOR,
+    build_sparkline_svg_markup,
+)
 from oddsgraph.explorer.tree import (
     LEFT_ROUNDS_OUT_TO_IN,
     RIGHT_ROUNDS_IN_TO_OUT,
     BracketHalf,
     BracketTree,
+    RippleState,
     build_knockout_tree,
+    compute_ripple,
 )
 
 ConnectorDirection = Literal["ltr", "rtl"]
@@ -105,6 +112,7 @@ def _connector_svg_markup(
     paths: list[str],
     *,
     arrow_paths: list[str] | None = None,
+    ripple_paths: list[str] | None = None,
 ) -> str:
     """Inline SVG markup (Dash has no html.Svg; Markdown allows HTML)."""
     path_xml = "".join(
@@ -122,10 +130,19 @@ def _connector_svg_markup(
         )
         for d in (arrow_paths or [])
     )
+    ripple_xml = "".join(
+        (
+            f'<path class="bracket-connector-ripple" d="{d}" fill="none" '
+            f'stroke="currentColor" stroke-width="1.35" '
+            f'stroke-linejoin="round" stroke-linecap="round" '
+            f'vector-effect="non-scaling-stroke" />'
+        )
+        for d in (ripple_paths or [])
+    )
     return (
         '<svg class="bracket-connector-svg" viewBox="0 0 20 100" '
         'preserveAspectRatio="none" role="presentation" '
-        f'xmlns="http://www.w3.org/2000/svg">{path_xml}{arrow_xml}</svg>'
+        f'xmlns="http://www.w3.org/2000/svg">{path_xml}{arrow_xml}{ripple_xml}</svg>'
     )
 
 
@@ -134,8 +151,10 @@ def render_connector(
     direction: ConnectorDirection,
     *,
     semi: bool = False,
+    active_pair_indices: frozenset[int] | None = None,
 ) -> html.Div:
     """SVG bracket connector between round columns, with progression arrows."""
+    active = active_pair_indices or frozenset()
     if semi:
         if direction == "ltr":
             paths = ["M 0 50 H 17"]
@@ -144,21 +163,44 @@ def render_connector(
             paths = ["M 20 50 H 3"]
             arrow_paths = ["M 3.8 48.65 L 0 50 L 3.8 51.35 Z"]
         width_class = "bracket-connector is-semi"
+        ripple_paths = list(paths) if 0 in active else []
     else:
         count = max(feeder_count, 0)
         paths = build_connector_paths(count, direction)
         arrow_paths = build_connector_arrow_paths(count, direction)
         width_class = "bracket-connector"
+        ripple_paths = [
+            paths[i] for i in sorted(active) if 0 <= i < len(paths)
+        ]
+    if ripple_paths:
+        width_class = f"{width_class} has-ripple"
     return html.Div(
         className=width_class,
         **{"aria-hidden": "true"},
         children=[
             dcc.Markdown(
-                _connector_svg_markup(paths, arrow_paths=arrow_paths),
+                _connector_svg_markup(
+                    paths,
+                    arrow_paths=arrow_paths,
+                    ripple_paths=ripple_paths,
+                ),
                 dangerously_allow_html=True,
                 className="bracket-connector-md",
             )
         ],
+    )
+
+
+def _sparkline_graph(
+    points: Sequence[tuple[int, float]] | None,
+    color: str,
+) -> dcc.Markdown | None:
+    if not points:
+        return None
+    return dcc.Markdown(
+        build_sparkline_svg_markup(list(points), color),
+        dangerously_allow_html=True,
+        className="match-team-sparkline",
     )
 
 
@@ -173,6 +215,8 @@ def _team_row(
     compact: bool,
     odds_tick: str | None = None,
     delta_pp: int | None = None,
+    sparkline_points: Sequence[tuple[int, float]] | None = None,
+    sparkline_color: str = SPARKLINE_HOME_COLOR,
 ) -> html.Div:
     name = team_name or "TBD"
     classes = ["match-team-row"]
@@ -222,6 +266,9 @@ def _team_row(
                 className=" ".join(prob_classes),
             )
         )
+        sparkline = _sparkline_graph(sparkline_points, sparkline_color)
+        if sparkline is not None:
+            children.append(sparkline)
     return html.Div(className=" ".join(classes), children=children)
 
 
@@ -230,6 +277,8 @@ def render_match_card(
     *,
     emphasis: bool = False,
     compact: bool = False,
+    ripple_target: bool = False,
+    surface: str | None = None,
 ) -> html.Fieldset:
     """Render a two-team matchup card with flags and advance probabilities."""
     data = _node_data(el)
@@ -248,6 +297,8 @@ def render_match_card(
         frame.append("is-projected")
     if data.get("favorite_flipped"):
         frame.append("is-favorite-flip")
+    if ripple_target:
+        frame.append("is-ripple-target")
     timeline = data.get("timeline_state")
     if timeline:
         frame.append(f"is-timeline-{timeline}")
@@ -277,6 +328,8 @@ def render_match_card(
     away_delta_pp = (
         None if home_delta_pp is None else -int(home_delta_pp)
     )
+    home_sparkline = data.get("home_sparkline") or None
+    away_sparkline = data.get("away_sparkline") or None
 
     # Highlight locked/favored side only when a probability or locked winner exists.
     home_wins: bool | None = None
@@ -299,6 +352,8 @@ def render_match_card(
             aria = f"{aria}; {home_label} {sign}{int(home_delta_pp)} points"
     if just_finished:
         aria = f"{aria}; just finished"
+    if ripple_target:
+        aria = f"{aria}; odds updated from upstream result"
 
     children: list[Any] = []
     if just_finished:
@@ -321,6 +376,8 @@ def render_match_card(
                 compact=compact,
                 odds_tick=str(home_tick) if home_tick else None,
                 delta_pp=int(home_delta_pp) if home_delta_pp is not None else None,
+                sparkline_points=home_sparkline,
+                sparkline_color=SPARKLINE_HOME_COLOR,
             ),
             _team_row(
                 team_name=str(away) if away else None,
@@ -334,17 +391,33 @@ def render_match_card(
                 compact=compact,
                 odds_tick=str(away_tick) if away_tick else None,
                 delta_pp=away_delta_pp,
+                sparkline_points=away_sparkline,
+                sparkline_color=SPARKLINE_AWAY_COLOR,
             ),
         ]
     )
 
+    match_id = str(data.get("id") or "")
+    clickable = bool(match_id and (home or away) and surface)
+    attrs: dict[str, Any] = {
+        "data-slot": "match-card",
+        "data-match-id": match_id,
+        "aria-label": aria,
+    }
+    if clickable:
+        attrs["id"] = {
+            "type": "match-card",
+            "match_id": match_id,
+            "surface": surface,
+        }
+        attrs["n_clicks"] = 0
+        attrs["role"] = "button"
+        attrs["tabIndex"] = 0
+        frame.append("is-clickable")
+
     return html.Fieldset(
         className=" ".join(frame),
-        **{
-            "data-slot": "match-card",
-            "data-match-id": str(data.get("id") or ""),
-            "aria-label": aria,
-        },
+        **attrs,
         children=children,
     )
 
@@ -368,9 +441,14 @@ def render_tree_side(
     direction: ConnectorDirection,
     *,
     region_label: str,
+    half_key: str = "left",
+    ripple: RippleState | None = None,
+    surface: str | None = None,
 ) -> html.Section:
     """One mirrored half of the knockout tree."""
     rounds = LEFT_ROUNDS_OUT_TO_IN if direction == "ltr" else RIGHT_ROUNDS_IN_TO_OUT
+    ripple_pairs = ripple.active_pairs if ripple is not None else {}
+    ripple_targets = ripple.target_ids if ripple is not None else frozenset()
     semi_spacer = html.Div(
         className="bracket-connector is-semi tree-header-pad",
         **{"aria-hidden": "true"},
@@ -400,7 +478,14 @@ def render_tree_side(
 
     body_row: list[Any] = []
     if direction == "rtl":
-        body_row.append(render_connector(1, "rtl", semi=True))
+        body_row.append(
+            render_connector(
+                1,
+                "rtl",
+                semi=True,
+                active_pair_indices=ripple_pairs.get(f"{half_key}:sf", frozenset()),
+            )
+        )
     for index, (round_id, short_label, name) in enumerate(rounds):
         del short_label, name
         matches = half.by_round(round_id)
@@ -419,7 +504,17 @@ def render_tree_side(
                                     if round_id == "r32"
                                     else "tree-card-slot"
                                 ),
-                                children=[render_match_card(m, compact=True)],
+                                children=[
+                                    render_match_card(
+                                        m,
+                                        compact=True,
+                                        ripple_target=(
+                                            str((_node_data(m).get("id") or ""))
+                                            in ripple_targets
+                                        ),
+                                        surface=surface,
+                                    )
+                                ],
                             )
                             for m in matches
                         ],
@@ -431,11 +526,30 @@ def render_tree_side(
             next_round_id = rounds[index + 1][0]
             if direction == "ltr":
                 feeder_count = len(matches)
+                feeder_round = round_id
             else:
                 feeder_count = len(half.by_round(next_round_id))
-            body_row.append(render_connector(feeder_count, direction))
+                # Right side renders rounds in_to_out (sf→r32); the connector
+                # after a round still carries feeders from the outer round.
+                feeder_round = next_round_id
+            body_row.append(
+                render_connector(
+                    feeder_count,
+                    direction,
+                    active_pair_indices=ripple_pairs.get(
+                        f"{half_key}:{feeder_round}", frozenset()
+                    ),
+                )
+            )
     if direction == "ltr":
-        body_row.append(render_connector(1, "ltr", semi=True))
+        body_row.append(
+            render_connector(
+                1,
+                "ltr",
+                semi=True,
+                active_pair_indices=ripple_pairs.get(f"{half_key}:sf", frozenset()),
+            )
+        )
 
     return html.Section(
         className="tree-side",
@@ -451,10 +565,16 @@ def render_final_column(
     tree: BracketTree,
     *,
     compact: bool = True,
+    ripple: RippleState | None = None,
+    surface: str | None = None,
 ) -> html.Section:
     """Final + champion + third-place center column."""
     champion = tree.champion
     final_data = _node_data(tree.final)
+    ripple_targets = ripple.target_ids if ripple is not None else frozenset()
+    final_id = str(final_data.get("id") or "")
+    third_data = _node_data(tree.third_place)
+    third_id = str(third_data.get("id") or "")
     actual_champion = None
     if final_data.get("resolved") and final_data.get("winner_team"):
         actual_champion = str(final_data["winner_team"])
@@ -536,12 +656,23 @@ def render_final_column(
             html.Div(
                 className="final-column-grid",
                 children=[
-                    render_match_card(tree.final, emphasis=True, compact=compact),
+                    render_match_card(
+                        tree.final,
+                        emphasis=True,
+                        compact=compact,
+                        ripple_target=final_id in ripple_targets,
+                        surface=surface,
+                    ),
                     champion_block,
                     html.Div(
                         children=[
                             html.P("Third place", className="third-place-label"),
-                            render_match_card(tree.third_place, compact=compact),
+                            render_match_card(
+                                tree.third_place,
+                                compact=compact,
+                                ripple_target=third_id in ripple_targets,
+                                surface=surface,
+                            ),
                         ]
                     ),
                 ],
@@ -587,8 +718,14 @@ def render_legend() -> html.Div:
     )
 
 
-def render_stacked_rounds(tree: BracketTree) -> html.Div:
+def render_stacked_rounds(
+    tree: BracketTree,
+    *,
+    ripple: RippleState | None = None,
+    surface: str | None = "mobile",
+) -> html.Div:
     """Narrow-viewport stacked rounds layout (ports KnockoutStackedRounds)."""
+    ripple_targets = ripple.target_ids if ripple is not None else frozenset()
     sections: list[Any] = [
         html.Div(
             className="stacked-final-wrap",
@@ -597,7 +734,9 @@ def render_stacked_rounds(tree: BracketTree) -> html.Div:
                     "Stage 1 of 6 — Final & podium",
                     className="stacked-stage-eyebrow",
                 ),
-                render_final_column(tree, compact=False),
+                render_final_column(
+                    tree, compact=False, ripple=ripple, surface=surface
+                ),
             ],
         )
     ]
@@ -630,7 +769,16 @@ def render_stacked_rounds(tree: BracketTree) -> html.Div:
                     ),
                     html.Div(
                         className=f"stacked-round-grid is-{round_id}",
-                        children=[render_match_card(m) for m in matches],
+                        children=[
+                            render_match_card(
+                                m,
+                                ripple_target=(
+                                    str((_node_data(m).get("id") or "")) in ripple_targets
+                                ),
+                                surface=surface,
+                            )
+                            for m in matches
+                        ],
                     ),
                 ],
             )
@@ -638,7 +786,12 @@ def render_stacked_rounds(tree: BracketTree) -> html.Div:
     return html.Div(className="stacked-knockout", children=sections)
 
 
-def render_mirrored_tree(tree: BracketTree) -> html.Div:
+def render_mirrored_tree(
+    tree: BracketTree,
+    *,
+    ripple: RippleState | None = None,
+    surface: str | None = "desktop",
+) -> html.Div:
     """Desktop mirrored two-halves tree."""
     return html.Div(
         className="knockout-tree",
@@ -655,15 +808,28 @@ def render_mirrored_tree(tree: BracketTree) -> html.Div:
                                 tree.left,
                                 "ltr",
                                 region_label="Left bracket half toward final",
+                                half_key="left",
+                                ripple=ripple,
+                                surface=surface,
                             ),
                             html.Div(
                                 className="final-column-wrap",
-                                children=[render_final_column(tree, compact=True)],
+                                children=[
+                                    render_final_column(
+                                        tree,
+                                        compact=True,
+                                        ripple=ripple,
+                                        surface=surface,
+                                    )
+                                ],
                             ),
                             render_tree_side(
                                 tree.right,
                                 "rtl",
                                 region_label="Right bracket half toward final",
+                                half_key="right",
+                                ripple=ripple,
+                                surface=surface,
                             ),
                         ],
                     )
@@ -678,12 +844,15 @@ def render_bracket_tree(
     *,
     include_legend: bool = True,
     layout: BracketLayout = "both",
+    ripple: RippleState | None = None,
 ) -> html.Div:
     """Top-level bracket: mirrored tree and/or stacked fallback.
 
     ``layout`` gates which HTML tree is built. ``both`` preserves the CSS
     media-query dual tree (used before the viewport Store is measured).
     """
+    if ripple is None:
+        ripple = compute_ripple(tree)
     children: list[Any] = []
     if include_legend:
         children.append(
@@ -706,14 +875,26 @@ def render_bracket_tree(
         children.append(
             html.Div(
                 className="bracket-desktop",
-                children=[render_mirrored_tree(tree)],
+                children=[
+                    render_mirrored_tree(
+                        tree,
+                        ripple=ripple,
+                        surface="desktop" if layout != "both" else None,
+                    )
+                ],
             )
         )
     if layout in {"both", "mobile"}:
         children.append(
             html.Div(
                 className="bracket-mobile",
-                children=[render_stacked_rounds(tree)],
+                children=[
+                    render_stacked_rounds(
+                        tree,
+                        ripple=ripple,
+                        surface="mobile" if layout != "both" else None,
+                    )
+                ],
             )
         )
     return html.Div(
@@ -731,7 +912,11 @@ def elements_to_bracket_children(
 ) -> html.Div:
     """Build knockout tree HTML children from bracket element dicts."""
     tree = build_knockout_tree(elements)
-    return render_bracket_tree(tree, include_legend=include_legend, layout=layout)
+    return render_bracket_tree(
+        tree,
+        include_legend=include_legend,
+        layout=layout,
+    )
 
 
 __all__ = [

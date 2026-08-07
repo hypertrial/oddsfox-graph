@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import pytest
+
 from oddsgraph.bracket_projection import (
     apply_bracket_projection,
-    card_short_label,
     conditional_advance_score,
     normalize_pair,
     project_match_at_hour,
     reach_prob_for_rank,
+    sparkline_points_for_side,
 )
 from oddsgraph.flags import flag_url_for_team, missing_flag_teams
 from oddsgraph.bracket import load_wc2026_schedule
@@ -47,27 +49,99 @@ def test_latest_reach_prob_uses_latest_at_or_before_hour() -> None:
     assert latest_series_point(series, 35, hour_key="h") == {"h": 30, "p": 0.3}
 
 
-def test_card_short_label_locks_resolved_probs_to_100() -> None:
-    champion = card_short_label(
-        "Spain", "Argentina", 1.0, 0.0, winner="Spain", stage="Final"
-    )
-    assert "100%" in champion
-    assert "0%" in champion
-    assert "Champion" not in champion
-    assert champion.split("\n")[0].startswith("Spain")
-    third = card_short_label(
-        "France", "England", 0.0, 1.0, winner="England", stage="Third Place"
-    )
-    assert "100%" in third
-    assert "0%" in third
-    assert "3rd" not in third
-    assert third.split("\n")[1].startswith("England")
-    long_name = card_short_label(
-        "Bosnia and Herzegovina", "United States", 0.4, 0.6
-    )
-    assert "…" in long_name or "Bosnia" in long_name
-    assert "40%" in long_name
-    assert "\u2007" in long_name or "\u00a0" in long_name
+def test_sparkline_points_prefer_direct_odds_series() -> None:
+    data = {
+        "stage": "Round of 16",
+        "odds_series": [
+            {"h": 100, "home": 0.55, "away": 0.45},
+            {"h": 200, "home": 0.60, "away": 0.40},
+            {"h": 300, "home": 0.70, "away": 0.30},
+        ],
+    }
+    stage_odds = {
+        "France": {"Round of 16": _series((100, 0.9), (200, 0.85), (300, 0.8))},
+    }
+    home = sparkline_points_for_side(data, "France", "home", 200, stage_odds)
+    away = sparkline_points_for_side(data, "Argentina", "away", 200, stage_odds)
+    assert home == [(100, 0.55), (200, 0.60)]
+    assert away == [(100, 0.45), (200, 0.40)]
+
+
+def test_sparkline_points_fall_back_to_stage_reach() -> None:
+    data = {"stage": "Round of 16", "odds_series": []}
+    stage_odds = {
+        "France": {
+            "Round of 16": _series((100, 0.9), (200, 0.85), (300, 0.8)),
+        },
+    }
+    points = sparkline_points_for_side(data, "France", "home", 200, stage_odds)
+    assert points == [(100, 0.9), (200, 0.85)]
+
+
+def test_sparkline_points_fall_back_when_direct_series_is_future_only() -> None:
+    data = {
+        "stage": "Round of 16",
+        "odds_series": [
+            {"h": 300, "home": 0.55, "away": 0.45},
+            {"h": 400, "home": 0.60, "away": 0.40},
+        ],
+    }
+    stage_odds = {
+        "France": {"Round of 16": _series((100, 0.9), (200, 0.85))},
+    }
+    points = sparkline_points_for_side(data, "France", "home", 200, stage_odds)
+    assert points == [(100, 0.9), (200, 0.85)]
+
+
+def test_sparkline_points_lock_to_winner_after_full_time() -> None:
+    data = {
+        "stage": "Round of 32",
+        "home_team": "Brazil",
+        "away_team": "France",
+        "winner_team": "France",
+        "match_end_epoch": 200,
+        "odds_series": [
+            {"h": 100, "home": 0.55, "away": 0.45},
+            {"h": 150, "home": 0.40, "away": 0.60},
+        ],
+    }
+    home = sparkline_points_for_side(data, "Brazil", "home", 200, {})
+    away = sparkline_points_for_side(data, "France", "away", 200, {})
+    assert home[-1] == (200, 0.0)
+    assert away[-1] == (200, 1.0)
+
+
+def test_sparkline_points_empty_when_both_missing() -> None:
+    data = {"stage": "Round of 16"}
+    assert sparkline_points_for_side(data, "France", "home", 100, {}) == []
+    assert sparkline_points_for_side(data, None, "home", 100, {}) == []
+
+
+def test_sparkline_points_no_lookahead_past_hour() -> None:
+    data = {
+        "stage": "Quarterfinals",
+        "odds_series": [
+            {"h": 10, "home": 0.5, "away": 0.5},
+            {"h": 20, "home": 0.6, "away": 0.4},
+            {"h": 30, "home": 0.7, "away": 0.3},
+        ],
+    }
+    assert sparkline_points_for_side(data, "A", "home", 15, {}) == [(10, 0.5)]
+    # hour_epoch=None includes the full direct series (no scrub bound).
+    assert sparkline_points_for_side(data, "A", "home", None, {}) == [
+        (10, 0.5),
+        (20, 0.6),
+        (30, 0.7),
+    ]
+
+
+def test_format_prob_label_and_resolved_marks() -> None:
+    from oddsgraph.bracket_projection import format_prob_label
+
+    assert format_prob_label(1.0) == "100%"
+    assert format_prob_label(0.0) == "0%"
+    assert format_prob_label(0.4) == "40%"
+    assert format_prob_label(None) == "—"
 
 
 def test_apply_projection_flags_champion_and_third_place_winner() -> None:
@@ -112,17 +186,9 @@ def test_apply_projection_flags_champion_and_third_place_winner() -> None:
     assert by_id["final"]["is_champion"] is True
     assert by_id["final"]["resolved"] is True
     assert by_id["final"]["current_home_prob"] == 1.0
-    assert by_id["final"]["home_prob_label"] == "100%"
-    assert by_id["final"]["away_prob_label"] == "0%"
-    assert "100%" in by_id["final"]["short_label"]
-    assert "Champion" not in by_id["final"]["short_label"]
     assert by_id["third"]["is_third_place_winner"] is True
     assert by_id["third"]["resolved"] is True
     assert by_id["third"]["current_home_prob"] == 0.0
-    assert by_id["third"]["home_prob_label"] == "0%"
-    assert by_id["third"]["away_prob_label"] == "100%"
-    assert "100%" in by_id["third"]["short_label"]
-    assert "3rd" not in by_id["third"]["short_label"]
 
     before = apply_bracket_projection(elements, third_end - 1, {})
     before_by_id = {el["data"]["id"]: el["data"] for el in before}
@@ -364,7 +430,7 @@ def test_apply_bracket_projection_orders_by_stage() -> None:
     by_id = {el["data"]["id"]: el["data"] for el in out if "source" not in el["data"]}
     assert by_id["r16"]["home_team"] == "Brazil"
     assert by_id["r16"]["away_team"] == "Spain"
-    assert "50%" in by_id["r16"]["short_label"]
+    assert by_id["r16"]["current_home_prob"] == pytest.approx(0.5)
     assert by_id["r16"]["flag_images"].count("/assets/flags/") == 2
 
 

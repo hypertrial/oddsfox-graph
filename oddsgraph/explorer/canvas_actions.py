@@ -203,6 +203,45 @@ def apply_time_slider(
     )
 
 
+def find_projected_match(
+    settings: Settings,
+    match_id: str,
+    hour_epoch: int | None,
+) -> dict[str, Any] | None:
+    """Return projected MATCH data for ``match_id`` at ``hour_epoch``.
+
+    Reuses the process-local projected-frame cache when it already holds the
+    requested hour; otherwise projects once and caches the result.
+    """
+    if not match_id:
+        return None
+    token = _artifact_token(settings)
+    cached = _FRAME_CACHE.frame
+    if (
+        cached is not None
+        and cached.token == token
+        and (
+            (hour_epoch is None and cached.hour_epoch is None)
+            or (
+                hour_epoch is not None
+                and cached.hour_epoch is not None
+                and int(cached.hour_epoch) == int(hour_epoch)
+            )
+        )
+    ):
+        elements = cached.elements
+    else:
+        elements = _project_elements(settings, hour_epoch)
+
+    for el in elements:
+        data = el.get("data") or {}
+        if "source" in data and "target" in data:
+            continue
+        if str(data.get("id") or "") == str(match_id):
+            return dict(data)
+    return None
+
+
 def _canvas_callback_outputs(*, allow_duplicate: bool = False) -> list[Output]:
     kwargs = {"allow_duplicate": True} if allow_duplicate else {}
     return [
@@ -215,6 +254,7 @@ __all__ = [
     "CanvasMutation",
     "apply_time_slider",
     "filter_canvas",
+    "find_projected_match",
     "load_view",
     "projected_frame_cache_stats",
     "reset_projected_frame_cache",
