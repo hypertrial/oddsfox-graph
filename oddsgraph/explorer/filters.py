@@ -6,6 +6,7 @@ from typing import Any
 
 from oddsgraph.explorer.presentation import (
     PRESERVED_CLASSES,
+    is_stage_header,
     merge_class_sets,
     split_classes,
 )
@@ -57,7 +58,7 @@ def node_types_in_elements(elements: list[dict[str, Any]]) -> list[str]:
     """Return sorted unique node ``type`` values present in ``elements``."""
     types: set[str] = set()
     for el in elements:
-        if not is_node(el):
+        if not is_node(el) or is_stage_header(el):
             continue
         node_type = (el.get("data") or {}).get("type")
         if node_type:
@@ -90,6 +91,11 @@ def apply_filters(
         confidence = float(data.get("confidence") or 0.0)
         el_method = str(data.get("inference_method") or "")
         hide = False
+
+        if is_stage_header(el):
+            # Column labels stay visible regardless of MATCH-only type filters.
+            filtered.append({**el, "classes": merge_class_sets(semantic, preserved)})
+            continue
 
         if confidence < min_confidence:
             hide = True

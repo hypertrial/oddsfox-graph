@@ -11,7 +11,11 @@ import dash_cytoscape as cyto
 from oddsgraph.config import Settings
 from oddsgraph.explorer import VIEW_BRACKET, VIEW_TOPOLOGY
 from oddsgraph.explorer.data import bracket_elements, graph_counts
-from oddsgraph.explorer.presentation import bracket_layout, stylesheet_for
+from oddsgraph.explorer.presentation import (
+    BRACKET_COLUMN_HEADERS,
+    bracket_layout,
+    stylesheet_for,
+)
 from oddsgraph.ontology import NodeType
 
 # Extra layouts used by the explorer (dagre lives in the extra bundle).
@@ -21,13 +25,7 @@ ASSETS_DIR = Path(__file__).resolve().parent / "assets"
 
 ALL_NODE_TYPES = [t.value for t in NodeType]
 
-STAGE_STRIP = [
-    "Round of 32",
-    "Round of 16",
-    "Quarterfinals",
-    "Semifinals",
-    "Final / 3rd",
-]
+STAGE_STRIP = [label for _, label in BRACKET_COLUMN_HEADERS]
 
 
 def default_stylesheet(view_mode: str = VIEW_BRACKET) -> list[dict[str, Any]]:

@@ -49,8 +49,9 @@ dataset.
 ## Topology vs market layer
 
 The default explorer view is a left-to-right knockout bracket (32 `MATCH`
-cards, `ADVANCES_TO` edges, path highlight on click). Switch to **Full
-topology** for `COMPETITION` / `STAGE` / `GROUP` / `ROUND` / `MATCH` / `TEAM`.
+cards, stage column headers, `ADVANCES_TO` edges, path highlight on click).
+Switch to **Full topology** for `COMPETITION` / `STAGE` / `GROUP` / `ROUND` /
+`MATCH` / `TEAM`.
 Compiled market outcomes bridge into topology via `REFERS_TO` (and related
 logical edges) when the proposition compiler covers the market template —
 see [Logical layer](../guides/logical-layer.md) for predicates and rules.

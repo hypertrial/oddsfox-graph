@@ -22,10 +22,24 @@ STAGE_COLUMN: dict[str, int] = {
     "Third Place": 4,
 }
 
+# One canvas header per bracket column (Final and Third Place share column 4).
+BRACKET_COLUMN_HEADERS: tuple[tuple[int, str], ...] = (
+    (0, "Round of 32"),
+    (1, "Round of 16"),
+    (2, "Quarterfinals"),
+    (3, "Semifinals"),
+    (4, "Final / 3rd"),
+)
+
+STAGE_HEADER_CLASS = "stage-header"
+STAGE_HEADER_TYPE = "STAGE_HEADER"
+
 COLUMN_X_SPACING = 260
 ROW_Y_SPACING = 72
 BRACKET_ORIGIN_X = 80
-BRACKET_ORIGIN_Y = 40
+# Match cards sit below column headers.
+BRACKET_ORIGIN_Y = 72
+BRACKET_HEADER_Y = 12
 # Offset Third Place below Final in the terminal column.
 THIRD_PLACE_Y_OFFSET = 160
 
@@ -91,6 +105,51 @@ def stage_rank(stage_label: str) -> int:
 def stage_column(stage_label: str) -> int:
     """Return left-to-right column index for a stage label."""
     return STAGE_COLUMN.get(stage_label, 0)
+
+
+def is_stage_header(el: dict[str, Any]) -> bool:
+    """Return True for non-interactive bracket column header nodes."""
+    if _is_edge(el):
+        return False
+    classes = str(el.get("classes") or "").split()
+    if STAGE_HEADER_CLASS in classes:
+        return True
+    data = el.get("data") or {}
+    return str(data.get("type") or "") == STAGE_HEADER_TYPE
+
+
+def bracket_stage_headers(
+    *,
+    columns: set[int] | None = None,
+) -> list[dict[str, Any]]:
+    """Build non-interactive stage labels for occupied bracket columns."""
+    headers: list[dict[str, Any]] = []
+    for col, label in BRACKET_COLUMN_HEADERS:
+        if columns is not None and col not in columns:
+            continue
+        headers.append(
+            {
+                "data": {
+                    "id": f"stage-header:{col}",
+                    "label": label,
+                    "short_label": label,
+                    "type": STAGE_HEADER_TYPE,
+                    "confidence": 1.0,
+                    "aliases": [],
+                    "evidence_count": 0,
+                    "resolution_method": "",
+                    "inference_method": "",
+                },
+                "classes": STAGE_HEADER_CLASS,
+                "position": {
+                    "x": BRACKET_ORIGIN_X + col * COLUMN_X_SPACING,
+                    "y": BRACKET_HEADER_Y,
+                },
+                "selectable": False,
+                "grabbable": False,
+            }
+        )
+    return headers
 
 
 def combine_classes(*parts: str) -> str:
@@ -224,6 +283,10 @@ def apply_path_highlight(
         semantic, preserved = split_classes(el.get("classes"))
         preserved.discard("path-active")
         preserved.discard("path-muted")
+        if is_stage_header(el):
+            # Column headers stay fully visible during path focus.
+            result.append({**el, "classes": merge_class_sets(semantic, preserved)})
+            continue
         if _is_edge(el):
             if eid in active_edges:
                 preserved.add("path-active")
@@ -471,6 +534,26 @@ def bracket_stylesheet() -> list[dict[str, Any]]:
             "style": {
                 "background-color": "#ecfdf5",
                 "border-color": "#0f766e",
+            },
+        },
+        {
+            "selector": f".{STAGE_HEADER_CLASS}",
+            "style": {
+                "label": "data(label)",
+                "shape": "rectangle",
+                "background-opacity": 0,
+                "border-width": 0,
+                "width": 168,
+                "height": 28,
+                "font-size": "12px",
+                "font-weight": 700,
+                "color": "#64748b",
+                "text-valign": "center",
+                "text-halign": "center",
+                "text-wrap": "wrap",
+                "text-max-width": 168,
+                "padding": "0px",
+                "events": "no",
             },
         },
         # Stage accent borders.

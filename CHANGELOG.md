@@ -60,6 +60,8 @@ flags and output schema as pre-1.0 and subject to change.
 
 ### Changed
 
+- Explorer knockout bracket draws non-interactive stage column headers
+  (Round of 32 → Final / 3rd) across the canvas.
 - Contributor checklist now explicitly asks for docs + changelog updates on
   user-visible behavior changes.
 - Public export schema API (`NODE_SCHEMA`, `EDGE_SCHEMA`, `write_parquet`,

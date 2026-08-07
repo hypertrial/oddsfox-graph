@@ -136,6 +136,28 @@ def test_merge_and_filters_preserve_path_classes() -> None:
     assert "hidden" not in by_id["match:1"]["classes"].split()
 
 
+def test_apply_filters_keeps_stage_headers_visible() -> None:
+    from oddsgraph.explorer.presentation import bracket_stage_headers
+
+    elements = [
+        _node("match:1", "MATCH"),
+        *bracket_stage_headers(columns={0}),
+    ]
+    filtered = apply_filters(elements, ["MATCH"], min_confidence=0.0, inference_method="")
+    by_id = {el["data"]["id"]: el for el in filtered}
+    assert "hidden" not in by_id["match:1"]["classes"].split()
+    assert "hidden" not in by_id["stage-header:0"]["classes"].split()
+    assert node_types_in_elements(elements) == ["MATCH"]
+
+    # Even with an empty type filter, column headers stay visible.
+    filtered_empty = apply_filters(
+        elements, [], min_confidence=0.0, inference_method=""
+    )
+    by_id = {el["data"]["id"]: el for el in filtered_empty}
+    assert "hidden" in by_id["match:1"]["classes"].split()
+    assert "hidden" not in by_id["stage-header:0"]["classes"].split()
+
+
 def test_clear_interaction_classes_keeps_hidden() -> None:
     from oddsgraph.explorer.filters import clear_interaction_classes
 

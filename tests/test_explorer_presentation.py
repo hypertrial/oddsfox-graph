@@ -6,8 +6,10 @@ from oddsgraph.explorer.presentation import (
     apply_path_highlight,
     bracket_layout,
     bracket_positions,
+    bracket_stage_headers,
     bracket_stylesheet,
     fifa_match_id,
+    is_stage_header,
     short_match_label,
     stage_column,
     stage_rank,
@@ -182,6 +184,55 @@ def test_apply_path_highlight_prefers_final_over_third_place() -> None:
     assert "path-muted" in by_id["sf|ADVANCES_TO|final"]["classes"].split()
 
 
+def test_bracket_stage_headers_align_to_columns() -> None:
+    headers = bracket_stage_headers()
+    assert len(headers) == 5
+    assert [h["data"]["label"] for h in headers] == [
+        "Round of 32",
+        "Round of 16",
+        "Quarterfinals",
+        "Semifinals",
+        "Final / 3rd",
+    ]
+    assert all(is_stage_header(h) for h in headers)
+    assert all(h["selectable"] is False and h["grabbable"] is False for h in headers)
+    assert headers[0]["position"]["x"] < headers[3]["position"]["x"]
+    assert headers[3]["data"]["label"] == "Semifinals"
+    # Final / 3rd shares the terminal column with Final matches.
+    assert stage_column("Final") == 4
+    assert headers[4]["position"]["x"] == headers[0]["position"]["x"] + 4 * (
+        headers[1]["position"]["x"] - headers[0]["position"]["x"]
+    )
+
+    only_terminal = bracket_stage_headers(columns={4})
+    assert len(only_terminal) == 1
+    assert only_terminal[0]["data"]["label"] == "Final / 3rd"
+
+
+def test_apply_path_highlight_keeps_stage_headers_visible() -> None:
+    elements = [
+        {"data": {"id": "a", "type": "MATCH", "stage": "Round of 32"}, "classes": "MATCH"},
+        {"data": {"id": "b", "type": "MATCH", "stage": "Final"}, "classes": "MATCH"},
+        {
+            "data": {
+                "id": "a|ADVANCES_TO|b",
+                "source": "a",
+                "target": "b",
+                "edge_type": "ADVANCES_TO",
+            },
+            "classes": "ADVANCES_TO",
+        },
+        *bracket_stage_headers(columns={0, 4}),
+    ]
+    highlighted = apply_path_highlight(elements, "a")
+    by_id = {el["data"]["id"]: el for el in highlighted}
+    assert "path-active" in by_id["a"]["classes"].split()
+    header = by_id["stage-header:0"]
+    assert "path-muted" not in header["classes"].split()
+    assert "path-active" not in header["classes"].split()
+    assert is_stage_header(header)
+
+
 def test_bracket_stylesheet_and_layout_contract() -> None:
     layout = bracket_layout()
     assert layout["name"] == "preset"
@@ -191,12 +242,18 @@ def test_bracket_stylesheet_and_layout_contract() -> None:
     assert "edge" in selectors
     assert ".path-active" in selectors
     assert ".path-muted" in selectors
+    assert ".stage-header" in selectors
     edge_style = next(rule["style"] for rule in styles if rule["selector"] == "edge")
     assert edge_style["curve-style"] == "taxi"
     assert edge_style["label"] == ""
     node_style = next(rule["style"] for rule in styles if rule["selector"] == "node")
     assert node_style["shape"] == "round-rectangle"
     assert node_style["label"] == "data(short_label)"
+    header_style = next(
+        rule["style"] for rule in styles if rule["selector"] == ".stage-header"
+    )
+    assert header_style["events"] == "no"
+    assert header_style["label"] == "data(label)"
 
 
 def test_stylesheet_for_matches_bracket_and_topology() -> None:

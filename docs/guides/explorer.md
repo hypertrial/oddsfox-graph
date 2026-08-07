@@ -26,6 +26,7 @@ The **knockout bracket** is a classic left-to-right tournament:
 
 - Exactly 32 `MATCH` cards connected by `ADVANCES_TO` edges
 - Round of 32 → Round of 16 → Quarterfinals → Semifinals → Final / Third Place
+- Non-interactive column headers label each stage across the canvas
 - Deterministic `preset` layout (not a force-directed hairball)
 - Orthogonal taxi edges without repeated `ADVANCES_TO` labels
 - Click a match to highlight its path through the DAG and inspect features

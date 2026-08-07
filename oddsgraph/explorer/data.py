@@ -14,7 +14,9 @@ from oddsgraph.config import Settings
 from oddsgraph.explorer import KNOCKOUT_STAGE_LABELS, TOPOLOGY_NODE_TYPES
 from oddsgraph.explorer.presentation import (
     bracket_positions,
+    bracket_stage_headers,
     short_match_label,
+    stage_column,
     stage_rank,
 )
 from oddsgraph.export import EDGE_SCHEMA, NODE_SCHEMA, table_with_schema
@@ -271,6 +273,7 @@ class ExplorerDataStore:
             edge_els = [edge_element(e) for e in edges]
             positions = bracket_positions(node_els, edge_els)
             positioned: list[dict[str, Any]] = []
+            occupied_columns: set[int] = set()
             for el in node_els:
                 node_id = el["data"]["id"]
                 pos = positions.get(node_id)
@@ -278,8 +281,12 @@ class ExplorerDataStore:
                     positioned.append({**el, "position": pos})
                 else:
                     positioned.append(el)
+                occupied_columns.add(
+                    stage_column(str(el["data"].get("stage") or ""))
+                )
 
-            slice_ = GraphSlice(nodes=positioned, edges=edge_els)
+            headers = bracket_stage_headers(columns=occupied_columns)
+            slice_ = GraphSlice(nodes=[*headers, *positioned], edges=edge_els)
             self._bracket_cache = slice_
             return slice_
 
@@ -510,10 +517,11 @@ def topology_elements(settings: Settings) -> GraphSlice:
 
 
 def bracket_elements(settings: Settings) -> GraphSlice:
-    """Return the 32-node knockout MATCH DAG (MATCH ADVANCES_TO MATCH only).
+    """Return the knockout MATCH DAG plus column stage headers.
 
     Each MATCH node is enriched with ``stage``, ``stage_rank``, ``short_label``,
     and a deterministic left-to-right ``position`` for the preset bracket layout.
+    Non-interactive ``STAGE_HEADER`` nodes label occupied columns.
     """
     return get_store(settings).bracket_elements()
 
