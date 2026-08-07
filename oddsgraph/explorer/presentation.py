@@ -45,6 +45,7 @@ NODE_COLORS: dict[str, str] = {
     "EVENT": "#7030a0",
     "MARKET": "#ffc000",
     "OUTCOME": "#a5a5a5",
+    "CONSTRAINT": "#c45911",
 }
 
 EDGE_COLORS: dict[str, str] = {
@@ -56,6 +57,11 @@ EDGE_COLORS: dict[str, str] = {
     "HAS_OUTCOME": "#a5a5a5",
     "PRICES": "#ffc000",
     "IMPLIES": "#7f7f7f",
+    "REFERS_TO": "#5b9bd5",
+    "EQUIVALENT": "#7030a0",
+    "COMPLEMENT": "#a5a5a5",
+    "MUTEX": "#c00000",
+    "EXACTLY_ONE": "#c45911",
 }
 
 

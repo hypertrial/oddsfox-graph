@@ -33,6 +33,7 @@ _NODE_TEMPLATE: dict[str, Any] = {
     "evidence_market_ids": [],
     "resolution_method": "",
     "inference_method": "",
+    "proposition_json": None,
 }
 
 _EDGE_TEMPLATE: dict[str, Any] = {
@@ -43,12 +44,48 @@ _EDGE_TEMPLATE: dict[str, Any] = {
     "evidence_market_ids": [],
     "evidence_text": "",
     "inference_method": "",
+    "derivation_type": "extraction",
+    "rule_id": None,
+    "rule_version": None,
+    "premises": None,
 }
 
 _REJECTED_EDGE_TEMPLATE: dict[str, Any] = {
     **_EDGE_TEMPLATE,
     "rejection_reason": "",
 }
+
+
+def _node_row(node: CanonicalNode) -> dict[str, Any]:
+    return {
+        "canonical_id": node.canonical_id,
+        "type": node.type.value if hasattr(node.type, "value") else node.type,
+        "label": node.label,
+        "aliases": list(node.aliases),
+        "confidence": node.confidence,
+        "evidence_market_ids": list(node.evidence_market_ids),
+        "resolution_method": node.resolution_method,
+        "inference_method": node.inference_method,
+        "proposition_json": (
+            node.proposition.model_dump_json() if node.proposition is not None else None
+        ),
+    }
+
+
+def _edge_row(edge: CanonicalEdge) -> dict[str, Any]:
+    return {
+        "source_id": edge.source_id,
+        "target_id": edge.target_id,
+        "edge_type": edge.edge_type.value,
+        "confidence": edge.confidence,
+        "evidence_market_ids": edge.evidence_market_ids,
+        "evidence_text": edge.evidence_text,
+        "inference_method": edge.inference_method,
+        "derivation_type": edge.derivation_type,
+        "rule_id": edge.rule_id,
+        "rule_version": edge.rule_version,
+        "premises": edge.premises,
+    }
 
 
 def export_graph_artifacts(
@@ -62,38 +99,11 @@ def export_graph_artifacts(
     ontology_path: Path,
     inference_report_path: Path,
 ) -> None:
-    _write_parquet(nodes_path, [n.model_dump() for n in nodes], _NODE_TEMPLATE)
-    _write_parquet(
-        edges_path,
-        [
-            {
-                "source_id": e.source_id,
-                "target_id": e.target_id,
-                "edge_type": e.edge_type.value,
-                "confidence": e.confidence,
-                "evidence_market_ids": e.evidence_market_ids,
-                "evidence_text": e.evidence_text,
-                "inference_method": e.inference_method,
-            }
-            for e in edges
-        ],
-        _EDGE_TEMPLATE,
-    )
+    _write_parquet(nodes_path, [_node_row(n) for n in nodes], _NODE_TEMPLATE)
+    _write_parquet(edges_path, [_edge_row(e) for e in edges], _EDGE_TEMPLATE)
     _write_parquet(
         rejected_edges_path,
-        [
-            {
-                "source_id": e.source_id,
-                "target_id": e.target_id,
-                "edge_type": e.edge_type.value,
-                "confidence": e.confidence,
-                "evidence_market_ids": e.evidence_market_ids,
-                "evidence_text": e.evidence_text,
-                "inference_method": e.inference_method,
-                "rejection_reason": e.rejection_reason,
-            }
-            for e in rejected_edges
-        ],
+        [{**_edge_row(e), "rejection_reason": e.rejection_reason} for e in rejected_edges],
         _REJECTED_EDGE_TEMPLATE,
     )
     ontology_path.write_text(json.dumps(dump_ontology_json(), indent=2), encoding="utf-8")

@@ -54,3 +54,83 @@ def test_load_semantic_markets_event_filter_matches_full_load() -> None:
     expected = [market for market in markets if market.event_id == "351746"]
     assert len(filtered) == len(expected)
     assert {market.market_id for market in filtered} == {market.market_id for market in expected}
+
+
+def test_pipeline_compiles_propositions_and_rules() -> None:
+    from oddsgraph.ontology import EdgeType
+    from oddsgraph.schema import SemanticMarket
+
+    markets = [
+        SemanticMarket(
+            market_id="10",
+            event_id="100",
+            event_title="Brazil vs. Morocco",
+            event_slug="fifwc-bra-mar-2026-06-13",
+            question="Will Brazil win?",
+            group_item_title="Brazil",
+            sports_market_type="moneyline",
+            outcomes=["Yes", "No"],
+        ),
+        SemanticMarket(
+            market_id="11",
+            event_id="100",
+            event_title="Brazil vs. Morocco",
+            event_slug="fifwc-bra-mar-2026-06-13",
+            question="Will Morocco win?",
+            group_item_title="Morocco",
+            sports_market_type="moneyline",
+            outcomes=["Yes", "No"],
+        ),
+        SemanticMarket(
+            market_id="20",
+            event_id="200",
+            event_title="World Cup Winner",
+            event_slug="world-cup-winner",
+            question="Will Brazil win the 2026 FIFA World Cup?",
+            group_item_title="Brazil",
+            outcomes=["Yes", "No"],
+        ),
+        SemanticMarket(
+            market_id="30",
+            event_id="300",
+            event_title="World Cup: Nation to Reach Final",
+            event_slug="nation-final",
+            question="Will Brazil reach the final?",
+            group_item_title="Brazil",
+            outcomes=["Yes", "No"],
+        ),
+    ]
+    settings = Settings()
+    settings.official_bracket = False
+    result = build_pipeline_from_markets(settings, markets)
+    assert result.propositions
+    assert any(n.proposition is not None for n in result.graph.nodes)
+    assert any(e.edge_type == EdgeType.REFERS_TO for e in result.graph.edges)
+    assert any(e.edge_type == EdgeType.PRICES for e in result.graph.edges)
+    assert any(e.derivation_type == "rule" for e in result.graph.edges)
+
+
+def test_pipeline_can_disable_propositions() -> None:
+    from oddsgraph.ontology import EdgeType
+    from oddsgraph.schema import SemanticMarket
+
+    markets = [
+        SemanticMarket(
+            market_id="10",
+            event_id="100",
+            event_title="Brazil vs. Morocco",
+            event_slug="fifwc-bra-mar-2026-06-13",
+            question="Will Brazil win?",
+            group_item_title="Brazil",
+            sports_market_type="moneyline",
+            outcomes=["Yes", "No"],
+        ),
+    ]
+    settings = Settings()
+    settings.official_bracket = False
+    settings.compile_propositions = False
+    settings.apply_rules = False
+    result = build_pipeline_from_markets(settings, markets)
+    assert result.propositions is None
+    assert not any(e.edge_type == EdgeType.REFERS_TO for e in result.graph.edges)
+    assert not any(n.proposition is not None for n in result.graph.nodes)

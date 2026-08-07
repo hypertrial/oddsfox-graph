@@ -7,6 +7,9 @@ def test_canonical_ids_are_deterministic() -> None:
     assert ids.event_id("351746") == "event:351746"
     assert ids.market_id("1897133") == "market:1897133"
     assert ids.outcome_id("1897133", "Yes") == "outcome:1897133:yes"
+    assert ids.constraint_id("exact-champion", "World Cup 2026").startswith(
+        "constraint:exact-champion:"
+    )
 
 
 def test_team_code_aliases() -> None:

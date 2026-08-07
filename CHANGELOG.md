@@ -15,12 +15,16 @@ flags and output schema as pre-1.0 and subject to change.
 
 ## [Unreleased]
 
-Add entries here for user-visible changes (new/changed CLI flags, changed
-defaults, output schema changes, new docs pages) as part of the PR that
-introduces them.
-
 ### Added
 
+- Formal proposition layer: deterministic compiler attaches `Proposition`
+  payloads to covered `OUTCOME` nodes and emits `REFERS_TO`, `PRICES`,
+  `COMPLEMENT`, and `EXACTLY_ONE` (+ `CONSTRAINT` nodes).
+- Deterministic rule engine (`IMPLIES` / `EQUIVALENT` / `MUTEX`) with flat
+  provenance fields (`derivation_type`, `rule_id`, `rule_version`, `premises`).
+- `oddsgraph build --propositions/--no-propositions` and
+  `--reasoning/--no-reasoning` (both default on).
+- On-demand `oddsgraph closure` writing `build/implies_closure.parquet`.
 - `oddsgraph` CLI (`reduce`, `infer`, `build`, `validate`, `explore`, `run`)
   over Polymarket WC2026 hourly-odds parquet.
 - Deterministic topology extraction for match/group/stage/tournament
@@ -42,6 +46,15 @@ introduces them.
   residual LLM path.
 - MkDocs documentation site with persona-based navigation (Analysts,
   Operators, Contributors, Integrators).
+
+### Changed
+
+- Ontology adds `CONSTRAINT`, `REFERS_TO`, `EQUIVALENT`, `COMPLEMENT`,
+  `MUTEX`, and `EXACTLY_ONE`.
+- Exported `nodes.parquet` includes `proposition_json`; `edges.parquet`
+  includes derivation provenance columns.
+- Docs updated for the topology↔market bridge (no longer universally
+  disconnected; residual market types may still lack propositions).
 
 ### Documentation
 

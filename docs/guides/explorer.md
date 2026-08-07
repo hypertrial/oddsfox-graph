@@ -47,15 +47,15 @@ on a full WC2026 build).
 On narrower viewports, use the **Controls** / **Inspector** toggles so the
 canvas keeps most of the screen.
 
-## Topology / market disconnect
+## Topology / market bridge
 
-!!! warning
+!!! note
 
-    The topology layer and the market layer are currently **disconnected**. The
-    export has no `PRICES` or `IMPLIES` edges linking `MATCH` / `TEAM` nodes to
-    `EVENT` / `MARKET` / `OUTCOME` nodes, so expanding a topology node will not
-    reach markets. Search for an event title (or market id) to explore the market
-    layer independently.
+    Deterministic proposition compilation links covered `OUTCOME` nodes into
+    topology via `REFERS_TO` (plus `PRICES` / logical edges). Residual market
+    types without a compiled proposition remain disconnected — search for an
+    event title or market id to inspect them, and see
+    [Known limitations](../concepts/limitations.md).
 
 ## See also
 

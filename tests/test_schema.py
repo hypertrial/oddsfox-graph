@@ -186,3 +186,40 @@ def test_compact_node_and_edge_helpers() -> None:
     assert edge.source == "team:a"
     assert CompactNode.from_node(node).id == "team:a"
     assert CompactEdge.from_edge(edge).x == "x"
+
+
+def test_proposition_key_and_canonical_fields() -> None:
+    from oddsgraph.schema import CanonicalEdge, CanonicalNode, Proposition
+
+    prop = Proposition(
+        predicate="reaches_stage",
+        arguments={"team": "team:canada", "stage": "stage:final"},
+        polarity=False,
+    )
+    assert prop.key().startswith("!reaches_stage(")
+    assert "team=team:canada" in prop.key()
+
+    node = CanonicalNode(
+        canonical_id="outcome:1:yes",
+        type=NodeType.OUTCOME,
+        label="Yes",
+        confidence=1.0,
+        evidence_market_ids=["1"],
+        proposition=prop,
+    )
+    assert node.proposition is not None
+    assert node.proposition.polarity is False
+
+    edge = CanonicalEdge(
+        source_id="a",
+        target_id="b",
+        edge_type=EdgeType.IMPLIES,
+        confidence=1.0,
+        evidence_market_ids=["1"],
+        derivation_type="rule",
+        rule_id="wc.stage_monotonicity",
+        rule_version=1,
+        premises=["p1", "p2"],
+    )
+    assert edge.derivation_type == "rule"
+    assert edge.rule_id == "wc.stage_monotonicity"

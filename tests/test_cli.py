@@ -28,6 +28,7 @@ def test_cli_help() -> None:
     assert "validate" in output
     assert "run" in output
     assert "explore" in output
+    assert "closure" in output
 
 
 def test_cli_explore_help() -> None:
@@ -68,6 +69,16 @@ def test_cli_run_help_includes_infer_and_build_options() -> None:
     assert "verify-deterministic" in output or "verify-determini" in output
     assert "few-shot" in output
     assert "mlx" in output.lower() or "--mlx-model-path" in output
+    assert "propositions" in output
+    assert "reasoning" in output
+
+
+def test_cli_build_help_includes_proposition_flags() -> None:
+    help_result = runner.invoke(app, ["build", "--help"])
+    assert help_result.exit_code == 0
+    output = _plain_output(help_result.output)
+    assert "propositions" in output
+    assert "reasoning" in output
 
 
 def test_cli_build_and_validate_with_fixture(tmp_path: Path) -> None:

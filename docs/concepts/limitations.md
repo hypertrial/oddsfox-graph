@@ -1,5 +1,5 @@
 ---
-description: Known OddsFox Graph caveats including disconnected topology and market layers and WC2026-only scope.
+description: Known OddsFox Graph caveats including proposition template coverage and WC2026-only scope.
 ---
 
 # Known limitations
@@ -8,24 +8,39 @@ A single place for caveats that are otherwise scattered across guides and
 audience pages. Read this before treating any exported artifact as more
 authoritative than it is.
 
-## Topology and market layers are disconnected
+## Proposition bridge covers deterministic templates only
 
-The exported graph has no `PRICES` or `IMPLIES` edges linking `MATCH` /
-`TEAM` topology nodes to `EVENT` / `MARKET` / `OUTCOME` market nodes.
-Expanding from a topology node in the explorer will not reach markets, and
-joining the two layers downstream requires your own matching logic (for
-example on `event_title` or market id). See
-[Output artifacts](../reference/output-artifacts.md) and
-[Ontology](../reference/ontology.md) for the exact edge patterns that do
-exist today.
+`REFERS_TO`, `PRICES`, `COMPLEMENT`, and `EXACTLY_ONE` edges (plus
+`Proposition` payloads on `OUTCOME` nodes) are emitted by the deterministic
+proposition compiler for:
+
+- match moneylines / draw / team-to-advance
+- group-winner markets
+- stage-of-elimination markets
+- world-cup-winner markets
+- nation/team reaches-stage markets (`Nation to Reach Final/Semifinals/…`,
+  `Team to advance to Knockout Stages`)
+
+Residual / unrecognized market types still produce `EVENT` / `MARKET` /
+`OUTCOME` structure without formal propositions, so those outcomes remain
+disconnected from topology entities. Check `proposition_json` on exported
+nodes and `derivation_type` on edges before assuming a logical bridge exists.
+
+## Rule engine is intentionally small
+
+Direct logical edges (`IMPLIES`, `EQUIVALENT`, `MUTEX`) come from a fixed
+WC2026 rule registry — not from LLM judgment. Transitive `IMPLIES` closure is
+**on-demand** via `oddsgraph closure` and is not written into
+`edges.parquet` by default.
 
 ## Scope is WC2026 / Polymarket only
 
-Deterministic templates, team alias/code tables, and the official bracket
-fragment (`oddsgraph/data/wc2026_schedule.json`) are all built against the
-Polymarket WC2026 hourly-odds schema and FIFA's 2026 World Cup structure.
-Nothing here generalizes to other tournaments or other prediction-market
-platforms without new templates, alias tables, and a new schedule export.
+Deterministic templates, team alias/code tables, proposition predicates, and
+the official bracket fragment (`oddsgraph/data/wc2026_schedule.json`) are all
+built against the Polymarket WC2026 hourly-odds schema and FIFA's 2026 World
+Cup structure. Nothing here generalizes to other tournaments or other
+prediction-market platforms without new templates, alias tables, and a new
+schedule export.
 
 ## Residual LLM output is lower-confidence than deterministic/official paths
 

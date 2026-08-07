@@ -1,5 +1,5 @@
 ---
-description: Answers about hosted data, inference speed, Metal, topology-market disconnect, and configuration defaults.
+description: Answers about hosted data, inference speed, Metal, topology-market bridging, and configuration defaults.
 ---
 
 # FAQ
@@ -26,9 +26,11 @@ CPU-only environments can install the prebuilt CPU wheel instead. See
 
 ## Are topology and markets connected?
 
-Not yet in the exported graph. There are currently no `PRICES` / `IMPLIES` edges
-linking `MATCH` / `TEAM` nodes to `EVENT` / `MARKET` / `OUTCOME` nodes. Use
-search in the explorer to inspect the market layer separately.
+Yes for markets covered by the proposition compiler. Those `OUTCOME` nodes
+carry a formal `Proposition` and link into topology via `REFERS_TO` (plus
+`PRICES` / `COMPLEMENT` / `EXACTLY_ONE`). Deterministic rules then add
+`IMPLIES` / `EQUIVALENT` / `MUTEX`. Residual / unrecognized market types may
+still lack propositions — see [Known limitations](limitations.md).
 
 ## Where do configuration defaults live?
 

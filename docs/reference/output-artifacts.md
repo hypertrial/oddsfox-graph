@@ -20,6 +20,7 @@ Schema from `CanonicalNode`:
 | `evidence_market_ids` | list[string] | Supporting market ids |
 | `resolution_method` | string | How the node was resolved |
 | `inference_method` | string | How the node was inferred |
+| `proposition_json` | string \| null | JSON-serialized `Proposition` for compiled OUTCOME nodes |
 
 ## `edges.parquet`
 
@@ -34,6 +35,10 @@ Schema from `CanonicalEdge`:
 | `evidence_market_ids` | list[string] | Supporting market ids |
 | `evidence_text` | string | Optional evidence snippet |
 | `inference_method` | string | How the edge was inferred |
+| `derivation_type` | string | `extraction`, `compiler`, `rule`, or `transitive` |
+| `rule_id` | string \| null | Rule identifier when `derivation_type=rule` |
+| `rule_version` | int \| null | Rule version when `derivation_type=rule` |
+| `premises` | list[string] \| null | Proposition keys or transitive path |
 
 ## `rejected_edges.parquet`
 
@@ -43,10 +48,16 @@ Same columns as edges, plus:
 | --- | --- | --- |
 | `rejection_reason` | string | Why the edge was dropped |
 
+## `implies_closure.parquet`
+
+Optional on-demand export from `oddsgraph closure`. Same columns as
+`edges.parquet`; rows are transitive `IMPLIES` edges with
+`derivation_type=transitive` and `premises` holding the shortest path.
+
 ## `ontology.json`
 
-Dump of node types, edge types, allowed patterns, and progression edge types
-from `dump_ontology_json()`.
+Dump of node types, edge types, allowed patterns, progression edge types, and
+logical edge types from `dump_ontology_json()`.
 
 ## `inference_report.json`
 

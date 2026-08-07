@@ -16,6 +16,7 @@ class NodeType(str, Enum):
     EVENT = "EVENT"
     MARKET = "MARKET"
     OUTCOME = "OUTCOME"
+    CONSTRAINT = "CONSTRAINT"
 
 
 class EdgeType(str, Enum):
@@ -27,6 +28,11 @@ class EdgeType(str, Enum):
     QUALIFIES_FOR = "QUALIFIES_FOR"
     ADVANCES_TO = "ADVANCES_TO"
     IMPLIES = "IMPLIES"
+    REFERS_TO = "REFERS_TO"
+    EQUIVALENT = "EQUIVALENT"
+    COMPLEMENT = "COMPLEMENT"
+    MUTEX = "MUTEX"
+    EXACTLY_ONE = "EXACTLY_ONE"
 
 
 ALLOWED_EDGE_PATTERNS: dict[EdgeType, set[tuple[NodeType, NodeType]]] = {
@@ -75,10 +81,39 @@ ALLOWED_EDGE_PATTERNS: dict[EdgeType, set[tuple[NodeType, NodeType]]] = {
         (NodeType.OUTCOME, NodeType.OUTCOME),
         (NodeType.MARKET, NodeType.OUTCOME),
     },
+    EdgeType.REFERS_TO: {
+        (NodeType.OUTCOME, NodeType.TEAM),
+        (NodeType.OUTCOME, NodeType.MATCH),
+        (NodeType.OUTCOME, NodeType.STAGE),
+        (NodeType.OUTCOME, NodeType.COMPETITION),
+        (NodeType.OUTCOME, NodeType.GROUP),
+    },
+    EdgeType.EQUIVALENT: {
+        (NodeType.OUTCOME, NodeType.OUTCOME),
+    },
+    EdgeType.COMPLEMENT: {
+        (NodeType.OUTCOME, NodeType.OUTCOME),
+    },
+    EdgeType.MUTEX: {
+        (NodeType.OUTCOME, NodeType.OUTCOME),
+    },
+    EdgeType.EXACTLY_ONE: {
+        (NodeType.CONSTRAINT, NodeType.OUTCOME),
+    },
 }
 
 PROGRESSION_EDGE_TYPES: frozenset[EdgeType] = frozenset(
     {EdgeType.ADVANCES_TO, EdgeType.QUALIFIES_FOR}
+)
+
+LOGICAL_EDGE_TYPES: frozenset[EdgeType] = frozenset(
+    {
+        EdgeType.IMPLIES,
+        EdgeType.EQUIVALENT,
+        EdgeType.COMPLEMENT,
+        EdgeType.MUTEX,
+        EdgeType.EXACTLY_ONE,
+    }
 )
 
 
@@ -103,4 +138,5 @@ def dump_ontology_json() -> dict[str, Any]:
             for et, patterns in ALLOWED_EDGE_PATTERNS.items()
         },
         "progression_edge_types": [t.value for t in PROGRESSION_EDGE_TYPES],
+        "logical_edge_types": [t.value for t in LOGICAL_EDGE_TYPES],
     }

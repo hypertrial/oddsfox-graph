@@ -150,3 +150,86 @@ def test_fixture_fragment_builds_valid_edges() -> None:
     errors = validate_exported_graph(result.nodes, result.edges)
     assert errors == []
     assert len(result.edges) >= 2
+
+
+def test_implies_cycle_is_rejected() -> None:
+    from oddsgraph.graphbuild import _has_implies_cycle
+
+    edges = [
+        CanonicalEdge(
+            source_id="outcome:a",
+            target_id="outcome:b",
+            edge_type=EdgeType.IMPLIES,
+            confidence=1.0,
+            evidence_market_ids=["1"],
+        ),
+        CanonicalEdge(
+            source_id="outcome:b",
+            target_id="outcome:a",
+            edge_type=EdgeType.IMPLIES,
+            confidence=1.0,
+            evidence_market_ids=["2"],
+        ),
+    ]
+    assert _has_implies_cycle(edges)
+
+    fragment = GraphFragment(
+        nodes=[
+            Node(
+                local_id="outcome:a",
+                type=NodeType.OUTCOME,
+                label="A",
+                confidence=1.0,
+                evidence_market_ids=["1"],
+            ),
+            Node(
+                local_id="outcome:b",
+                type=NodeType.OUTCOME,
+                label="B",
+                confidence=1.0,
+                evidence_market_ids=["2"],
+            ),
+        ],
+        edges=[
+            Edge(
+                source="outcome:a",
+                target="outcome:b",
+                type=EdgeType.IMPLIES,
+                confidence=1.0,
+                evidence_market_ids=["1"],
+            ),
+            Edge(
+                source="outcome:b",
+                target="outcome:a",
+                type=EdgeType.IMPLIES,
+                confidence=1.0,
+                evidence_market_ids=["2"],
+            ),
+        ],
+    )
+    settings = Settings()
+    state = resolve_fragments([fragment], settings, inference_method="rule_engine")
+    result = build_graph_from_fragments(
+        [fragment], state, settings, fragment_methods=["rule_engine"]
+    )
+    assert any(e.rejection_reason == "implies_cycle" for e in result.rejected_edges)
+    assert not any(e.edge_type == EdgeType.IMPLIES for e in result.edges)
+    assert "implies cycle detected" in validate_exported_graph(
+        result.nodes,
+        [
+            CanonicalEdge(
+                source_id="outcome:a",
+                target_id="outcome:b",
+                edge_type=EdgeType.IMPLIES,
+                confidence=1.0,
+                evidence_market_ids=["1"],
+            ),
+            CanonicalEdge(
+                source_id="outcome:b",
+                target_id="outcome:a",
+                edge_type=EdgeType.IMPLIES,
+                confidence=1.0,
+                evidence_market_ids=["2"],
+            ),
+        ],
+    )

@@ -1,5 +1,5 @@
 ---
-description: Stage-by-stage oddsgraph CLI walkthrough for reduce, infer, build, validate, explore, and run.
+description: Stage-by-stage oddsgraph CLI walkthrough for reduce, infer, build, validate, explore, closure, and run.
 ---
 
 # Running the pipeline
@@ -13,8 +13,9 @@ OddsFox Graph exposes a Typer CLI named `oddsgraph`. Every command shares
 | --- | --- |
 | `oddsgraph reduce` | Reduce hourly odds parquet to semantic market records |
 | `oddsgraph infer` | Infer graph fragments per event (deterministic + residual LLM) |
-| `oddsgraph build` | Resolve entities, validate, export nodes/edges |
+| `oddsgraph build` | Resolve entities, compile propositions, apply rules, export |
 | `oddsgraph validate` | Validate exported artifacts |
+| `oddsgraph closure` | On-demand transitive `IMPLIES` closure |
 | `oddsgraph explore` | Local Dash explorer over exported parquet |
 | `oddsgraph run` | Full pipeline: reduce → infer → build → validate |
 
@@ -25,6 +26,7 @@ oddsgraph reduce
 oddsgraph infer --limit-events 10 -v
 oddsgraph build
 oddsgraph validate
+oddsgraph closure   # optional
 ```
 
 Or one shot:
@@ -53,6 +55,7 @@ Build / run:
 
 ```bash
 oddsgraph build --minimum-confidence 0.5 --official-bracket
+oddsgraph build --no-propositions --no-reasoning
 ```
 
 See [CLI](../reference/cli.md) for the complete flag list and
@@ -68,6 +71,7 @@ build/fragments/
 build/nodes.parquet
 build/edges.parquet
 build/rejected_edges.parquet
+build/implies_closure.parquet   # from oddsgraph closure
 build/inference_report.json
 build/ontology.json
 ```

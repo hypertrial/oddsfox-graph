@@ -1,5 +1,5 @@
 ---
-description: Complete oddsgraph CLI reference for reduce, infer, build, validate, explore, and run flags.
+description: Complete oddsgraph CLI reference for reduce, infer, build, validate, explore, closure, and run flags.
 ---
 
 # CLI
@@ -43,16 +43,23 @@ Infer graph fragments per event using deterministic topology and/or a local LLM.
 
 ## `oddsgraph build`
 
-Resolve entities, build graph, validate, and export artifacts.
+Resolve entities, compile propositions, apply logical rules, and export artifacts.
 
 | Option | Description |
 | --- | --- |
 | `--minimum-confidence` | Minimum edge confidence threshold |
 | `--official-bracket` / `--no-official-bracket` | Inject curated WC2026 stage ladder and official MATCH bracket |
+| `--propositions` / `--no-propositions` | Compile formal propositions onto OUTCOME nodes (default: on) |
+| `--reasoning` / `--no-reasoning` | Apply deterministic logical rules over propositions (default: on) |
 
 ## `oddsgraph validate`
 
 Validate exported graph artifacts. Exits non-zero on failure.
+
+## `oddsgraph closure`
+
+Compute on-demand transitive `IMPLIES` closure from exported edges into
+`build/implies_closure.parquet`. Requires a prior `oddsgraph build`.
 
 ## `oddsgraph explore`
 

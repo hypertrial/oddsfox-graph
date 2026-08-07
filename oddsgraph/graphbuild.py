@@ -10,6 +10,7 @@ from oddsgraph.config import Settings
 from oddsgraph.ontology import (
     is_allowed_edge,
     PROGRESSION_EDGE_TYPES,
+    EdgeType,
 )
 from oddsgraph.resolution import ResolutionState
 from oddsgraph.schema import CanonicalEdge, CanonicalNode, GraphFragment, RejectedEdge
@@ -30,21 +31,23 @@ def _dedupe_edges(edges: list[CanonicalEdge]) -> list[CanonicalEdge]:
         if existing is None:
             merged[key] = edge
             continue
+        # Prefer the higher-confidence edge as the provenance primary.
+        primary = existing if existing.confidence >= edge.confidence else edge
+        secondary = edge if primary is existing else existing
         merged_evidence = sorted(
             set(existing.evidence_market_ids) | set(edge.evidence_market_ids)
         )
-        evidence_text = existing.evidence_text or edge.evidence_text
-        merged[key] = existing.model_copy(
+        merged[key] = primary.model_copy(
             update={
                 "confidence": max(existing.confidence, edge.confidence),
                 "evidence_market_ids": merged_evidence,
-                "evidence_text": evidence_text,
+                "evidence_text": primary.evidence_text or secondary.evidence_text,
             }
         )
     return list(merged.values())
 
 
-def _has_progression_cycle(edges: list[CanonicalEdge]) -> bool:
+def _has_typed_cycle(edges: list[CanonicalEdge], edge_types: frozenset) -> bool:
     if not edges:
         return False
 
@@ -57,7 +60,7 @@ def _has_progression_cycle(edges: list[CanonicalEdge]) -> bool:
         return node_index[node_id]
 
     for edge in edges:
-        if edge.edge_type not in PROGRESSION_EDGE_TYPES:
+        if edge.edge_type not in edge_types:
             continue
         graph.add_edge(idx(edge.source_id), idx(edge.target_id), edge)
 
@@ -65,6 +68,62 @@ def _has_progression_cycle(edges: list[CanonicalEdge]) -> bool:
         return False
 
     return not rx.is_directed_acyclic_graph(graph)
+
+
+def _has_progression_cycle(edges: list[CanonicalEdge]) -> bool:
+    return _has_typed_cycle(edges, PROGRESSION_EDGE_TYPES)
+
+
+def _has_implies_cycle(edges: list[CanonicalEdge]) -> bool:
+    return _has_typed_cycle(edges, frozenset({EdgeType.IMPLIES}))
+
+
+# Public aliases used by the build pipeline.
+dedupe_edges = _dedupe_edges
+has_implies_cycle = _has_implies_cycle
+
+
+def accept_edges(
+    edges: list[CanonicalEdge],
+    node_types: dict[str, object],
+    settings: Settings,
+) -> tuple[list[CanonicalEdge], list[RejectedEdge]]:
+    """Apply confidence, evidence, and ontology checks to candidate edges."""
+    accepted: list[CanonicalEdge] = []
+    rejected: list[RejectedEdge] = []
+    for edge in edges:
+        if edge.confidence < settings.minimum_confidence:
+            rejected.append(
+                RejectedEdge(
+                    **edge.model_dump(),
+                    rejection_reason="below_minimum_confidence",
+                )
+            )
+            continue
+        if edge.confidence < 0 or edge.confidence > 1:
+            rejected.append(
+                RejectedEdge(**edge.model_dump(), rejection_reason="invalid_confidence")
+            )
+            continue
+        if not edge.evidence_market_ids:
+            rejected.append(
+                RejectedEdge(**edge.model_dump(), rejection_reason="missing_evidence")
+            )
+            continue
+        source_type = node_types.get(edge.source_id)
+        target_type = node_types.get(edge.target_id)
+        if source_type is None or target_type is None:
+            rejected.append(
+                RejectedEdge(**edge.model_dump(), rejection_reason="missing_endpoint")
+            )
+            continue
+        if not is_allowed_edge(edge.edge_type, source_type, target_type):  # type: ignore[arg-type]
+            rejected.append(
+                RejectedEdge(**edge.model_dump(), rejection_reason="invalid_pattern")
+            )
+            continue
+        accepted.append(edge)
+    return accepted, rejected
 
 
 def _reject_cyclic_progression_edges(
@@ -144,6 +203,9 @@ def build_graph_from_fragments(
 
     for idx, fragment in enumerate(fragments):
         method = inference_methods[idx] if idx < len(inference_methods) else "unknown"
+        derivation = (
+            "compiler" if method == "proposition_compiler" else "extraction"
+        )
         for edge in fragment.edges:
             source_id = resolution_state.local_to_canonical.get(edge.source)
             target_id = resolution_state.local_to_canonical.get(edge.target)
@@ -160,51 +222,28 @@ def build_graph_from_fragments(
                     evidence_market_ids=list(edge.evidence_market_ids),
                     evidence_text=edge.evidence_text,
                     inference_method=method,
+                    derivation_type=derivation,
                 )
             )
 
     deduped = _dedupe_edges(raw_edges)
-    accepted: list[CanonicalEdge] = []
-    rejected: list[RejectedEdge] = []
-
-    for edge in deduped:
-        if edge.confidence < settings.minimum_confidence:
-            rejected.append(
-                RejectedEdge(
-                    **edge.model_dump(),
-                    rejection_reason="below_minimum_confidence",
-                )
-            )
-            continue
-        if edge.confidence < 0 or edge.confidence > 1:
-            rejected.append(
-                RejectedEdge(**edge.model_dump(), rejection_reason="invalid_confidence")
-            )
-            continue
-        if not edge.evidence_market_ids:
-            rejected.append(
-                RejectedEdge(**edge.model_dump(), rejection_reason="missing_evidence")
-            )
-            continue
-        source_type = node_types.get(edge.source_id)
-        target_type = node_types.get(edge.target_id)
-        if source_type is None or target_type is None:
-            rejected.append(
-                RejectedEdge(**edge.model_dump(), rejection_reason="missing_endpoint")
-            )
-            continue
-        if not is_allowed_edge(edge.edge_type, source_type, target_type):
-            rejected.append(
-                RejectedEdge(**edge.model_dump(), rejection_reason="invalid_pattern")
-            )
-            continue
-        accepted.append(edge)
+    accepted, rejected = accept_edges(deduped, node_types, settings)
 
     progression_edges = [e for e in accepted if e.edge_type in PROGRESSION_EDGE_TYPES]
     non_progression = [e for e in accepted if e.edge_type not in PROGRESSION_EDGE_TYPES]
     kept_progression, cycle_rejected = _reject_cyclic_progression_edges(progression_edges)
     accepted = non_progression + kept_progression
     rejected.extend(cycle_rejected)
+
+    implies_edges = [e for e in accepted if e.edge_type == EdgeType.IMPLIES]
+    if _has_implies_cycle(implies_edges):
+        # Reject all IMPLIES edges when a cycle is present — a rule-engine bug signal.
+        kept = [e for e in accepted if e.edge_type != EdgeType.IMPLIES]
+        for edge in implies_edges:
+            rejected.append(
+                RejectedEdge(**edge.model_dump(), rejection_reason="implies_cycle")
+            )
+        accepted = kept
 
     result.edges = accepted
     result.rejected_edges = rejected
@@ -240,5 +279,9 @@ def validate_exported_graph(
     progression = [e for e in edges if e.edge_type in PROGRESSION_EDGE_TYPES]
     if _has_progression_cycle(progression):
         errors.append("progression cycle detected")
+
+    implies = [e for e in edges if e.edge_type == EdgeType.IMPLIES]
+    if _has_implies_cycle(implies):
+        errors.append("implies cycle detected")
 
     return errors

@@ -10,13 +10,30 @@ from oddsgraph.bracket import build_official_bracket_fragment
 from oddsgraph.config import Settings
 from oddsgraph.deterministic import build_deterministic_fragments_by_event
 from oddsgraph.export import export_graph_artifacts
-from oddsgraph.graphbuild import GraphBuildResult, build_graph_from_fragments, validate_exported_graph
+from oddsgraph.graphbuild import (
+    GraphBuildResult,
+    accept_edges,
+    build_graph_from_fragments,
+    dedupe_edges,
+    has_implies_cycle,
+    validate_exported_graph,
+)
 from oddsgraph.infer import load_all_fragments
-from oddsgraph.ontology import EdgeType
+from oddsgraph.ontology import EdgeType, NodeType
+from oddsgraph.propositions import compile_propositions
 from oddsgraph.reduce import load_semantic_markets
 from oddsgraph.reporting import build_inference_report, load_inference_report
 from oddsgraph.resolution import ResolutionState, resolve_fragments
-from oddsgraph.schema import CanonicalEdge, CanonicalNode, GraphFragment, InferenceReport, SemanticMarket
+from oddsgraph.rules import apply_rules
+from oddsgraph.schema import (
+    CanonicalEdge,
+    CanonicalNode,
+    GraphFragment,
+    InferenceReport,
+    Proposition,
+    RejectedEdge,
+    SemanticMarket,
+)
 
 
 @dataclass
@@ -24,6 +41,23 @@ class BuildPipelineResult:
     resolution: ResolutionState
     graph: GraphBuildResult
     report: InferenceReport
+    propositions: dict[str, Proposition] | None = None
+
+
+def _attach_propositions(
+    nodes: list[CanonicalNode],
+    propositions: dict[str, Proposition],
+) -> list[CanonicalNode]:
+    if not propositions:
+        return nodes
+    updated: list[CanonicalNode] = []
+    for node in nodes:
+        prop = propositions.get(node.canonical_id)
+        if prop is not None and node.type == NodeType.OUTCOME:
+            updated.append(node.model_copy(update={"proposition": prop}))
+        else:
+            updated.append(node)
+    return updated
 
 
 def build_pipeline_from_markets(
@@ -55,6 +89,16 @@ def build_pipeline_from_markets(
         all_fragments.append(bracket)
         inference_methods.append("official_bracket")
 
+    compiled_propositions: dict[str, Proposition] = {}
+    if settings.compile_propositions:
+        compilation = compile_propositions(
+            markets, competition_label=settings.competition_label
+        )
+        if compilation.fragment.nodes or compilation.fragment.edges:
+            all_fragments.append(compilation.fragment)
+            inference_methods.append("proposition_compiler")
+        compiled_propositions = compilation.propositions
+
     resolution = resolve_fragments(
         all_fragments,
         settings,
@@ -66,6 +110,37 @@ def build_pipeline_from_markets(
         settings,
         fragment_methods=inference_methods,
     )
+
+    if compiled_propositions:
+        graph.nodes = _attach_propositions(graph.nodes, compiled_propositions)
+        # Keep resolution state in sync for downstream consumers.
+        for node in graph.nodes:
+            resolution.canonical_nodes[node.canonical_id] = node
+
+    if settings.apply_rules and compiled_propositions:
+        rule_edges = apply_rules(graph.nodes)
+        if rule_edges:
+            node_types = {n.canonical_id: n.type for n in graph.nodes}
+            accepted, rejected = accept_edges(rule_edges, node_types, settings)
+            merged = dedupe_edges(graph.edges + accepted)
+            implies = [e for e in merged if e.edge_type == EdgeType.IMPLIES]
+            if has_implies_cycle(implies):
+                non_implies_rules = [
+                    e for e in accepted if e.edge_type != EdgeType.IMPLIES
+                ]
+                graph.edges = dedupe_edges(graph.edges + non_implies_rules)
+                for edge in accepted:
+                    if edge.edge_type == EdgeType.IMPLIES:
+                        graph.rejected_edges.append(
+                            RejectedEdge(
+                                **edge.model_dump(),
+                                rejection_reason="implies_cycle",
+                            )
+                        )
+            else:
+                graph.edges = merged
+            graph.rejected_edges.extend(rejected)
+
     existing_report = load_inference_report(settings.inference_report_path)
     report = build_inference_report(
         resolution,
@@ -73,7 +148,12 @@ def build_pipeline_from_markets(
         model_path=str(settings.model_path) if settings.model_path.exists() else None,
         per_event_status=existing_report.per_event_status,
     )
-    return BuildPipelineResult(resolution=resolution, graph=graph, report=report)
+    return BuildPipelineResult(
+        resolution=resolution,
+        graph=graph,
+        report=report,
+        propositions=compiled_propositions or None,
+    )
 
 
 def run_build_and_export(
@@ -109,7 +189,24 @@ def validate_exported_artifacts(settings: Settings) -> list[str]:
     nodes_table = pq.read_table(settings.nodes_path)
     edges_table = pq.read_table(settings.edges_path)
 
-    nodes = [CanonicalNode(**row) for row in nodes_table.to_pylist()]
+    nodes: list[CanonicalNode] = []
+    for row in nodes_table.to_pylist():
+        prop_json = row.get("proposition_json")
+        prop = Proposition.model_validate_json(prop_json) if prop_json else None
+        nodes.append(
+            CanonicalNode(
+                canonical_id=row["canonical_id"],
+                type=NodeType(row["type"]),
+                label=row["label"],
+                aliases=row.get("aliases") or [],
+                confidence=row["confidence"],
+                evidence_market_ids=row.get("evidence_market_ids") or [],
+                resolution_method=row.get("resolution_method", "unresolved"),
+                inference_method=row.get("inference_method", "unknown"),
+                proposition=prop,
+            )
+        )
+
     edges = [
         CanonicalEdge(
             source_id=row["source_id"],
@@ -119,6 +216,10 @@ def validate_exported_artifacts(settings: Settings) -> list[str]:
             evidence_market_ids=row["evidence_market_ids"],
             evidence_text=row.get("evidence_text", ""),
             inference_method=row.get("inference_method", "unknown"),
+            derivation_type=row.get("derivation_type", "extraction"),
+            rule_id=row.get("rule_id"),
+            rule_version=row.get("rule_version"),
+            premises=row.get("premises"),
         )
         for row in edges_table.to_pylist()
     ]

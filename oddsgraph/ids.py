@@ -94,3 +94,8 @@ def round_id(competition_label: str, round_label: str) -> str:
 def match_id(*parts: str) -> str:
     slug_parts = [slugify(p) for p in parts if p]
     return "match:" + ":".join(slug_parts)
+
+
+def constraint_id(*parts: str) -> str:
+    slug_parts = [slugify(p) for p in parts if p]
+    return "constraint:" + ":".join(slug_parts)

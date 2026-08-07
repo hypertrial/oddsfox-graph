@@ -91,6 +91,19 @@ Resolved, export-ready graph elements with stable ids, type, evidence, and
 provenance fields. Schemas: `CanonicalNode` / `CanonicalEdge`. See
 [Output artifacts](../reference/output-artifacts.md).
 
+## Proposition
+
+Formal truth condition attached to a covered `OUTCOME` node (`predicate`,
+`arguments`, `polarity`, …). Compiled deterministically from market templates
+during `build`. See [Ontology](../reference/ontology.md).
+
+## Rule engine / derivation type
+
+Deterministic logical rules over propositions that emit direct `IMPLIES`,
+`EQUIVALENT`, or `MUTEX` edges. Edge provenance uses `derivation_type`
+(`extraction`, `compiler`, `rule`, `transitive`). Transitive `IMPLIES`
+closure is on-demand via `oddsgraph closure`.
+
 ## Ontology / allowed edge pattern
 
 Allowed node types, edge types, and `(source → target)` patterns in

@@ -111,6 +111,11 @@ def _suggested_canonical_id(node: Node, competition_slug: str) -> str:
         if node.local_id.startswith("match:"):
             return node.local_id
         return ids.match_id(node.label)
+    if node.type == NodeType.CONSTRAINT:
+        # Constraint IDs are fully qualified by the proposition compiler.
+        if node.local_id.startswith("constraint:"):
+            return node.local_id
+        return ids.constraint_id(node.label)
     if node.type == NodeType.EVENT:
         return ids.event_id(node.local_id.replace("event:", ""))
     if node.type == NodeType.MARKET and node.evidence_market_ids:

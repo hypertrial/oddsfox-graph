@@ -121,8 +121,9 @@ uv sync --extra explore   # or: uv sync --extra dev --extra explore
 oddsgraph explore         # http://127.0.0.1:8050
 ```
 
-Default view is a left-to-right knockout bracket. Topology and market layers are
-currently disconnected — see [Explorer](docs/guides/explorer.md) and
+Default view is a left-to-right knockout bracket. Compiled propositions bridge
+covered markets into topology via `REFERS_TO` — residual types may still lack
+that bridge; see [Explorer](docs/guides/explorer.md) and
 [Known limitations](docs/concepts/limitations.md).
 
 ## Stack

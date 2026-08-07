@@ -26,6 +26,7 @@ default source of truth.
 | `rejected_edges_path` | `build/rejected_edges.parquet` | Rejected edges |
 | `ontology_path` | `build/ontology.json` | Ontology dump |
 | `inference_report_path` | `build/inference_report.json` | Inference report |
+| `implies_closure_path` | `build/implies_closure.parquet` | On-demand transitive IMPLIES |
 
 ## Model / LLM
 
@@ -56,8 +57,10 @@ default source of truth.
 | --- | --- | --- |
 | `deterministic_topology` | `true` | Skip LLM for template-covered events |
 | `official_bracket` | `true` | Inject curated FIFA schedule on build |
+| `compile_propositions` | `true` | Compile formal propositions onto OUTCOME nodes |
+| `apply_rules` | `true` | Apply deterministic logical rules over propositions |
 | `verify_deterministic` | `false` | LLM confirm/patch over deterministic output |
-| `verify_max_tokens` | `300` | Max tokens for verify pass |
+| `verify_max_tokens` | `512` | Max tokens for verify pass |
 | `use_few_shot_exemplars` | `true` | Few-shot exemplars in residual prompts |
 | `few_shot_top_k` | `2` | Exemplars per residual prompt |
 | `competition_label` | `World Cup 2026` | COMPETITION label/slug base |

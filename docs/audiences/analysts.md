@@ -51,10 +51,11 @@ dataset.
 The default explorer view is a left-to-right knockout bracket (32 `MATCH`
 cards, `ADVANCES_TO` edges, path highlight on click). Switch to **Full
 topology** for `COMPETITION` / `STAGE` / `GROUP` / `ROUND` / `MATCH` / `TEAM`.
-The market layer (`EVENT`, `MARKET`, `OUTCOME`) is currently **disconnected**:
-the export has no `PRICES` or `IMPLIES` edges linking topology nodes to markets.
-Search for an event title or market id to explore the market layer
-independently.
+Compiled market outcomes bridge into topology via `REFERS_TO` (and related
+logical edges) when the proposition compiler covers the market template.
+Residual / unrecognized markets may still lack that bridge — check
+`proposition_json` on outcomes. Search for an event title or market id to
+explore the market layer directly.
 
 ## Next pages
 

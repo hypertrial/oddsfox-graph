@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
@@ -191,6 +192,39 @@ def merge_fragments(fragments: list[GraphFragment]) -> GraphFragment:
     )
 
 
+class Proposition(BaseModel):
+    """Formal truth condition attached to an OUTCOME node."""
+
+    predicate: str
+    arguments: dict[str, str] = Field(default_factory=dict)
+    polarity: bool = True
+    comparator: str | None = None
+    value: float | None = None
+    unit: str | None = None
+    time_start: datetime | None = None
+    time_end: datetime | None = None
+
+    def key(self) -> str:
+        """Stable string form for dedup, rule grouping, and edge premises."""
+        args = ",".join(f"{k}={self.arguments[k]}" for k in sorted(self.arguments))
+        polarity = "" if self.polarity else "!"
+        base = f"{polarity}{self.predicate}({args})"
+        extras: list[str] = []
+        if self.comparator is not None:
+            extras.append(f"cmp={self.comparator}")
+        if self.value is not None:
+            extras.append(f"val={self.value}")
+        if self.unit is not None:
+            extras.append(f"unit={self.unit}")
+        if self.time_start is not None:
+            extras.append(f"start={self.time_start.isoformat()}")
+        if self.time_end is not None:
+            extras.append(f"end={self.time_end.isoformat()}")
+        if extras:
+            return f"{base}|{'|'.join(extras)}"
+        return base
+
+
 class CanonicalNode(BaseModel):
     canonical_id: str
     type: NodeType
@@ -200,6 +234,7 @@ class CanonicalNode(BaseModel):
     evidence_market_ids: list[str] = Field(default_factory=list)
     resolution_method: str = "unresolved"
     inference_method: str = "unknown"
+    proposition: Proposition | None = None
 
 
 class CanonicalEdge(BaseModel):
@@ -210,6 +245,10 @@ class CanonicalEdge(BaseModel):
     evidence_market_ids: list[str] = Field(min_length=1)
     evidence_text: str = ""
     inference_method: str = "unknown"
+    derivation_type: str = "extraction"
+    rule_id: str | None = None
+    rule_version: int | None = None
+    premises: list[str] | None = None
 
 
 class RejectedEdge(CanonicalEdge):

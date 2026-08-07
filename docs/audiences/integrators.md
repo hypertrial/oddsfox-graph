@@ -42,9 +42,12 @@ and validation path.
 
 ## Anti-patterns
 
-- Joining topology nodes to markets as if `PRICES` / `IMPLIES` edges already exist
+- Assuming every market has a compiled `Proposition` / `REFERS_TO` bridge
+  (only deterministic templates are covered; residual types may still be
+  disconnected)
 - Treating residual LLM fragments as ground truth without confidence filtering
 - Ignoring `rejected_edges.parquet` when debugging missing relationships
+- Materializing transitive `IMPLIES` by hand instead of using `oddsgraph closure`
 
 ## Next pages
 

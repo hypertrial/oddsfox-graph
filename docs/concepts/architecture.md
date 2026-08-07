@@ -21,15 +21,19 @@ to compiler phases.
 | Parsing (deterministic grammar) | Deterministic topology | `oddsgraph/deterministic.py`, `oddsgraph/topology.py` | Template-matched fragments |
 | Constant folding | Official bracket injection | `oddsgraph/bracket.py` | Curated FIFA schedule fragment |
 | Semantic analysis (ambiguous input) | Residual LLM extraction | `oddsgraph/infer.py`, `oddsgraph/prompts.py`, `oddsgraph/llm*.py` | `fragments/<event_id>.json` |
+| Proposition compilation | Formal truth conditions | `oddsgraph/propositions.py` | `Proposition` on OUTCOME + `REFERS_TO` / `PRICES` / `COMPLEMENT` / `EXACTLY_ONE` |
 | Linking | Entity resolution | `oddsgraph/resolution.py` | Canonical node/edge IDs |
 | Type checking / diagnostics | Ontology validation + confidence filter | `oddsgraph/ontology.py`, `oddsgraph/graphbuild.py` | `rejected_edges.parquet` |
+| Rule-based reasoning | Deterministic logical rules | `oddsgraph/rules.py` | Direct `IMPLIES` / `EQUIVALENT` / `MUTEX` |
 | Code generation | Export | `oddsgraph/export.py` | `nodes.parquet` + `edges.parquet` |
+| On-demand closure | Transitive IMPLIES | `oddsgraph/closure.py` (`oddsgraph closure`) | `implies_closure.parquet` |
 
 ## Phase diagram
 
 Deterministic parsing covers most events; unrecognized events take the residual
-LLM semantic-analysis path. Official bracket injection joins at `build`. All
-paths converge at the linker.
+LLM semantic-analysis path. Official bracket injection and proposition
+compilation join at `build`. All paths converge at the linker; reasoning runs
+after ontology validation.
 
 ```mermaid
 flowchart LR
@@ -38,15 +42,18 @@ flowchart LR
   parserTopology["Parser: deterministic topology"]
   semanticLLM["Semantic analysis: residual LLM"]
   constFold["Constant folding: official bracket"]
+  propCompile["Proposition compilation"]
   linkerResolve["Linker: entity resolution"]
   typeCheck["Type check: ontology + confidence"]
+  ruleEngine["Rule-based reasoning"]
   codegenExport["Codegen: export"]
 
   sourceParquet --> lexerReduce --> parserTopology
   parserTopology -->|"template match"| linkerResolve
   parserTopology -->|"unrecognized events"| semanticLLM --> linkerResolve
   constFold --> linkerResolve
-  linkerResolve --> typeCheck --> codegenExport
+  propCompile --> linkerResolve
+  linkerResolve --> typeCheck --> ruleEngine --> codegenExport
 ```
 
 ## CLI stage view
@@ -62,8 +69,10 @@ flowchart LR
   fragments["event fragments"]
   build["build"]
   export["nodes + edges"]
+  closure["closure optional"]
 
   parquet --> reduce --> semantic --> infer --> fragments --> build --> export
+  export --> closure
 ```
 
 1. **reduce** — Collapse hourly rows into semantic market records keyed by
@@ -74,15 +83,20 @@ flowchart LR
      (semantic analysis)
    - write `build/fragments/<event_id>.json` (path-safe `event_id` only)
 3. **build** — Optionally inject the official WC2026 bracket (constant
-   folding), resolve fragment nodes into canonical IDs (linking), validate
-   ontology patterns and apply confidence filters (type checking), then export
-   parquet / JSON (code generation).
+   folding), compile propositions onto outcomes, resolve fragment nodes into
+   canonical IDs (linking), validate ontology patterns and apply confidence
+   filters (type checking), apply deterministic logical rules, then export
+   parquet / JSON (code generation). Toggle with `--propositions/--no-propositions`
+   and `--reasoning/--no-reasoning`.
 4. **validate** — Re-check exported artifacts for consistency.
+5. **closure** — Optionally compute transitive `IMPLIES` edges on demand into
+   `build/implies_closure.parquet` (not materialized by default).
 
 ## Performance note
 
 Local LLM inference dominates end-to-end wall-clock time. Deterministic
 topology covers most WC2026 events; residual LLM work is the expensive path.
+Proposition compilation and rule application are deterministic and cheap.
 Backend choice (`inprocess` / `server` / `mlx`), outlines constrained decoding,
 and MLX setup are documented in
 [Inference backends](../guides/inference-backends.md).
