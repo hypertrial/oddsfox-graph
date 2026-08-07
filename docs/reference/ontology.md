@@ -84,7 +84,9 @@ Compiled markets attach a formal `Proposition` to `OUTCOME` nodes:
 `REFERS_TO` edges connect each outcome to the topology entities named in its
 arguments. Deterministic rules then emit `IMPLIES` / `EQUIVALENT` / `MUTEX`
 edges between outcomes; `COMPLEMENT` and `EXACTLY_ONE` are emitted at compile
-time from market structure.
+time from market structure. Match-result `EXACTLY_ONE` partitions require the
+draw market in addition to the two team moneylines — team-only moneylines do
+not claim exclusivity because a soccer match can still draw.
 
 ## See also
 

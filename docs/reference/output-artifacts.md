@@ -83,8 +83,10 @@ Schema from `InferenceReport`:
 | `fragments/<event_id>__verify_manifest.json` | Fingerprint of the template candidate used for resume invalidation |
 
 Fragment filenames use a single path-safe `event_id` segment matching
-`[A-Za-z0-9._-]+`. IDs with path separators, spaces, or `..` are rejected so
-writes cannot escape `build/fragments/` (or nest under unexpected directories).
+`[A-Za-z0-9._-]+` **without** embedded `__` and without surrounding whitespace.
+IDs with path separators, spaces, `..`, or `__` are rejected so writes cannot
+escape `build/fragments/` or collide with reserved suffixes such as
+`__verified.json` / `__partN.json`.
 
 ## See also
 

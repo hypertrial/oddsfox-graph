@@ -54,7 +54,8 @@ settings changes (token budgets, `max-markets-per-chunk`) invalidate stale
 bug. For the deterministic-verification tier specifically, a verified
 fragment (`__verified.json`) is only reused while its
 `__verify_manifest.json` fingerprint still matches the current template
-output.
+output. A failed verification deletes that event's verified artifacts so a
+later `build` cannot load a stale `__verified.json`.
 
 ### Model not found at `models/qwen3-4b-q4_k_m.gguf`
 

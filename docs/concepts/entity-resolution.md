@@ -28,6 +28,13 @@ Fragment-local nodes map to canonical IDs using ordered tiers, including:
 Unresolved nodes keep an unresolved method marker until a later tier succeeds.
 Tier counts appear in `inference_report.json` under `resolution_tiers`.
 
+### MATCH identity
+
+Dateful MATCH ids (`match:<teams>-<YYYY-MM-DD>`) are distinct fixtures. Two
+MATCH nodes that share a display label but carry different dates do **not**
+merge. Label-only MATCH ids may still upgrade to a dateful id when the
+official bracket or topology supplies the more specific form.
+
 ## Confidence filtering
 
 `--minimum-confidence` rejects edges below the threshold during `build`. It does

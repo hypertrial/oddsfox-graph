@@ -448,6 +448,8 @@ def _register_new(
             "new_entity",
             indexes,
         )
+        # If bind is rejected (incompatible MATCH pair), leave the existing
+        # occupant and skip registering a conflicting alias for this local id.
         return
     _register_canonical(state, new_id, node, "new_entity", method, indexes)
     _register_tier(state, "new_entity")

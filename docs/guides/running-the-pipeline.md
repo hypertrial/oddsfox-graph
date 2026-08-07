@@ -36,8 +36,10 @@ oddsgraph -v run --limit-events 10
 ```
 
 `oddsgraph run` with `--event-id` / `--limit-events` reuses the same in-memory
-market list for build, so the exported graph stays scoped to those events.
-Standalone `oddsgraph build` still reads the full semantic parquet.
+market list for build, and inferred/verified fragments are filtered to those
+event IDs so the exported graph stays scoped. Standalone `oddsgraph build`
+still reads the full semantic parquet (and all on-disk fragments) unless you
+pass a narrowed market list programmatically.
 
 ## Useful flags
 

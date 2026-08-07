@@ -51,9 +51,12 @@ oddsgraph infer --verify-deterministic
 Verified artifacts land at `build/fragments/<event_id>__verified.json` with a
 sidecar `__verify_manifest.json` that fingerprints the template candidate. With
 `--resume` (default), verified files are reused only when that fingerprint still
-matches the current template; otherwise verification runs again. On `build`,
-verified topology **replaces** template topology for that event
-(EVENT/MARKET/OUTCOME base nodes remain deterministic).
+matches the current template; otherwise verification runs again. If verification
+fails, stale `__verified.json` / manifest files for that event are deleted so
+`build` cannot prefer them. On `build`, verified topology is loaded only when
+the manifest status is `deterministic_verified` or `deterministic_corrected`,
+and it **replaces** template topology for that event (EVENT/MARKET/OUTCOME base
+nodes remain deterministic).
 
 ## See also
 
