@@ -353,6 +353,31 @@ def test_all_schedule_teams_have_local_flags() -> None:
     assert missing_flag_teams(teams) == []
 
 
+def test_flag_svgs_declare_explicit_root_dimensions() -> None:
+    """Cytoscape SVG backgrounds need root width/height to scale with zoom."""
+    import re
+    from pathlib import Path
+
+    flags_dir = (
+        Path(__file__).resolve().parents[1]
+        / "oddsgraph"
+        / "explorer"
+        / "assets"
+        / "flags"
+    )
+    svg_open = re.compile(r"<svg\b[^>]*>", re.IGNORECASE | re.DOTALL)
+    missing: list[str] = []
+    for path in sorted(flags_dir.glob("*.svg")):
+        tag = svg_open.search(path.read_text(encoding="utf-8"))
+        if tag is None:
+            missing.append(f"{path.name}:no-svg")
+            continue
+        open_tag = tag.group(0)
+        if "width=" not in open_tag or "height=" not in open_tag:
+            missing.append(path.name)
+    assert missing == []
+
+
 def test_projection_falls_back_to_feeder_advance_odds_without_stage_odds() -> None:
     """Without stage-reach series, use feeder advance odds — not schedule homes."""
     elements = [

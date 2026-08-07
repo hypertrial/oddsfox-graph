@@ -43,6 +43,8 @@ flags and output schema as pre-1.0 and subject to change.
 
 - Explorer match-card flag SVGs use node-relative sizes so they scale with
   zoom instead of shrinking when zooming in.
+- Flag SVG assets now declare explicit ``width`` / ``height`` (Cytoscape
+  requires this for SVG background images to scale with zoom).
 - Explorer projection maps feeder branches onto schedule home/away slots
   (not alphabetical feeder labels) and ranks Third Place candidates by
   `P(reach Final)`.
