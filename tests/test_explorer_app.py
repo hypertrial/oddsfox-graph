@@ -141,6 +141,8 @@ def test_build_app_registers_layout_assets_and_callbacks(tmp_path: Path) -> None
 
     assert "controls-open" in rendered
     assert "Filters & legend" in rendered
+    assert "explorer-stage" in rendered
+    assert "playback-dock" in rendered
     assert "graph-cyto" not in rendered
     assert "inspector-panel" not in rendered
     assert "toggle-inspector" not in rendered

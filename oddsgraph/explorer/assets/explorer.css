@@ -207,6 +207,8 @@ body {
   font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
+  cursor: default;
+  user-select: none;
 }
 
 .stage-step::before {
@@ -270,6 +272,15 @@ body {
   flex: 1;
   min-height: 0;
   position: relative;
+}
+
+.explorer-stage {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .explorer-canvas-wrap {
@@ -430,8 +441,7 @@ button:hover:not(:disabled) {
 .btn:focus-visible,
 button:focus-visible,
 input:focus-visible,
-select:focus-visible,
-.stage-step:focus-visible {
+select:focus-visible {
   outline: 2px solid var(--of-cyan);
   outline-offset: 2px;
 }
@@ -493,13 +503,14 @@ button:disabled {
   position: relative;
   z-index: var(--of-z-dock);
   flex: 0 0 auto;
-  width: min(var(--of-dock-max), calc(100% - 28px));
-  margin: 0 auto calc(14px + var(--of-safe-bottom));
-  padding: 12px 14px 10px;
-  border-radius: 18px;
-  border: 1px solid rgba(51, 65, 85, 0.9);
-  background: rgba(21, 30, 50, 0.94);
-  box-shadow: var(--of-shadow);
+  width: 100%;
+  margin: 0;
+  padding: 10px 16px calc(10px + var(--of-safe-bottom));
+  border-radius: 0;
+  border: 0;
+  border-top: 1px solid rgba(51, 65, 85, 0.9);
+  background: rgba(21, 30, 50, 0.97);
+  box-shadow: 0 -8px 24px rgba(2, 6, 23, 0.35);
   backdrop-filter: blur(14px);
 }
 
@@ -508,6 +519,8 @@ button:disabled {
   grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 12px;
   align-items: center;
+  width: min(var(--of-dock-max), 100%);
+  margin: 0 auto;
 }
 
 .playback-meta {
@@ -548,7 +561,8 @@ button:disabled {
 }
 
 .playback-slider-wrap {
-  margin-top: 6px;
+  width: min(var(--of-dock-max), 100%);
+  margin: 6px auto 0;
 }
 
 .playback-status {
@@ -1365,8 +1379,8 @@ button:disabled {
   }
 
   .playback-dock {
-    width: calc(100% - 20px);
-    margin-bottom: calc(10px + var(--of-safe-bottom));
+    padding-left: 12px;
+    padding-right: 12px;
   }
 }
 
@@ -1419,9 +1433,41 @@ button:disabled {
   }
 }
 
+@media (max-height: 800px) {
+  .legend-copy {
+    display: none;
+  }
+
+  .bracket-eyebrow {
+    font-size: 10px;
+    letter-spacing: 0.12em;
+  }
+
+  .bracket-title {
+    margin-top: 4px;
+    font-size: clamp(1.1rem, 1.8vw, 1.4rem);
+  }
+
+  .probability-legend {
+    margin-top: 6px;
+    gap: 6px;
+  }
+
+  .tree-side-body {
+    min-height: 360px;
+  }
+
+  .explorer-canvas-wrap {
+    padding-top: 8px;
+    padding-bottom: 8px;
+  }
+}
+
 @media (max-height: 700px) {
   .explorer-subtitle,
-  .playback-status:empty {
+  .playback-status:empty,
+  .bracket-eyebrow,
+  .legend-pills {
     display: none;
   }
 
@@ -1430,9 +1476,22 @@ button:disabled {
     padding-bottom: 4px;
   }
 
+  .stage-step {
+    min-height: 30px;
+    padding: 4px 10px;
+  }
+
   .playback-dock {
     padding-top: 8px;
-    padding-bottom: 8px;
+    padding-bottom: calc(8px + var(--of-safe-bottom));
+  }
+
+  .tree-side-body {
+    min-height: 300px;
+  }
+
+  .bracket-section-header {
+    padding-top: 0;
   }
 }
 

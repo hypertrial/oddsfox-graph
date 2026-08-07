@@ -136,182 +136,187 @@ def build_app(settings: Settings) -> Dash:
                 className="explorer-body",
                 children=[
                     html.Div(
-                        id="drawer-scrim",
-                        className="drawer-scrim",
-                        n_clicks=0,
-                        role="presentation",
-                    ),
-                    html.Aside(
-                        id="controls-panel",
-                        className="explorer-drawer explorer-controls",
+                        className="explorer-stage",
                         children=[
                             html.Div(
-                                className="drawer-header",
-                                children=[
-                                    html.H2("Filters & legend", className="drawer-title"),
-                                    html.Button(
-                                        "Close",
-                                        id="close-controls",
-                                        n_clicks=0,
-                                        className="btn btn-ghost btn-icon",
-                                        type="button",
-                                    ),
-                                ],
+                                id="drawer-scrim",
+                                className="drawer-scrim",
+                                n_clicks=0,
+                                role="presentation",
                             ),
-                            html.Section(
-                                className="drawer-section",
+                            html.Aside(
+                                id="controls-panel",
+                                className="explorer-drawer explorer-controls",
                                 children=[
-                                    html.H3("Filters", className="drawer-section-title"),
-                                    html.Label(
-                                        "Min confidence",
-                                        htmlFor="confidence-filter",
-                                        className="panel-label",
-                                    ),
-                                    dcc.Slider(
-                                        id="confidence-filter",
-                                        min=0,
-                                        max=1,
-                                        step=0.05,
-                                        value=0,
-                                        marks={0: "0", 0.5: "0.5", 1: "1"},
-                                        allow_direct_input=False,
-                                        tooltip=False,
-                                    ),
-                                    html.P(
-                                        id="confidence-value",
-                                        className="filter-value",
-                                        children="0.00",
-                                    ),
-                                    html.Label(
-                                        "Inference method",
-                                        htmlFor="inference-filter",
-                                        className="panel-label",
-                                    ),
-                                    dcc.Dropdown(
-                                        id="inference-filter",
-                                        options=[
-                                            {"label": "(any)", "value": ""},
-                                            {
-                                                "label": "deterministic",
-                                                "value": "deterministic",
-                                            },
-                                            {
-                                                "label": "official_bracket",
-                                                "value": "official_bracket",
-                                            },
-                                            {"label": "llm", "value": "llm"},
-                                            {
-                                                "label": "unknown",
-                                                "value": "unknown",
-                                            },
-                                        ],
-                                        value="",
-                                        clearable=False,
-                                    ),
-                                    html.Button(
-                                        "Reset filters",
-                                        id="reset-filters-button",
-                                        n_clicks=0,
-                                        className="btn",
-                                        type="button",
-                                    ),
-                                ],
-                            ),
-                            html.Section(
-                                className="drawer-section",
-                                children=[
-                                    html.H3("Legend", className="drawer-section-title"),
-                                    html.Ul(
-                                        className="drawer-legend-pills",
+                                    html.Div(
+                                        className="drawer-header",
                                         children=[
-                                            html.Li(
-                                                className="legend-pill is-correct",
-                                                children=[
-                                                    html.Span(
-                                                        className="legend-dot",
-                                                        **{"aria-hidden": "true"},
-                                                    ),
-                                                    "Resolved",
-                                                ],
-                                            ),
-                                            html.Li(
-                                                className="legend-pill is-pending",
-                                                children=[
-                                                    html.Span(
-                                                        className="legend-dot",
-                                                        **{"aria-hidden": "true"},
-                                                    ),
-                                                    "Pending",
-                                                ],
-                                            ),
-                                            html.Li(
-                                                className="legend-pill is-diverged",
-                                                children=[
-                                                    html.Span(
-                                                        className="legend-dot",
-                                                        **{"aria-hidden": "true"},
-                                                    ),
-                                                    "Diverged",
-                                                ],
+                                            html.H2("Filters & legend", className="drawer-title"),
+                                            html.Button(
+                                                "Close",
+                                                id="close-controls",
+                                                n_clicks=0,
+                                                className="btn btn-ghost btn-icon",
+                                                type="button",
                                             ),
                                         ],
                                     ),
-                                ],
-                            ),
-                            html.Section(
-                                className="drawer-section",
-                                children=[
-                                    html.H3("Projections", className="drawer-section-title"),
-                                    html.P(
-                                        "Scrub tournament time to reproject unresolved knockout matchups.",
-                                        className="panel-hint",
-                                    ),
-                                    html.Details(
-                                        className="help-details",
-                                        open=False,
+                                    html.Section(
+                                        className="drawer-section",
                                         children=[
-                                            html.Summary("How projections work"),
+                                            html.H3("Filters", className="drawer-section-title"),
+                                            html.Label(
+                                                "Min confidence",
+                                                htmlFor="confidence-filter",
+                                                className="panel-label",
+                                            ),
+                                            dcc.Slider(
+                                                id="confidence-filter",
+                                                min=0,
+                                                max=1,
+                                                step=0.05,
+                                                value=0,
+                                                marks={0: "0", 0.5: "0.5", 1: "1"},
+                                                allow_direct_input=False,
+                                                tooltip=False,
+                                            ),
                                             html.P(
-                                                "Play advances one kickoff or full-time at a time "
-                                                "(simultaneous fixtures share a step). "
-                                                "Each card shows projected participants and the probability "
-                                                "each advances from that round (normalized from stage markets). "
-                                                "Resolved games lock to 100% / 0%, including "
-                                                "Final and Third Place once those results lock at full time.",
+                                                id="confidence-value",
+                                                className="filter-value",
+                                                children="0.00",
+                                            ),
+                                            html.Label(
+                                                "Inference method",
+                                                htmlFor="inference-filter",
+                                                className="panel-label",
+                                            ),
+                                            dcc.Dropdown(
+                                                id="inference-filter",
+                                                options=[
+                                                    {"label": "(any)", "value": ""},
+                                                    {
+                                                        "label": "deterministic",
+                                                        "value": "deterministic",
+                                                    },
+                                                    {
+                                                        "label": "official_bracket",
+                                                        "value": "official_bracket",
+                                                    },
+                                                    {"label": "llm", "value": "llm"},
+                                                    {
+                                                        "label": "unknown",
+                                                        "value": "unknown",
+                                                    },
+                                                ],
+                                                value="",
+                                                clearable=False,
+                                            ),
+                                            html.Button(
+                                                "Reset filters",
+                                                id="reset-filters-button",
+                                                n_clicks=0,
+                                                className="btn",
+                                                type="button",
+                                            ),
+                                        ],
+                                    ),
+                                    html.Section(
+                                        className="drawer-section",
+                                        children=[
+                                            html.H3("Legend", className="drawer-section-title"),
+                                            html.Ul(
+                                                className="drawer-legend-pills",
+                                                children=[
+                                                    html.Li(
+                                                        className="legend-pill is-correct",
+                                                        children=[
+                                                            html.Span(
+                                                                className="legend-dot",
+                                                                **{"aria-hidden": "true"},
+                                                            ),
+                                                            "Resolved",
+                                                        ],
+                                                    ),
+                                                    html.Li(
+                                                        className="legend-pill is-pending",
+                                                        children=[
+                                                            html.Span(
+                                                                className="legend-dot",
+                                                                **{"aria-hidden": "true"},
+                                                            ),
+                                                            "Pending",
+                                                        ],
+                                                    ),
+                                                    html.Li(
+                                                        className="legend-pill is-diverged",
+                                                        children=[
+                                                            html.Span(
+                                                                className="legend-dot",
+                                                                **{"aria-hidden": "true"},
+                                                            ),
+                                                            "Diverged",
+                                                        ],
+                                                    ),
+                                                ],
+                                            ),
+                                        ],
+                                    ),
+                                    html.Section(
+                                        className="drawer-section",
+                                        children=[
+                                            html.H3("Projections", className="drawer-section-title"),
+                                            html.P(
+                                                "Scrub tournament time to reproject unresolved knockout matchups.",
                                                 className="panel-hint",
                                             ),
+                                            html.Details(
+                                                className="help-details",
+                                                open=False,
+                                                children=[
+                                                    html.Summary("How projections work"),
+                                                    html.P(
+                                                        "Play advances one kickoff or full-time at a time "
+                                                        "(simultaneous fixtures share a step). "
+                                                        "Each card shows projected participants and the probability "
+                                                        "each advances from that round (normalized from stage markets). "
+                                                        "Resolved games lock to 100% / 0%, including "
+                                                        "Final and Third Place once those results lock at full time.",
+                                                        className="panel-hint",
+                                                    ),
+                                                ],
+                                            ),
+                                        ],
+                                    ),
+                                    html.Section(
+                                        className="drawer-section",
+                                        children=[
+                                            html.H3("Data source", className="drawer-section-title"),
+                                            html.P(
+                                                f"build: {settings.build_dir}",
+                                                className="data-source-path",
+                                                title=str(settings.build_dir),
+                                            ),
+                                            html.P(counts_full, className="panel-hint"),
                                         ],
                                     ),
                                 ],
                             ),
-                            html.Section(
-                                className="drawer-section",
+                            html.Main(
+                                className="explorer-canvas-wrap",
                                 children=[
-                                    html.H3("Data source", className="drawer-section-title"),
                                     html.P(
-                                        f"build: {settings.build_dir}",
-                                        className="data-source-path",
-                                        title=str(settings.build_dir),
+                                        id="bracket-summary",
+                                        className="visually-hidden",
+                                        children=bracket_summary_text(
+                                            None,
+                                            None if slider_disabled else slider_value,
+                                        ),
                                     ),
-                                    html.P(counts_full, className="panel-hint"),
+                                    html.Div(
+                                        id="bracket-canvas",
+                                        children=initial_children,
+                                    ),
                                 ],
-                            ),
-                        ],
-                    ),
-                    html.Main(
-                        className="explorer-canvas-wrap",
-                        children=[
-                            html.P(
-                                id="bracket-summary",
-                                className="visually-hidden",
-                                children=bracket_summary_text(
-                                    None,
-                                    None if slider_disabled else slider_value,
-                                ),
-                            ),
-                            html.Div(
-                                id="bracket-canvas",
-                                children=initial_children,
                             ),
                         ],
                     ),

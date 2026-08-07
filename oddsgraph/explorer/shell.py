@@ -58,6 +58,7 @@ def build_tracker(
         id="stage-tracker",
         className="stage-tracker",
         role="list",
+        title="Schedule progress for the selected tournament time",
         **{"aria-label": "Tournament phases", "data-phase-key": phase_key or phase.key},
     )
 

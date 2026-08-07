@@ -45,9 +45,10 @@ canvas (desktop ≥1400px). Narrower viewports use stacked rounds:
 - Pill legend: Resolved / Pending / Diverged
 - A persistent **phase tracker** (Groups → Final weekend) highlights the
   schedule window for the selected hour, including intermissions
-- Bottom **playback dock** (reserved below the scrollable bracket, not an
-  overlay): compact UTC time (`Jun 28 · 19:00 UTC`), phase badge,
-  game-milestone slider, Play/Pause, Reset view, and live action status
+- Bottom **playback dock** (full-width footer below the scrollable bracket):
+  compact UTC time (`Jun 28 · 19:00 UTC`), phase badge, game-milestone slider,
+  Play/Pause, Reset view, and live action status. The Filters drawer overlays
+  the bracket stage only, so playback stays usable while filters are open.
 
 ### Projection rules
 

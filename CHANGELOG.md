@@ -44,8 +44,10 @@ flags and output schema as pre-1.0 and subject to change.
 - Explorer match cards use a wider dark layout with aligned probability
   columns, row-aligned flags, and taxi connectors without arrowheads.
 - Explorer Controls moved into a closed-by-default utility drawer; playback
-  lives in a reserved bottom dock (not an overlay) instead of a persistent left
-  sidebar. Action status stays in the dock.
+  lives in a full-width footer dock below the bracket stage (not an overlay).
+  Action status stays in the dock.
+- Explorer chrome densifies on short viewports (hide legend copy / pills,
+  smaller title and tree floor) so more of the mirrored bracket stays on screen.
 - Explorer match-card tint encodes resolution, not favorite: teal fill means
   the match is resolved at the selected tournament hour; unfinished cards
   rely on numeric percentages and dashed borders when projected.
@@ -61,6 +63,8 @@ flags and output schema as pre-1.0 and subject to change.
 - Explorer playback dock no longer covers bottom bracket cards on short /
   non-maximized viewports: the dock is a normal-flow flex sibling below the
   scrollable canvas instead of an absolute overlay inside it.
+- Explorer Filters drawer is scoped to the bracket stage so the playback
+  footer stays usable while filters are open.
 - Explorer Final / Third Place locked cards use the same teal resolved tint as
   other finished matches (gold/silver champion overrides removed).
 - Explorer attaches curated schedule winners by team pair when MATCH ids
