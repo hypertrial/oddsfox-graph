@@ -41,16 +41,6 @@ def _semantic_markets_arrow_schema() -> pa.Schema:
     return pa.Table.from_pylist([sample]).schema
 
 
-def _market_row_for_parquet(market: SemanticMarket) -> dict[str, Any]:
-    """Dump a market with list fields normalized for stable Arrow schemas."""
-    row = market.model_dump()
-    for key in ("outcomes", "tags", "event_tags"):
-        if row.get(key) is None:
-            # Keep list typed across batches (None would infer as Arrow null).
-            row[key] = []
-    return row
-
-
 def quote_sql_literal(value: str) -> str:
     """Escape a string for safe inclusion in a DuckDB single-quoted literal."""
     return value.replace("'", "''")

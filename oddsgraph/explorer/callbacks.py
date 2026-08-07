@@ -269,8 +269,8 @@ def expand_neighbors(
             no_update,
             (
                 f"No neighbors for {selected_node_id}. "
-                "Topology and market layers are disconnected "
-                "(no PRICES/IMPLIES edges yet)."
+                "Covered templates bridge via REFERS_TO/PRICES; residual "
+                "market types may still lack a topology bridge."
             ),
             no_update,
             no_update,

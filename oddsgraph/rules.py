@@ -47,6 +47,13 @@ def stage_rank_for_proposition(stage_id: str) -> int:
     return STAGE_MONOTONICITY_RANK.get(stage_label_from_id(stage_id), -1)
 
 
+def stage_slug_for_proposition(stage_id: str) -> str:
+    """Return the stage slug from a ``stage:…`` id or free-form label."""
+    if stage_id.startswith("stage:") and stage_id.count(":") >= 2:
+        return stage_id.rsplit(":", 1)[-1]
+    return ids.slugify(stage_id)
+
+
 RuleFn = Callable[[Proposition, Proposition], bool]
 
 
@@ -115,9 +122,8 @@ def champion_reaches_final(a: Proposition, b: Proposition) -> bool:
         return False
     if not _same_team_and_competition(a, b):
         return False
-    return stage_rank_for_proposition(b.arguments.get("stage", "")) == STAGE_MONOTONICITY_RANK[
-        "Final"
-    ]
+    # Compare Final identity, not monotonic rank — Third Place shares Final's rank.
+    return stage_slug_for_proposition(b.arguments.get("stage", "")) == "final"
 
 
 @rule("wc.elimination_implies_reaches", EdgeType.IMPLIES)

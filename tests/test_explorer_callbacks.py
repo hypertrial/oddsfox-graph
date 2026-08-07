@@ -214,6 +214,46 @@ def test_expand_surfaces_neighbor_truncation(tmp_path: Path) -> None:
     assert "Truncated to 1 incident edges" in status
 
 
+def test_expand_empty_neighbors_mentions_proposition_bridge(tmp_path: Path) -> None:
+    settings = make_settings(tmp_path)
+    export_graph_artifacts(
+        nodes=[
+            CanonicalNode(
+                canonical_id="team:lonely",
+                type=NodeType.TEAM,
+                label="Lonely",
+                aliases=[],
+                confidence=1.0,
+                evidence_market_ids=["m1"],
+                resolution_method="exact_id",
+                inference_method="deterministic",
+            )
+        ],
+        edges=[],
+        rejected_edges=[],
+        report=InferenceReport(node_counts={"TEAM": 1}, edge_counts={}),
+        nodes_path=settings.nodes_path,
+        edges_path=settings.edges_path,
+        rejected_edges_path=settings.rejected_edges_path,
+        ontology_path=settings.ontology_path,
+        inference_report_path=settings.inference_report_path,
+    )
+
+    _elements, status, *_rest = expand_neighbors(
+        settings,
+        "team:lonely",
+        VIEW_TOPOLOGY,
+        elements=[],
+        visible_types=["TEAM"],
+        min_confidence=0.0,
+        inference_method="",
+        neighbor_limit=50,
+    )
+    assert "No neighbors for team:lonely" in status
+    assert "REFERS_TO/PRICES" in status
+    assert "disconnected" not in status.lower()
+
+
 def test_load_view_honors_skip_reload(tmp_path: Path) -> None:
     settings = make_settings(tmp_path)
     _write_fixture(settings.build_dir)

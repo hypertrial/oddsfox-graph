@@ -72,6 +72,45 @@ def test_stage_monotonicity_and_champion_reaches_final() -> None:
         assert edge.premises
 
 
+def test_champion_does_not_imply_third_place() -> None:
+    """Third Place shares Final's monotonic rank but is not the Final."""
+    competition = ids.competition_id("World Cup 2026")
+    team = ids.team_id("Brazil")
+    third = ids.stage_id("World Cup 2026", "Third Place")
+    final = ids.stage_id("World Cup 2026", "Final")
+    nodes = [
+        _outcome(
+            "outcome:win",
+            Proposition(
+                predicate="wins_competition",
+                arguments={"team": team, "competition": competition},
+            ),
+        ),
+        _outcome(
+            "outcome:third",
+            Proposition(
+                predicate="reaches_stage",
+                arguments={"team": team, "competition": competition, "stage": third},
+            ),
+        ),
+        _outcome(
+            "outcome:final",
+            Proposition(
+                predicate="reaches_stage",
+                arguments={"team": team, "competition": competition, "stage": final},
+            ),
+        ),
+    ]
+    edges = apply_rules(nodes)
+    implies = {
+        (e.source_id, e.target_id, e.rule_id)
+        for e in edges
+        if e.edge_type == EdgeType.IMPLIES
+    }
+    assert ("outcome:win", "outcome:final", "wc.champion_reaches_final") in implies
+    assert ("outcome:win", "outcome:third", "wc.champion_reaches_final") not in implies
+
+
 def test_champion_equivalent_to_elim_at_champion() -> None:
     competition = ids.competition_id("World Cup 2026")
     team = ids.team_id("Portugal")

@@ -1,4 +1,5 @@
 import duckdb
+import pyarrow as pa
 import pyarrow.parquet as pq
 
 from oddsgraph.config import Settings
@@ -71,6 +72,20 @@ def test_empty_exports_are_readable_by_duckdb(tmp_path) -> None:
         f"SELECT count(*) FROM read_parquet('{nodes_path}')"
     ).fetchone()[0]
     assert count == 0
+
+    # Empty list columns must be string-typed so UNNEST/ILIKE search works.
+    assert table.schema.field("aliases").type == pa.list_(pa.string())
+    assert edges_table.schema.field("evidence_market_ids").type == pa.list_(pa.string())
+    alias_ok = duckdb.sql(
+        f"""
+        SELECT count(*) FROM read_parquet('{nodes_path}')
+        WHERE EXISTS (
+          SELECT 1 FROM UNNEST(COALESCE(aliases, [])) AS a(alias)
+          WHERE alias ILIKE '%x%' ESCAPE '\\'
+        )
+        """
+    ).fetchone()[0]
+    assert alias_ok == 0
 
 
 def test_export_serializes_proposition_json(tmp_path) -> None:

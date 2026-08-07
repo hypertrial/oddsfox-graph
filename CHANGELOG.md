@@ -55,6 +55,22 @@ flags and output schema as pre-1.0 and subject to change.
   includes derivation provenance columns.
 - Docs updated for the topology↔market bridge (no longer universally
   disconnected; residual market types may still lack propositions).
+- Empty parquet exports use explicit Arrow schemas so list columns stay
+  `list[string]` (explorer search/UNNEST no longer BinderErrors on empty
+  graphs).
+
+### Fixed
+
+- `wc.champion_reaches_final` no longer treats Third Place as Final (rank
+  collision); implication requires the Final stage slug.
+- `soccer_team_to_advance` markets now emit `CONSTRAINT` + `EXACTLY_ONE`
+  as documented for covered templates.
+- Explorer missing-parquet stubs match the export schema; `graph_counts`
+  falls back to parquet when `inference_report` histograms are empty.
+- `oddsgraph closure` writes via the edge Arrow schema (was still passing
+  the removed row-template API).
+- Troubleshooting / explorer expand copy no longer claims topology and
+  market layers are universally disconnected.
 
 ### Documentation
 

@@ -78,8 +78,17 @@ def test_team_to_advance_categorical_outcomes() -> None:
     result = compile_propositions_by_event(markets)["100"]
     assert result.fully_covered is True
     brazil_id = ids.outcome_id("13", "Brazil")
+    morocco_id = ids.outcome_id("13", "Morocco")
     assert result.propositions[brazil_id].predicate == "advances_match"
     assert result.propositions[brazil_id].polarity is True
+    edge_types = {e.type for e in result.fragment.edges}
+    assert EdgeType.EXACTLY_ONE in edge_types
+    assert EdgeType.PRICES in edge_types
+    assert EdgeType.REFERS_TO in edge_types
+    exactly = [e for e in result.fragment.edges if e.type == EdgeType.EXACTLY_ONE]
+    targets = {e.target for e in exactly}
+    assert targets == {brazil_id, morocco_id}
+    assert any(n.type == NodeType.CONSTRAINT for n in result.fragment.nodes)
 
 
 def test_group_winner_and_world_cup_winner() -> None:

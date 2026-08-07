@@ -12,48 +12,51 @@ import pyarrow.parquet as pq
 from oddsgraph.ontology import dump_ontology_json
 from oddsgraph.schema import CanonicalEdge, CanonicalNode, InferenceReport, RejectedEdge
 
+_STRING_LIST = pa.list_(pa.string())
 
-def _table_with_schema(rows: list[dict], template_row: dict[str, Any]) -> pa.Table:
-    if rows:
-        return pa.Table.from_pylist(rows)
-    return pa.Table.from_pylist([template_row]).slice(0, 0)
+_NODE_SCHEMA = pa.schema(
+    [
+        ("canonical_id", pa.string()),
+        ("type", pa.string()),
+        ("label", pa.string()),
+        ("aliases", _STRING_LIST),
+        ("confidence", pa.float64()),
+        ("evidence_market_ids", _STRING_LIST),
+        ("resolution_method", pa.string()),
+        ("inference_method", pa.string()),
+        ("proposition_json", pa.string()),
+    ]
+)
+
+_EDGE_SCHEMA = pa.schema(
+    [
+        ("source_id", pa.string()),
+        ("target_id", pa.string()),
+        ("edge_type", pa.string()),
+        ("confidence", pa.float64()),
+        ("evidence_market_ids", _STRING_LIST),
+        ("evidence_text", pa.string()),
+        ("inference_method", pa.string()),
+        ("derivation_type", pa.string()),
+        ("rule_id", pa.string()),
+        ("rule_version", pa.int64()),
+        ("premises", _STRING_LIST),
+    ]
+)
+
+_REJECTED_EDGE_SCHEMA = pa.schema(
+    [*_EDGE_SCHEMA, ("rejection_reason", pa.string())]
+)
 
 
-def _write_parquet(path: Path, rows: list[dict], template_row: dict[str, Any]) -> None:
-    table = _table_with_schema(rows, template_row)
-    pq.write_table(table, path)
+def _table_with_schema(rows: list[dict], schema: pa.Schema) -> pa.Table:
+    if not rows:
+        return schema.empty_table()
+    return pa.Table.from_pylist(rows, schema=schema)
 
 
-_NODE_TEMPLATE: dict[str, Any] = {
-    "canonical_id": "",
-    "type": "TEAM",
-    "label": "",
-    "aliases": [],
-    "confidence": 0.0,
-    "evidence_market_ids": [],
-    "resolution_method": "",
-    "inference_method": "",
-    "proposition_json": None,
-}
-
-_EDGE_TEMPLATE: dict[str, Any] = {
-    "source_id": "",
-    "target_id": "",
-    "edge_type": "PART_OF",
-    "confidence": 0.0,
-    "evidence_market_ids": [],
-    "evidence_text": "",
-    "inference_method": "",
-    "derivation_type": "extraction",
-    "rule_id": None,
-    "rule_version": None,
-    "premises": None,
-}
-
-_REJECTED_EDGE_TEMPLATE: dict[str, Any] = {
-    **_EDGE_TEMPLATE,
-    "rejection_reason": "",
-}
+def _write_parquet(path: Path, rows: list[dict], schema: pa.Schema) -> None:
+    pq.write_table(_table_with_schema(rows, schema), path)
 
 
 def _node_row(node: CanonicalNode) -> dict[str, Any]:
@@ -99,12 +102,12 @@ def export_graph_artifacts(
     ontology_path: Path,
     inference_report_path: Path,
 ) -> None:
-    _write_parquet(nodes_path, [_node_row(n) for n in nodes], _NODE_TEMPLATE)
-    _write_parquet(edges_path, [_edge_row(e) for e in edges], _EDGE_TEMPLATE)
+    _write_parquet(nodes_path, [_node_row(n) for n in nodes], _NODE_SCHEMA)
+    _write_parquet(edges_path, [_edge_row(e) for e in edges], _EDGE_SCHEMA)
     _write_parquet(
         rejected_edges_path,
         [{**_edge_row(e), "rejection_reason": e.rejection_reason} for e in rejected_edges],
-        _REJECTED_EDGE_TEMPLATE,
+        _REJECTED_EDGE_SCHEMA,
     )
     ontology_path.write_text(json.dumps(dump_ontology_json(), indent=2), encoding="utf-8")
     inference_report_path.write_text(report.model_dump_json(indent=2), encoding="utf-8")

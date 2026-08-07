@@ -424,6 +424,42 @@ def test_graph_counts_from_inference_report(tmp_path: Path) -> None:
     assert counts["edge_counts"]["HAS_MARKET"] == 1
 
 
+def test_graph_counts_falls_back_when_report_histograms_empty(tmp_path: Path) -> None:
+    settings = make_settings(tmp_path)
+    export_graph_artifacts(
+        nodes=[
+            _node("team:a", NodeType.TEAM, "A"),
+        ],
+        edges=[],
+        rejected_edges=[],
+        report=InferenceReport(),
+        nodes_path=settings.nodes_path,
+        edges_path=settings.edges_path,
+        rejected_edges_path=settings.rejected_edges_path,
+        ontology_path=settings.ontology_path,
+        inference_report_path=settings.inference_report_path,
+    )
+    clear_stores()
+    counts = graph_counts(settings)
+    assert counts["source"] == "parquet"
+    assert counts["total_nodes"] == 1
+    assert counts["node_counts"]["TEAM"] == 1
+
+
+def test_missing_parquet_stubs_support_topology_queries(tmp_path: Path) -> None:
+    settings = make_settings(tmp_path)
+    # Intentionally leave nodes/edges parquet absent.
+    clear_stores()
+    store = get_store(settings)
+    slice_ = store.topology_elements()
+    assert slice_.nodes == []
+    assert slice_.edges == []
+    assert search_nodes(settings, "brazil") == []
+    counts = store.graph_counts()
+    assert counts["total_nodes"] == 0
+    assert counts["total_edges"] == 0
+
+
 def test_bracket_elements_on_real_build_if_present() -> None:
     """Optional smoke against a local full build (skipped when artifacts missing)."""
     settings = Settings()

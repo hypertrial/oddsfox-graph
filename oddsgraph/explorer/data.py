@@ -17,6 +17,7 @@ from oddsgraph.explorer.presentation import (
     short_match_label,
     stage_rank,
 )
+from oddsgraph.export import _EDGE_SCHEMA, _NODE_SCHEMA, _table_with_schema
 from oddsgraph.reduce import quote_path
 
 
@@ -145,15 +146,16 @@ class ExplorerDataStore:
                 f"CREATE TABLE nodes AS SELECT * FROM read_parquet('{nodes_sql}')"
             )
         else:
-            conn.execute("CREATE TABLE nodes (canonical_id VARCHAR)")
+            # Match export schema so queries on type/label/aliases do not BinderError.
+            conn.register("_nodes_stub", _table_with_schema([], _NODE_SCHEMA))
+            conn.execute("CREATE TABLE nodes AS SELECT * FROM _nodes_stub")
         if self.edges_path.exists():
             conn.execute(
                 f"CREATE TABLE edges AS SELECT * FROM read_parquet('{edges_sql}')"
             )
         else:
-            conn.execute(
-                "CREATE TABLE edges (source_id VARCHAR, target_id VARCHAR, edge_type VARCHAR)"
-            )
+            conn.register("_edges_stub", _table_with_schema([], _EDGE_SCHEMA))
+            conn.execute("CREATE TABLE edges AS SELECT * FROM _edges_stub")
         self._conn = conn
         self._nodes_mtime = nodes_mtime
         self._edges_mtime = edges_mtime
@@ -425,7 +427,12 @@ class ExplorerDataStore:
                 report = json.loads(report_path.read_text(encoding="utf-8"))
                 node_counts = report.get("node_counts") or {}
                 edge_counts = report.get("edge_counts") or {}
-                if isinstance(node_counts, dict) and isinstance(edge_counts, dict):
+                # Empty histograms are not authoritative — fall through to parquet.
+                if (
+                    isinstance(node_counts, dict)
+                    and isinstance(edge_counts, dict)
+                    and (node_counts or edge_counts)
+                ):
                     return {
                         "node_counts": {str(k): int(v) for k, v in node_counts.items()},
                         "edge_counts": {str(k): int(v) for k, v in edge_counts.items()},

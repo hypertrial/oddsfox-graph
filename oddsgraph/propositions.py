@@ -194,6 +194,8 @@ def _build_match_propositions(
     nodes: list[Node] = []
     partition_outcome_ids: list[str] = []
     partition_evidence: set[str] = set()
+    advance_outcome_ids: list[str] = []
+    advance_evidence: set[str] = set()
 
     for market in markets:
         smt = market.sports_market_type or ""
@@ -271,6 +273,8 @@ def _build_match_propositions(
                     },
                 )
                 propositions[outcome_local] = prop
+                advance_outcome_ids.append(outcome_local)
+                advance_evidence.add(market.market_id)
                 evidence = [market.market_id]
                 evidence_text = market.question or outcome_label
                 edges.append(_prices_edge(market.market_id, outcome_local, evidence_text))
@@ -299,6 +303,20 @@ def _build_match_propositions(
             f"Exact result: {match_label}",
             partition_outcome_ids,
             sorted(partition_evidence),
+            match_label,
+        )
+        nodes.extend(c_nodes)
+        edges.extend(c_edges)
+
+    if len(advance_outcome_ids) >= 2:
+        constraint_local = ids.constraint_id(
+            "exact-match-advance", competition_label, match_local
+        )
+        c_nodes, c_edges = _exactly_one(
+            constraint_local,
+            f"Team to advance: {match_label}",
+            advance_outcome_ids,
+            sorted(advance_evidence),
             match_label,
         )
         nodes.extend(c_nodes)

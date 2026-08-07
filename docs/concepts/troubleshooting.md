@@ -78,8 +78,11 @@ matches between the build and explore invocations.
 
 ### Expanding a match/team node in the explorer never reaches markets
 
-Expected — the topology and market layers are not connected in the exported
-graph today. See [Known limitations](limitations.md).
+Covered proposition templates emit `REFERS_TO` / `PRICES` bridges from
+outcomes to topology entities. If expand still stops at the topology layer,
+the selected node's residual market type may lack a compiled proposition —
+see [Known limitations](limitations.md). Confirm `proposition_json` on nearby
+`OUTCOME` nodes and that the build ran with propositions enabled.
 
 ## Docs
 
