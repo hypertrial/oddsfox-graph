@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import bisect
+from collections.abc import Sequence
 from typing import Any
 
 from dash import Dash, Input, Output, State, callback_context, html, no_update
 from dash.exceptions import PreventUpdate
 
+from oddsgraph.bracket import schedule_playback_milestones
 from oddsgraph.config import Settings
 from oddsgraph.explorer.canvas_actions import (
     CanvasMutation,
@@ -28,8 +31,6 @@ from oddsgraph.explorer.shell import (
     phase_badge_children,
     playback_time_children,
 )
-
-_HOUR_SECONDS = 3600
 
 # Re-export public canvas helpers so existing test imports keep working.
 __all__ = [
@@ -78,8 +79,9 @@ def next_play_advance(
     playing: bool,
     hour_epoch: int | None,
     max_hour: int | None,
+    milestones: Sequence[int],
 ) -> tuple[int, bool, str, bool, str, str] | None:
-    """Advance one hour while playing, or ``None`` when idle / incomplete.
+    """Advance one playback milestone while playing, or ``None`` when idle.
 
     Returns
     ``(next_hour, interval_disabled, button_label, playing, aria_label, aria_pressed)``.
@@ -87,11 +89,12 @@ def next_play_advance(
     """
     if not playing:
         return None
-    if hour_epoch is None or max_hour is None:
+    if hour_epoch is None or max_hour is None or not milestones:
         return None
-    next_hour = int(hour_epoch) + _HOUR_SECONDS
     end = int(max_hour)
-    if next_hour >= end:
+    idx = bisect.bisect_right(milestones, int(hour_epoch))
+    next_hour = milestones[idx] if idx < len(milestones) else None
+    if next_hour is None or next_hour >= end:
         return end, True, "Play", False, "Play tournament timeline", "false"
     return next_hour, False, "Pause", True, "Pause tournament timeline", "true"
 
@@ -342,6 +345,7 @@ def register_callbacks(app: Dash, settings: Settings) -> None:
             playing=bool(playing),
             hour_epoch=hour_epoch,
             max_hour=max_hour,
+            milestones=schedule_playback_milestones(),
         )
         if result is None:
             raise PreventUpdate

@@ -45,7 +45,7 @@ sports-data canvas:
 - Orthogonal taxi edges without arrowheads or repeated `ADVANCES_TO` labels
 - Click a match to open the inspector and highlight its path through the DAG
 - Floating **playback dock**: compact UTC time (`Jun 28 · 19:00 UTC`), phase
-  badge, hourly slider, Play/Pause, Reset view, and live action status
+  badge, game-milestone slider, Play/Pause, Reset view, and live action status
   (hide/reset feedback stays visible even when the inspector is closed)
 
 ### Projection rules
@@ -74,7 +74,9 @@ At the selected hour:
 ### Progressive controls
 
 - Primary: floating playback dock (tournament start → Final full-time), Play
-  (one hour per step; one day every 2 seconds), Reset view
+  (one kickoff or full-time per step; ~184 steps end-to-end; simultaneous
+  fixtures share a step), Reset view. Manual scrubbing snaps to the same
+  game milestones.
 - **Filters & legend** drawer (closed by default): confidence / inference
   filters, visual legend, projection help, and data-source metadata
 - Hover a card for a compact preview; the inspector opens on selection and

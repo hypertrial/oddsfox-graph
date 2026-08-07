@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from oddsgraph.bracket_projection import home_prob_at_hour
 from oddsgraph.explorer.presentation import (
     apply_path_highlight,
     apply_time_slice,
@@ -11,7 +12,6 @@ from oddsgraph.explorer.presentation import (
     bracket_stylesheet,
     fifa_match_id,
     format_hour_label,
-    home_prob_at_hour,
     is_stage_header,
     short_match_label,
     stage_column,
@@ -449,3 +449,26 @@ def test_bracket_summary_text_omits_counts_without_elements() -> None:
         hour,
     )
     assert "1 resolved matches, 1 projected." in counted
+
+
+def test_time_slider_marks_include_playback_milestones() -> None:
+    from oddsgraph.bracket import (
+        schedule_playback_milestones,
+        tournament_playback_bounds,
+    )
+    from oddsgraph.explorer.presentation import time_slider_marks
+
+    min_hour, max_hour = tournament_playback_bounds()
+    assert min_hour is not None and max_hour is not None
+    marks = time_slider_marks(min_hour, max_hour)
+    milestones = schedule_playback_milestones()
+    assert len(marks) >= len(milestones)
+    for epoch in milestones:
+        assert epoch in marks
+    assert isinstance(marks[min_hour], dict)
+    assert marks[min_hour]["label"]
+    unlabeled = [v for v in marks.values() if v == ""]
+    assert unlabeled
+    assert "Groups" in {
+        v["label"] for v in marks.values() if isinstance(v, dict)
+    }

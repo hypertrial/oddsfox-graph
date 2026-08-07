@@ -29,8 +29,6 @@ flags and output schema as pre-1.0 and subject to change.
 - Explorer projects unresolved future matchups from feeder-branch leaders,
   shows numeric advance probabilities on every card, and renders local SVG
   country flags on both sides of each match node.
-- Explorer Play control advances tournament time one hour at a time at a rate
-  of one day every two seconds.
 - Explorer Final / Third Place cards lock winners to **100%** / **0%** at full
   time (Spain and England in the curated WC2026 schedule) with distinct
   champion / third-place card styling once the match is locked.
@@ -48,6 +46,10 @@ flags and output schema as pre-1.0 and subject to change.
   rely on numeric percentages and dashed borders when projected.
 - Explorer time slider spans official tournament kickoffs through Final
   full-time, not the full early Champion-market odds-history window.
+- Explorer Play / time scrubbing advances by schedule kickoff and full-time
+  milestones (~184 steps end-to-end) instead of one hour at a time;
+  simultaneous fixtures share a step. Manual scrubbing snaps to the same
+  milestones.
 
 ### Fixed
 

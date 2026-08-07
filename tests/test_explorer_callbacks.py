@@ -257,6 +257,8 @@ def test_toggle_controls_and_inspector_classnames() -> None:
 def test_next_play_toggle_and_advance() -> None:
     from oddsgraph.explorer.callbacks import next_play_advance, next_play_toggle
 
+    milestones = (100, 3700, 10_000)
+
     assert next_play_toggle(
         playing=False,
         hour_epoch=100,
@@ -289,8 +291,15 @@ def test_next_play_toggle_and_advance() -> None:
         slider_disabled=False,
     ) == (False, "Pause", True, 0, "Pause tournament timeline", "true")
 
-    assert next_play_advance(playing=False, hour_epoch=100, max_hour=10_000) is None
-    assert next_play_advance(playing=True, hour_epoch=100, max_hour=10_000) == (
+    assert (
+        next_play_advance(
+            playing=False, hour_epoch=100, max_hour=10_000, milestones=milestones
+        )
+        is None
+    )
+    assert next_play_advance(
+        playing=True, hour_epoch=100, max_hour=10_000, milestones=milestones
+    ) == (
         3700,
         False,
         "Pause",
@@ -298,13 +307,32 @@ def test_next_play_toggle_and_advance() -> None:
         "Pause tournament timeline",
         "true",
     )
-    assert next_play_advance(playing=True, hour_epoch=10_000 - 3600, max_hour=10_000) == (
+    assert next_play_advance(
+        playing=True, hour_epoch=3700, max_hour=10_000, milestones=milestones
+    ) == (
         10_000,
         True,
         "Play",
         False,
         "Play tournament timeline",
         "false",
+    )
+    # Mid-interval scrub values still jump forward to the next milestone.
+    assert next_play_advance(
+        playing=True, hour_epoch=2000, max_hour=10_000, milestones=milestones
+    ) == (
+        3700,
+        False,
+        "Pause",
+        True,
+        "Pause tournament timeline",
+        "true",
+    )
+    assert (
+        next_play_advance(
+            playing=True, hour_epoch=100, max_hour=10_000, milestones=()
+        )
+        is None
     )
 
 

@@ -785,6 +785,23 @@ button:disabled {
   color: var(--of-faint) !important;
 }
 
+/* Dense milestone snaps: keep unlabeled dots small vs stage labels. */
+.rc-slider-dot {
+  width: 4px !important;
+  height: 4px !important;
+  bottom: -1px !important;
+  margin-left: -2px !important;
+  border-color: #334155 !important;
+  background-color: #334155 !important;
+  opacity: 0.45;
+}
+
+.rc-slider-dot-active {
+  border-color: var(--of-cyan) !important;
+  background-color: var(--of-cyan) !important;
+  opacity: 0.7;
+}
+
 @media (max-width: 900px) {
   .explorer-header {
     align-items: flex-start;

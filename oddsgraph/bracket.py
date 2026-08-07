@@ -178,6 +178,26 @@ def schedule_stage_windows() -> tuple[StageWindow, ...]:
     return tuple(windows)
 
 
+@lru_cache(maxsize=1)
+def schedule_playback_milestones() -> tuple[int, ...]:
+    """Sorted unique kickoff + full-time epochs across all schedule fixtures.
+
+    Each entry is one playback step (a match starting or resolving).
+    Simultaneous fixtures collapse into a shared epoch automatically.
+    """
+    schedule = load_wc2026_schedule()
+    epochs: set[int] = set()
+    for raw in schedule.get("fixtures") or []:
+        if not isinstance(raw, dict):
+            continue
+        kickoff = _kickoff_epoch(raw.get("kickoff_at_utc"))
+        if kickoff is None:
+            continue
+        epochs.add(int(kickoff))
+        epochs.add(int(kickoff) + _SCHEDULE_MATCH_DURATION_SECONDS)
+    return tuple(sorted(epochs))
+
+
 def tournament_playback_bounds() -> tuple[int | None, int | None]:
     """Hour-aligned explorer slider bounds through Final full-time."""
     windows = schedule_stage_windows()

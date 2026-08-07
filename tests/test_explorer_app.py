@@ -105,7 +105,7 @@ def _write_minimal_build(build_dir: Path) -> None:
 
 
 def test_build_app_registers_layout_assets_and_callbacks(tmp_path: Path) -> None:
-    from oddsgraph.explorer.app import ASSETS_DIR, TIME_PLAY_MS_PER_HOUR, build_app
+    from oddsgraph.explorer.app import ASSETS_DIR, TIME_PLAY_MS_PER_STEP, build_app
     from oddsgraph.explorer.presentation import bracket_stylesheet
 
     settings = make_settings(tmp_path)
@@ -113,7 +113,7 @@ def test_build_app_registers_layout_assets_and_callbacks(tmp_path: Path) -> None
 
     assert ASSETS_DIR.exists()
     assert (ASSETS_DIR / "explorer.css").exists()
-    assert TIME_PLAY_MS_PER_HOUR == round(2000 / 24)
+    assert TIME_PLAY_MS_PER_STEP == 400
 
     app = build_app(settings)
     assert app.title == "OddsFox Graph explorer"
@@ -179,6 +179,7 @@ def test_build_app_registers_layout_assets_and_callbacks(tmp_path: Path) -> None
     assert getattr(confidence, "allow_direct_input") is False
     assert getattr(time_slider, "tooltip") is False
     assert getattr(confidence, "tooltip") is False
+    assert getattr(time_slider, "step") is None
 
     for removed_id in (
         "view-mode",

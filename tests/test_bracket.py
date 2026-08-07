@@ -58,6 +58,34 @@ def test_tournament_playback_bounds_extend_through_final_full_time() -> None:
     assert windows[-1].label == "Final"
 
 
+def test_schedule_playback_milestones_are_kickoffs_and_full_times() -> None:
+    from datetime import datetime, timezone
+
+    from oddsgraph.bracket import (
+        schedule_playback_milestones,
+        tournament_playback_bounds,
+    )
+
+    milestones = schedule_playback_milestones()
+    play_start, play_end = tournament_playback_bounds()
+    assert len(milestones) == 184
+    assert milestones == tuple(sorted(set(milestones)))
+    assert milestones[0] == play_start
+    assert milestones[-1] == play_end
+
+    # Simultaneous group kickoffs collapse into one milestone epoch.
+    simultaneous = int(
+        datetime(2026, 6, 24, 19, 0, tzinfo=timezone.utc).timestamp()
+    )
+    assert milestones.count(simultaneous) == 1
+    fixtures = [
+        f
+        for f in load_wc2026_schedule()["fixtures"]
+        if f.get("kickoff_at_utc") == "2026-06-24T19:00:00"
+    ]
+    assert len(fixtures) == 2
+
+
 def test_schedule_has_104_fixtures_with_expected_stage_counts() -> None:
     schedule = load_wc2026_schedule()
     fixtures = schedule["fixtures"]

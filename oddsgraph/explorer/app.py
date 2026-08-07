@@ -31,8 +31,8 @@ from oddsgraph.explorer.shell import (
 
 ASSETS_DIR = Path(__file__).resolve().parent / "assets"
 
-# Playback advances one hour at a time; one tournament day takes 2 real seconds.
-TIME_PLAY_MS_PER_HOUR = max(1, round(2000 / 24))
+# Playback advances one kickoff or full-time milestone at a time.
+TIME_PLAY_MS_PER_STEP = 400
 
 
 def _counts_summary(counts: dict[str, Any]) -> str:
@@ -290,7 +290,8 @@ def build_app(settings: Settings) -> Dash:
                                         children=[
                                             html.Summary("How projections work"),
                                             html.P(
-                                                "Play advances one hour at a time (one day every 2 seconds). "
+                                                "Play advances one kickoff or full-time at a time "
+                                                "(simultaneous fixtures share a step). "
                                                 "Each card shows projected participants and the probability "
                                                 "each advances from that round (normalized from stage markets). "
                                                 "Teal tint = match resolved; dashed borders mark projected "
@@ -361,8 +362,8 @@ def build_app(settings: Settings) -> Dash:
                                                 type="button",
                                                 disabled=slider_disabled,
                                                 title=(
-                                                    "Advance one hour at a time "
-                                                    "(1 day = 2 seconds)"
+                                                    "Advance one kickoff or full-time "
+                                                    "at a time"
                                                 ),
                                                 **{
                                                     "aria-label": "Play tournament timeline",
@@ -410,7 +411,7 @@ def build_app(settings: Settings) -> Dash:
                                                 id="time-slider",
                                                 min=min_hour,
                                                 max=max_hour,
-                                                step=3600,
+                                                step=None,
                                                 value=slider_value,
                                                 marks=marks,
                                                 disabled=slider_disabled,
@@ -494,7 +495,7 @@ def build_app(settings: Settings) -> Dash:
             dcc.Store(id="phase-key", data=initial_phase.key),
             dcc.Interval(
                 id="time-play-interval",
-                interval=TIME_PLAY_MS_PER_HOUR,
+                interval=TIME_PLAY_MS_PER_STEP,
                 n_intervals=0,
                 disabled=True,
             ),

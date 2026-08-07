@@ -11,10 +11,10 @@ from oddsgraph.bracket import (
     KNOCKOUT_STAGE_RANK,
     STAGE_KEY_TO_LABEL,
     StageWindow,
+    schedule_playback_milestones,
     schedule_stage_windows,
 )
 from oddsgraph.bracket_projection import (
-    home_prob_at_hour as home_prob_at_hour,
     split_match_teams,
 )
 # Reverse map: stage label -> rank (Final and Third Place both rank 5).
@@ -413,9 +413,9 @@ def stamp_timeline_states(
     return updated
 
 
-def time_slider_marks(min_hour: int, max_hour: int) -> dict[int, dict[str, str]]:
-    """Build compact stage-start marks for the playback slider."""
-    marks: dict[int, dict[str, str]] = {}
+def time_slider_marks(min_hour: int, max_hour: int) -> dict[int, dict[str, str] | str]:
+    """Stage-boundary labels plus unlabeled kickoff/full-time snaps for ``step=None``."""
+    marks: dict[int, dict[str, str] | str] = {}
     windows = schedule_stage_windows()
     for window in windows:
         hour = window.start_hour
@@ -444,6 +444,9 @@ def time_slider_marks(min_hour: int, max_hour: int) -> dict[int, dict[str, str]]
             "label": "End",
             "style": {"fontSize": "10px", "color": "#94a3b8", "whiteSpace": "nowrap"},
         }
+    for epoch in schedule_playback_milestones():
+        if min_hour <= epoch <= max_hour:
+            marks.setdefault(epoch, "")
     return marks
 
 

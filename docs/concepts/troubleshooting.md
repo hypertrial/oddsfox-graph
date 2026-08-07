@@ -89,8 +89,9 @@ matches between the build and explore invocations.
 
 ### Explorer time slider shows no probabilities / cards stay uncolored
 
-The tournament time slider always spans official schedule kickoffs (first →
-last fixture). Advance probabilities and future-round projection need
+The tournament time slider always spans official schedule kickoffs through
+Final full-time and snaps to kickoff / full-time milestones. Advance
+probabilities and future-round projection need
 `build/odds_history.parquet` and `build/stage_odds_history.parquet` from
 `oddsgraph odds-history` (also produced by `oddsgraph run`). Without those
 artifacts the bracket still loads from `nodes.parquet` / `edges.parquet`, but
