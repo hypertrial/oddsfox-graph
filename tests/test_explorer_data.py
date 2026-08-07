@@ -8,7 +8,6 @@ import pytest
 import rustworkx as rx
 
 from oddsgraph.config import Settings
-from oddsgraph.explorer import TOPOLOGY_NODE_TYPES
 from oddsgraph.explorer.data import (
     bracket_elements,
     clear_stores,
@@ -16,9 +15,6 @@ from oddsgraph.explorer.data import (
     get_node,
     get_store,
     graph_counts,
-    node_neighbors,
-    search_nodes,
-    topology_elements,
 )
 from oddsgraph.export import export_graph_artifacts
 from oddsgraph.ontology import EdgeType, NodeType
@@ -206,34 +202,12 @@ def _clear_explorer_stores() -> None:
     clear_stores()
 
 
-def test_topology_elements_excludes_market_layer(tmp_path: Path) -> None:
-    settings = make_settings(tmp_path)
-    _write_fixture_graph(settings.build_dir)
-
-    slice_ = topology_elements(settings)
-    node_ids = {el["data"]["id"] for el in slice_.nodes}
-    node_types = {el["data"]["type"] for el in slice_.nodes}
-    edge_types = {el["data"]["edge_type"] for el in slice_.edges}
-
-    assert node_types <= TOPOLOGY_NODE_TYPES
-    assert "event:100" not in node_ids
-    assert "market:m1" not in node_ids
-    assert "outcome:m1:brazil" not in node_ids
-    assert "match:brazil-vs-france" in node_ids
-    assert "team:brazil" in node_ids
-    assert "HAS_MARKET" not in edge_types
-    assert "HAS_OUTCOME" not in edge_types
-    assert "PARTICIPATES_IN" in edge_types
-    assert "PART_OF" in edge_types
-
-
 def test_canvas_elements_strip_evidence_payloads(tmp_path: Path) -> None:
     settings = make_settings(tmp_path)
     _write_fixture_graph(settings.build_dir)
 
-    topo = topology_elements(settings)
     bracket = bracket_elements(settings)
-    for el in [*topo.nodes, *topo.edges, *bracket.nodes, *bracket.edges]:
+    for el in [*bracket.nodes, *bracket.edges]:
         data = el["data"]
         assert "evidence_market_ids" not in data
         assert "evidence_text" not in data
@@ -242,48 +216,34 @@ def test_canvas_elements_strip_evidence_payloads(tmp_path: Path) -> None:
             continue
         assert data["evidence_count"] >= 1
 
-    row = get_node(settings, "team:brazil")
+    row = get_node(settings, "match:brazil-vs-france")
     assert row is not None
     assert row["evidence_market_ids"] == ["m1"]
     edge = get_edge(
         settings,
-        "team:brazil",
         "match:brazil-vs-france",
-        "PARTICIPATES_IN",
+        "match:final",
+        "ADVANCES_TO",
     )
     assert edge is not None
     assert edge["evidence_market_ids"] == ["m1"]
-    assert edge["evidence_text"] == "Brazil plays"
 
 
-def test_get_store_caches_topology_and_refreshes_on_mtime(tmp_path: Path) -> None:
+def test_get_store_caches_bracket_and_refreshes_on_mtime(tmp_path: Path) -> None:
     settings = make_settings(tmp_path)
     _write_fixture_graph(settings.build_dir)
 
     store = get_store(settings)
-    first = store.topology_elements()
-    second = store.topology_elements()
+    first = store.bracket_elements()
+    second = store.bracket_elements()
     assert first is second
 
     # Touch parquet so the store closes and rebuilds caches.
     settings.nodes_path.write_bytes(settings.nodes_path.read_bytes())
     store.refresh_if_stale()
-    third = store.topology_elements()
+    third = store.bracket_elements()
     assert third is not first
     assert len(third.nodes) == len(first.nodes)
-
-
-def test_node_neighbors_sets_truncated_when_limit_hit(tmp_path: Path) -> None:
-    settings = make_settings(tmp_path)
-    _write_fixture_graph(settings.build_dir)
-
-    full = node_neighbors(settings, "match:brazil-vs-france", limit=300)
-    assert full.truncated is False
-    assert len(full.edges) >= 2
-
-    limited = node_neighbors(settings, "match:brazil-vs-france", limit=1)
-    assert limited.truncated is True
-    assert len(limited.edges) == 1
 
 
 def test_bracket_elements_returns_only_knockout_matches(tmp_path: Path) -> None:
@@ -357,75 +317,27 @@ def test_bracket_elements_is_acyclic(tmp_path: Path) -> None:
     assert rx.is_directed_acyclic_graph(graph)
 
 
-def test_search_nodes_matches_label_alias_and_limit(tmp_path: Path) -> None:
-    settings = make_settings(tmp_path)
-    _write_fixture_graph(settings.build_dir)
-
-    by_label = search_nodes(settings, "brazil", limit=25)
-    labels = {row["canonical_id"] for row in by_label}
-    assert "team:brazil" in labels
-    assert "match:brazil-vs-france" in labels
-
-    by_alias = search_nodes(settings, "Seleção", limit=25)
-    assert any(row["canonical_id"] == "team:brazil" for row in by_alias)
-
-    limited = search_nodes(settings, "brazil", limit=1)
-    assert len(limited) == 1
-
-    empty = search_nodes(settings, "   ", limit=25)
-    assert empty == []
-
-
-def test_node_neighbors_match_and_event_are_disconnected(tmp_path: Path) -> None:
-    settings = make_settings(tmp_path)
-    _write_fixture_graph(settings.build_dir)
-
-    match_slice = node_neighbors(settings, "match:brazil-vs-france")
-    match_ids = {el["data"]["id"] for el in match_slice.nodes}
-    assert "team:brazil" in match_ids
-    assert "team:france" in match_ids
-    assert "stage:world-cup-2026:round-of-16" in match_ids
-    assert "match:final" in match_ids
-    assert "event:100" not in match_ids
-    assert "market:m1" not in match_ids
-
-    event_slice = node_neighbors(settings, "event:100")
-    event_ids = {el["data"]["id"] for el in event_slice.nodes}
-    assert "market:m1" in event_ids
-    assert "match:brazil-vs-france" not in event_ids
-    assert "team:brazil" not in event_ids
-
-
 def test_get_node_and_get_edge_missing_return_none(tmp_path: Path) -> None:
     settings = make_settings(tmp_path)
     _write_fixture_graph(settings.build_dir)
 
-    assert get_node(settings, "team:brazil") is not None
+    assert get_node(settings, "match:brazil-vs-france") is not None
     assert get_node(settings, "team:missing") is None
     assert get_node(settings, "") is None
 
     edge = get_edge(
         settings,
-        "team:brazil",
         "match:brazil-vs-france",
-        "PARTICIPATES_IN",
+        "match:final",
+        "ADVANCES_TO",
     )
     assert edge is not None
-    assert edge["evidence_text"] == "Brazil plays"
+    assert edge["evidence_text"] == "team continuity across consecutive knockout stages"
 
     assert (
-        get_edge(settings, "team:brazil", "match:brazil-vs-france", "PRICES") is None
+        get_edge(settings, "match:brazil-vs-france", "match:final", "PRICES") is None
     )
     assert get_edge(settings, "", "x", "PART_OF") is None
-
-
-def test_search_nodes_escapes_like_wildcards(tmp_path: Path) -> None:
-    settings = make_settings(tmp_path)
-    _write_fixture_graph(settings.build_dir)
-
-    # A literal '%' should not match every label via ILIKE wildcards.
-    rows = search_nodes(settings, "%", limit=25)
-    assert rows == []
 
 
 def test_graph_counts_from_inference_report(tmp_path: Path) -> None:
@@ -462,15 +374,14 @@ def test_graph_counts_falls_back_when_report_histograms_empty(tmp_path: Path) ->
     assert counts["node_counts"]["TEAM"] == 1
 
 
-def test_missing_parquet_stubs_support_topology_queries(tmp_path: Path) -> None:
+def test_missing_parquet_stubs_support_empty_queries(tmp_path: Path) -> None:
     settings = make_settings(tmp_path)
     # Intentionally leave nodes/edges parquet absent.
     clear_stores()
     store = get_store(settings)
-    slice_ = store.topology_elements()
+    slice_ = store.bracket_elements()
     assert slice_.nodes == []
     assert slice_.edges == []
-    assert search_nodes(settings, "brazil") == []
     counts = store.graph_counts()
     assert counts["total_nodes"] == 0
     assert counts["total_edges"] == 0
@@ -510,6 +421,11 @@ def test_bracket_elements_on_real_build_if_present() -> None:
     assert len(finals) == 1 and len(thirds) == 1
     assert thirds[0]["position"]["y"] > finals[0]["position"]["y"]
     assert headers[0]["position"]["y"] < min(n["position"]["y"] for n in matches)
+    if settings.odds_history_path.exists():
+        with_odds = [n for n in matches if n["data"].get("odds_series")]
+        assert len(with_odds) == 32
+        assert all("current_home_prob" in n["data"] for n in with_odds)
+        assert all(n["data"].get("winner_team") for n in with_odds)
     graph = rx.PyDiGraph()
     index: dict[str, int] = {}
     for node in matches:
@@ -522,3 +438,42 @@ def test_bracket_elements_on_real_build_if_present() -> None:
             edge["data"]["edge_type"],
         )
     assert rx.is_directed_acyclic_graph(graph)
+
+
+def test_bracket_elements_enrich_odds_series(tmp_path: Path) -> None:
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    from oddsgraph.odds_history import ODDS_HISTORY_SCHEMA
+
+    settings = make_settings(tmp_path)
+    _write_fixture_graph(settings.build_dir)
+    pq.write_table(
+        pa.Table.from_pylist(
+            [
+                {
+                    "match_canonical_id": "match:brazil-vs-france",
+                    "home_team": "Brazil",
+                    "away_team": "France",
+                    "odds_hour_epoch": 1000,
+                    "home_prob": 0.55,
+                    "away_prob": 0.45,
+                    "match_start_epoch": 1000,
+                    "match_end_epoch": 2000,
+                    "winner_team": "Brazil",
+                }
+            ],
+            schema=ODDS_HISTORY_SCHEMA,
+        ),
+        settings.odds_history_path,
+    )
+
+    slice_ = bracket_elements(settings)
+    by_id = {el["data"]["id"]: el["data"] for el in slice_.nodes}
+    match = by_id["match:brazil-vs-france"]
+    assert match["home_team"] == "Brazil"
+    assert match["away_team"] == "France"
+    assert match["winner_team"] == "Brazil"
+    assert match["odds_series"] == [{"h": 1000, "home": 0.55, "away": 0.45}]
+    assert match["current_home_prob"] == 0.55
+    assert "odds_series" not in by_id["match:final"]

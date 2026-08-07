@@ -85,14 +85,14 @@ with this backend.
 from a completed `oddsgraph build` (or `run`) first. Confirm `--build-dir`
 matches between the build and explore invocations.
 
-### Expanding a match/team node in the explorer never reaches markets
+### Explorer time slider is missing or all matches stay uncolored
 
-Covered proposition templates emit `REFERS_TO` / `PRICES` bridges from
-outcomes to topology entities. If expand still stops at the topology layer,
-the selected node's residual market type may lack a compiled proposition —
-see [Known limitations](limitations.md) and the predicate table in
-[Logical layer](../guides/logical-layer.md). Confirm `proposition_json` on
-nearby `OUTCOME` nodes and that the build ran with propositions enabled.
+The Knockout time slider needs `build/odds_history.parquet` from
+`oddsgraph odds-history` (also produced by `oddsgraph run`). Without that
+artifact the bracket still loads from `nodes.parquet` / `edges.parquet`, but
+MATCH cards have no `current_home_prob` coloring. Confirm `--build-dir`
+matches and that the source parquet includes `soccer_team_to_advance`
+markets.
 
 ## Docs
 

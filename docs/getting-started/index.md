@@ -63,6 +63,7 @@ build/semantic_markets.parquet
 build/fragments/<event_id>.json
 build/nodes.parquet
 build/edges.parquet
+build/odds_history.parquet
 build/rejected_edges.parquet
 build/inference_report.json
 build/ontology.json
@@ -72,6 +73,7 @@ Optional explorer:
 
 ```bash
 uv sync --extra explore
+oddsgraph odds-history   # optional temporal odds for the explorer slider
 oddsgraph explore
 ```
 

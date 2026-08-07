@@ -17,6 +17,11 @@ flags and output schema as pre-1.0 and subject to change.
 
 ### Added
 
+- `oddsgraph odds-history` builds `build/odds_history.parquet`: hourly knockout
+  win probabilities from Polymarket `soccer_team_to_advance` markets, with
+  winner lock after match end.
+- Explorer knockout time slider colors each MATCH by home win-probability
+  (green = home favored, red = away) and locks winners to 1 after end.
 - Logical layer guide documenting proposition predicates, compile-time
   structural edges, the WC2026 rule registry, build flags, and on-demand
   `IMPLIES` closure.
@@ -50,8 +55,8 @@ flags and output schema as pre-1.0 and subject to change.
 - Few-shot exemplar retrieval (`--few-shot`) for residual LLM prompts.
 - Entity resolution with tiered exact/alias/fuzzy matching and confidence
   filtering (`--minimum-confidence`).
-- Local Dash + Cytoscape explorer (`oddsgraph explore`) with a knockout-
-  bracket default view and a full-topology view.
+- Local Dash + Cytoscape explorer (`oddsgraph explore`) with a temporal
+  knockout-bracket view.
 - LoRA fine-tuning / self-distillation scripts (`scripts/export_finetune_dataset.py`,
   `scripts/finetune_lora.py`, `scripts/eval_finetuned_model.py`) for the
   residual LLM path.
@@ -60,6 +65,9 @@ flags and output schema as pre-1.0 and subject to change.
 
 ### Changed
 
+- Explorer is bracket-only: removed Full topology view, search, expand
+  neighbors, type filter, and layout chooser.
+- Controls and Inspector sidebars are collapsible on all viewport widths.
 - Explorer knockout bracket draws non-interactive stage column headers
   (Round of 32 → Final / 3rd) across the canvas.
 - Contributor checklist now explicitly asks for docs + changelog updates on

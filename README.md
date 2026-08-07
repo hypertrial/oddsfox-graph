@@ -79,6 +79,7 @@ oddsgraph reduce          # reduce parquet to semantic markets
 oddsgraph infer           # infer graph fragments per event
 oddsgraph build           # resolve, validate, export graph
 oddsgraph validate        # validate exported artifacts
+oddsgraph odds-history    # knockout advance odds time series for explorer
 oddsgraph explore         # local Dash explorer over nodes/edges parquet
 oddsgraph run             # full pipeline
 ```
@@ -109,6 +110,7 @@ build/semantic_markets.parquet
 build/fragments/<event_id>.json
 build/nodes.parquet
 build/edges.parquet
+build/odds_history.parquet
 build/rejected_edges.parquet
 build/inference_report.json
 build/ontology.json
@@ -120,12 +122,14 @@ Column contracts: [Output artifacts](docs/reference/output-artifacts.md).
 
 ```bash
 uv sync --extra explore   # or: uv sync --extra dev --extra explore
+oddsgraph odds-history    # optional temporal odds for the explorer slider
 oddsgraph explore         # http://127.0.0.1:8050
 ```
 
-Default view is a left-to-right knockout bracket. Compiled propositions bridge
-covered markets into topology via `REFERS_TO` — residual types may still lack
-that bridge; see [Explorer](docs/guides/explorer.md) and
+Default view is a left-to-right knockout bracket with an hourly win-probability
+slider (when `odds_history.parquet` is present). Compiled propositions still
+bridge covered markets into the exported graph via `REFERS_TO` — residual types
+may still lack that bridge; see [Explorer](docs/guides/explorer.md) and
 [Known limitations](docs/concepts/limitations.md).
 
 ## Stack

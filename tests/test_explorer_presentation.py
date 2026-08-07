@@ -4,16 +4,18 @@ from __future__ import annotations
 
 from oddsgraph.explorer.presentation import (
     apply_path_highlight,
+    apply_time_slice,
     bracket_layout,
     bracket_positions,
     bracket_stage_headers,
     bracket_stylesheet,
     fifa_match_id,
+    format_hour_label,
+    home_prob_at_hour,
     is_stage_header,
     short_match_label,
     stage_column,
     stage_rank,
-    stylesheet_for,
 )
 
 
@@ -254,13 +256,51 @@ def test_bracket_stylesheet_and_layout_contract() -> None:
     )
     assert header_style["events"] == "no"
     assert header_style["label"] == "data(label)"
+    assert "node[current_home_prob]" in selectors
+    odds_style = next(
+        rule["style"]
+        for rule in styles
+        if rule["selector"] == "node[current_home_prob]"
+    )
+    assert "mapData(current_home_prob" in odds_style["background-color"]
 
 
-def test_stylesheet_for_matches_bracket_and_topology() -> None:
-    from oddsgraph.explorer import VIEW_BRACKET, VIEW_TOPOLOGY
+def test_home_prob_at_hour_and_winner_lock() -> None:
+    data = {
+        "home_team": "Brazil",
+        "away_team": "France",
+        "match_end_epoch": 200,
+        "winner_team": "France",
+        "odds_series": [
+            {"h": 100, "home": 0.4, "away": 0.6},
+            {"h": 150, "home": 0.25, "away": 0.75},
+        ],
+    }
+    assert home_prob_at_hour(data, 120) == 0.4
+    assert home_prob_at_hour(data, 150) == 0.25
+    assert home_prob_at_hour(data, 250) == 0.0
+    data["winner_team"] = "Brazil"
+    assert home_prob_at_hour(data, 250) == 1.0
 
-    bracket = stylesheet_for(VIEW_BRACKET)
-    topology = stylesheet_for(VIEW_TOPOLOGY)
-    assert bracket == bracket_stylesheet()
-    assert any(rule["selector"] == "edge" for rule in topology)
-    assert bracket != topology
+
+def test_apply_time_slice_stamps_current_home_prob() -> None:
+    elements = [
+        {
+            "data": {
+                "id": "match:a",
+                "type": "MATCH",
+                "home_team": "Brazil",
+                "away_team": "France",
+                "match_end_epoch": 200,
+                "winner_team": "France",
+                "odds_series": [{"h": 100, "home": 0.3, "away": 0.7}],
+            },
+            "classes": "MATCH",
+        }
+    ]
+    stamped = apply_time_slice(elements, 100)
+    assert stamped[0]["data"]["current_home_prob"] == 0.3
+    locked = apply_time_slice(elements, 300)
+    assert locked[0]["data"]["current_home_prob"] == 0.0
+    assert "2026" not in format_hour_label(None)
+    assert "UTC" in format_hour_label(1_783_200_000)

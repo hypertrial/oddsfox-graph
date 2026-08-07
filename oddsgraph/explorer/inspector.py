@@ -1,4 +1,4 @@
-"""Inspector and search rendering helpers for the local graph explorer."""
+"""Inspector rendering helpers for the local graph explorer."""
 
 from __future__ import annotations
 
@@ -134,25 +134,6 @@ def _inspector_sheet(
             ),
         ]
     )
-
-
-def _search_results_list(rows: list[dict[str, Any]]) -> html.Div:
-    if not rows:
-        return html.Div("No matches.", className="panel-hint")
-    items = []
-    for row in rows:
-        items.append(
-            html.Button(
-                f"{row['type']}: {row['label']}",
-                id={"type": "search-result", "index": row["canonical_id"]},
-                n_clicks=0,
-                className="search-result-btn",
-                title=row["canonical_id"],
-                type="button",
-                role="listitem",
-            )
-        )
-    return html.Div(items, className="search-results")
 
 
 def _hover_card_children(data: dict[str, Any] | None) -> tuple[Any, dict[str, str]]:

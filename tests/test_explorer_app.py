@@ -105,8 +105,8 @@ def _write_minimal_build(build_dir: Path) -> None:
 
 
 def test_build_app_registers_layout_assets_and_callbacks(tmp_path: Path) -> None:
-    from oddsgraph.explorer.app import ASSETS_DIR, build_app, default_stylesheet
-    from oddsgraph.explorer import VIEW_BRACKET
+    from oddsgraph.explorer.app import ASSETS_DIR, build_app
+    from oddsgraph.explorer.presentation import bracket_stylesheet
 
     settings = make_settings(tmp_path)
     _write_minimal_build(settings.build_dir)
@@ -119,26 +119,36 @@ def test_build_app_registers_layout_assets_and_callbacks(tmp_path: Path) -> None
     layout = app.layout
     assert layout is not None
 
-    # Component ids used by callbacks must be present.
     rendered = str(layout)
     for component_id in (
-        "view-mode",
-        "search-input",
-        "search-button",
+        "time-slider",
+        "time-slider-label",
         "graph-cyto",
         "inspector-panel",
-        "layout-dropdown",
         "reset-button",
-        "view-in-topology-button",
         "hover-card",
-        "skip-view-reload",
+        "toggle-controls",
+        "toggle-inspector",
+        "confidence-filter",
+        "remove-button",
     ):
         assert component_id in rendered
 
-    styles = default_stylesheet(VIEW_BRACKET)
+    for removed_id in (
+        "view-mode",
+        "search-input",
+        "view-in-topology-button",
+        "layout-dropdown",
+        "type-filter",
+        "skip-view-reload",
+        "expand-button",
+    ):
+        assert removed_id not in rendered
+
+    styles = bracket_stylesheet()
     assert any(rule["selector"] == "edge" for rule in styles)
     edge = next(rule for rule in styles if rule["selector"] == "edge")
     assert edge["style"]["curve-style"] == "taxi"
+    assert any(rule["selector"] == "node[current_home_prob]" for rule in styles)
 
-    # Callback map is populated (exact count may evolve; split canvas callbacks).
     assert len(app.callback_map) >= 7

@@ -27,6 +27,7 @@ default source of truth.
 | `ontology_path` | `build/ontology.json` | Ontology dump |
 | `inference_report_path` | `build/inference_report.json` | Inference report |
 | `implies_closure_path` | `build/implies_closure.parquet` | On-demand transitive IMPLIES |
+| `odds_history_path` | `build/odds_history.parquet` | Knockout advance odds time series |
 
 ## Model / LLM
 

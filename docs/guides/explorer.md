@@ -11,6 +11,7 @@ artifacts.
 
 ```bash
 uv sync --extra explore
+oddsgraph odds-history   # optional; enables the Knockout time slider
 oddsgraph explore
 ```
 
@@ -18,7 +19,9 @@ Opens `http://127.0.0.1:8050` by default. Options: `--host`, `--port`, `--debug`
 plus the shared `--build-dir`.
 
 Requires `build/nodes.parquet` and `build/edges.parquet` from a prior
-`oddsgraph build` / `oddsgraph run`.
+`oddsgraph build` / `oddsgraph run`. The temporal color slider additionally
+needs `build/odds_history.parquet` from `oddsgraph odds-history` (also
+produced by `oddsgraph run`).
 
 ## Default view
 
@@ -30,33 +33,19 @@ The **knockout bracket** is a classic left-to-right tournament:
 - Deterministic `preset` layout (not a force-directed hairball)
 - Orthogonal taxi edges without repeated `ADVANCES_TO` labels
 - Click a match to highlight its path through the DAG and inspect features
-
-Switch **View → Full topology** for the broader
-`COMPETITION` / `STAGE` / `GROUP` / `ROUND` / `MATCH` / `TEAM` graph (~180 nodes
-on a full WC2026 build).
+- Hourly **Knockout time** slider colors each match by team-to-advance
+  probability (green = home favored, red = away). After a match ends, the
+  winner locks to probability 1
 
 ### Progressive controls
 
-- Primary: View, Search, Reset
-- Advanced (collapsed by default): node-type filter, confidence, inference
-  method, free layout chooser
-- Search or **Expand neighbors** from the bracket switches into Full topology
-  so the 32-node preset stays clean
+- Primary: Knockout time slider, Reset
+- Advanced (collapsed by default): confidence and inference-method filters
 - Hover a card for a compact preview; the inspector shows identity, provenance,
   and evidence (long market-id lists stay collapsed)
 
-On narrower viewports, use the **Controls** / **Inspector** toggles so the
-canvas keeps most of the screen.
-
-## Topology / market bridge
-
-!!! note
-
-    Deterministic proposition compilation links covered `OUTCOME` nodes into
-    topology via `REFERS_TO` (plus `PRICES` / logical edges). Residual market
-    types without a compiled proposition remain disconnected — search for an
-    event title or market id to inspect them, and see
-    [Known limitations](../concepts/limitations.md).
+Use the **Controls** / **Inspector** toggles on any viewport width so the
+canvas can reclaim space when a sidebar is collapsed.
 
 ## See also
 

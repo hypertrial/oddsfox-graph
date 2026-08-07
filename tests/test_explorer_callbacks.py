@@ -4,19 +4,20 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pyarrow as pa
+import pyarrow.parquet as pq
 import pytest
 from dash import no_update
 
-from oddsgraph.explorer import VIEW_BRACKET, VIEW_TOPOLOGY
 from oddsgraph.explorer.callbacks import (
-    add_search_result,
-    expand_neighbors,
+    apply_time_slider,
     highlight_on_tap,
     load_view,
-    open_in_topology,
+    remove_from_canvas,
 )
 from oddsgraph.explorer.data import clear_stores
 from oddsgraph.export import export_graph_artifacts
+from oddsgraph.odds_history import ODDS_HISTORY_SCHEMA
 from oddsgraph.ontology import EdgeType, NodeType
 from oddsgraph.schema import CanonicalEdge, CanonicalNode, InferenceReport
 from tests.helpers import make_settings
@@ -73,16 +74,6 @@ def _write_fixture(build_dir: Path) -> None:
             resolution_method="exact_id",
             inference_method="official_bracket",
         ),
-        CanonicalNode(
-            canonical_id="team:brazil",
-            type=NodeType.TEAM,
-            label="Brazil",
-            aliases=["bra"],
-            confidence=1.0,
-            evidence_market_ids=["m1"],
-            resolution_method="exact_id",
-            inference_method="deterministic",
-        ),
     ]
     edges = [
         CanonicalEdge(
@@ -112,15 +103,6 @@ def _write_fixture(build_dir: Path) -> None:
             evidence_text="continuity",
             inference_method="official_bracket",
         ),
-        CanonicalEdge(
-            source_id="team:brazil",
-            target_id="match:a",
-            edge_type=EdgeType.PARTICIPATES_IN,
-            confidence=1.0,
-            evidence_market_ids=["m1"],
-            evidence_text="Brazil plays",
-            inference_method="deterministic",
-        ),
     ]
     export_graph_artifacts(
         nodes=nodes,
@@ -128,8 +110,8 @@ def _write_fixture(build_dir: Path) -> None:
         rejected_edges=[],
         report=InferenceReport(
             events_processed=1,
-            node_counts={"STAGE": 2, "MATCH": 2, "TEAM": 1},
-            edge_counts={"PART_OF": 2, "ADVANCES_TO": 1, "PARTICIPATES_IN": 1},
+            node_counts={"STAGE": 2, "MATCH": 2},
+            edge_counts={"PART_OF": 2, "ADVANCES_TO": 1},
         ),
         nodes_path=build_dir / "nodes.parquet",
         edges_path=build_dir / "edges.parquet",
@@ -139,10 +121,10 @@ def _write_fixture(build_dir: Path) -> None:
     )
 
 
-def test_highlight_on_tap_updates_path_classes() -> None:
+def test_highlight_on_tap_marks_path() -> None:
     elements = [
-        {"data": {"id": "a", "type": "MATCH", "stage": "Round of 16"}, "classes": "MATCH"},
-        {"data": {"id": "b", "type": "MATCH", "stage": "Final"}, "classes": "MATCH"},
+        {"data": {"id": "a", "type": "MATCH", "label": "A"}, "classes": "MATCH"},
+        {"data": {"id": "b", "type": "MATCH", "label": "B"}, "classes": "MATCH"},
         {
             "data": {
                 "id": "a|ADVANCES_TO|b",
@@ -162,144 +144,107 @@ def test_highlight_on_tap_updates_path_classes() -> None:
     assert "Highlighted path through a." in status
 
 
-def test_expand_from_bracket_sets_topology(tmp_path: Path) -> None:
+def test_load_view_resets_bracket(tmp_path: Path) -> None:
     settings = make_settings(tmp_path)
     _write_fixture(settings.build_dir)
 
-    (
-        elements,
-        status,
-        next_types,
-        layout,
-        view_mode,
-        _stylesheet,
-        selected,
-        _edge,
-        skip,
-    ) = expand_neighbors(
-        settings,
-        "match:a",
-        VIEW_BRACKET,
-        elements=[],
-        visible_types=["MATCH"],
-        min_confidence=0.0,
-        inference_method="",
-    )
-    assert view_mode == VIEW_TOPOLOGY
-    assert layout == "breadthfirst"
-    assert selected == "match:a"
-    assert skip is True
-    assert "MATCH" in next_types
-    assert "TEAM" in next_types
-    assert "Expanded match:a in Full topology" in status
-    ids = {el["data"]["id"] for el in elements if "source" not in (el.get("data") or {})}
-    assert "match:a" in ids
-    assert "team:brazil" in ids
-
-
-def test_expand_surfaces_neighbor_truncation(tmp_path: Path) -> None:
-    settings = make_settings(tmp_path)
-    _write_fixture(settings.build_dir)
-
-    _elements, status, *_rest = expand_neighbors(
-        settings,
-        "match:a",
-        VIEW_TOPOLOGY,
-        elements=[],
-        visible_types=["MATCH", "TEAM", "STAGE"],
-        min_confidence=0.0,
-        inference_method="",
-        neighbor_limit=1,
-    )
-    assert "Truncated to 1 incident edges" in status
-
-
-def test_expand_empty_neighbors_mentions_proposition_bridge(tmp_path: Path) -> None:
-    settings = make_settings(tmp_path)
-    export_graph_artifacts(
-        nodes=[
-            CanonicalNode(
-                canonical_id="team:lonely",
-                type=NodeType.TEAM,
-                label="Lonely",
-                aliases=[],
-                confidence=1.0,
-                evidence_market_ids=["m1"],
-                resolution_method="exact_id",
-                inference_method="deterministic",
-            )
-        ],
-        edges=[],
-        rejected_edges=[],
-        report=InferenceReport(node_counts={"TEAM": 1}, edge_counts={}),
-        nodes_path=settings.nodes_path,
-        edges_path=settings.edges_path,
-        rejected_edges_path=settings.rejected_edges_path,
-        ontology_path=settings.ontology_path,
-        inference_report_path=settings.inference_report_path,
-    )
-
-    _elements, status, *_rest = expand_neighbors(
-        settings,
-        "team:lonely",
-        VIEW_TOPOLOGY,
-        elements=[],
-        visible_types=["TEAM"],
-        min_confidence=0.0,
-        inference_method="",
-        neighbor_limit=50,
-    )
-    assert "No neighbors for team:lonely" in status
-    assert "REFERS_TO/PRICES" in status
-    assert "disconnected" not in status.lower()
-
-
-def test_load_view_honors_skip_reload(tmp_path: Path) -> None:
-    settings = make_settings(tmp_path)
-    _write_fixture(settings.build_dir)
-
-    skipped = load_view(
-        settings,
-        VIEW_TOPOLOGY,
-        0.0,
-        "",
-        skip_view_reload=True,
-    )
-    assert skipped[0] is no_update
-    assert skipped[8] is False
-
-    loaded = load_view(settings, VIEW_BRACKET, 0.0, "")
+    loaded = load_view(settings, 0.0, "", reset=True)
     assert loaded[0] is not no_update
-    assert "Loaded knockout bracket view." in loaded[1]
+    assert "Reset knockout bracket view." in loaded[1]
+    ids = {
+        el["data"]["id"]
+        for el in loaded[0]
+        if "source" not in (el.get("data") or {})
+        and el["data"].get("type") == "MATCH"
+    }
+    assert ids == {"match:a", "match:b"}
 
 
-def test_open_in_topology_and_search_switch_view(tmp_path: Path) -> None:
+def test_apply_time_slider_locks_winner(tmp_path: Path) -> None:
     settings = make_settings(tmp_path)
     _write_fixture(settings.build_dir)
-
-    opened = open_in_topology(settings, "match:a", 0.0, "")
-    assert opened[4] == VIEW_TOPOLOGY
-    assert opened[8] is True
-    assert "Opened match:a in Full topology." in opened[1]
-
-    already = open_in_topology(
-        settings,
-        "match:a",
-        0.0,
-        "",
-        current_view_mode=VIEW_TOPOLOGY,
+    pq.write_table(
+        pa.Table.from_pylist(
+            [
+                {
+                    "match_canonical_id": "match:a",
+                    "home_team": "Brazil",
+                    "away_team": "France",
+                    "odds_hour_epoch": 100,
+                    "home_prob": 0.4,
+                    "away_prob": 0.6,
+                    "match_start_epoch": 100,
+                    "match_end_epoch": 200,
+                    "winner_team": "France",
+                },
+                {
+                    "match_canonical_id": "match:a",
+                    "home_team": "Brazil",
+                    "away_team": "France",
+                    "odds_hour_epoch": 150,
+                    "home_prob": 0.2,
+                    "away_prob": 0.8,
+                    "match_start_epoch": 100,
+                    "match_end_epoch": 200,
+                    "winner_team": "France",
+                },
+            ],
+            schema=ODDS_HISTORY_SCHEMA,
+        ),
+        settings.odds_history_path,
     )
-    assert already[8] is False
 
-    added = add_search_result(
-        settings,
-        "team:brazil",
-        VIEW_BRACKET,
-        elements=[],
-        visible_types=["MATCH"],
-        min_confidence=0.0,
-        inference_method="",
-    )
-    assert added[4] == VIEW_TOPOLOGY
-    assert added[6] == "team:brazil"
-    assert "Opened team:brazil in Full topology." in added[1]
+    elements, *_ = load_view(settings, 0.0, "", hour_epoch=100)
+    mid = apply_time_slider(elements, 150, 0.0, "")
+    locked = apply_time_slider(elements, 250, 0.0, "")
+    by_mid = {
+        el["data"]["id"]: el["data"]
+        for el in mid[0]
+        if el["data"].get("type") == "MATCH"
+    }
+    by_locked = {
+        el["data"]["id"]: el["data"]
+        for el in locked[0]
+        if el["data"].get("type") == "MATCH"
+    }
+    assert by_mid["match:a"]["current_home_prob"] == 0.2
+    assert by_locked["match:a"]["current_home_prob"] == 0.0
+
+
+def test_remove_from_canvas(tmp_path: Path) -> None:
+    settings = make_settings(tmp_path)
+    _write_fixture(settings.build_dir)
+    elements, *_ = load_view(settings, 0.0, "")
+    removed = remove_from_canvas("match:a", elements, 0.0, "")
+    ids = {
+        el["data"]["id"]
+        for el in removed[0]
+        if "source" not in (el.get("data") or {})
+        and el["data"].get("type") == "MATCH"
+    }
+    assert "match:a" not in ids
+    assert "match:b" in ids
+
+
+def test_toggle_controls_and_inspector_classnames() -> None:
+    """Sidebar toggles flip ``is-open`` class names used by CSS collapse."""
+
+    def toggle(is_open: bool, *, kind: str) -> tuple[str, bool]:
+        next_open = not bool(is_open)
+        base = "explorer-controls" if kind == "controls" else "explorer-inspector"
+        classes = f"{base} is-open" if next_open else base
+        return classes, next_open
+
+    classes, opened = toggle(True, kind="controls")
+    assert opened is False
+    assert classes == "explorer-controls"
+    classes, opened = toggle(False, kind="controls")
+    assert opened is True
+    assert classes == "explorer-controls is-open"
+
+    classes, opened = toggle(True, kind="inspector")
+    assert opened is False
+    assert classes == "explorer-inspector"
+    classes, opened = toggle(False, kind="inspector")
+    assert opened is True
+    assert classes == "explorer-inspector is-open"

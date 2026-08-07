@@ -2,64 +2,37 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
-from dash import ALL, Dash, Input, Output, State, callback_context, html, no_update
+from dash import Dash, Input, Output, State, callback_context, html
 from dash.exceptions import PreventUpdate
 
 from oddsgraph.config import Settings
-from oddsgraph.explorer import VIEW_BRACKET, VIEW_TOPOLOGY
 from oddsgraph.explorer.canvas_actions import (
     CanvasMutation,
     _canvas_callback_outputs,
-    _noop_mutation,
-    add_search_result,
-    expand_neighbors,
+    apply_time_slider,
     filter_canvas,
     highlight_on_tap,
     load_view,
-    open_in_topology,
     remove_from_canvas,
 )
-from oddsgraph.explorer.data import get_edge, get_node, search_nodes
-from oddsgraph.explorer.inspector import (
-    _hover_card_children,
-    _inspector_sheet,
-    _search_results_list,
-)
-from oddsgraph.explorer.presentation import bracket_layout, topology_layout
+from oddsgraph.explorer.data import get_edge, get_node
+from oddsgraph.explorer.inspector import _hover_card_children, _inspector_sheet
+from oddsgraph.explorer.presentation import format_hour_label
 
 # Re-export public canvas helpers so existing test imports keep working.
 __all__ = [
-    "add_search_result",
-    "expand_neighbors",
+    "apply_time_slider",
     "highlight_on_tap",
     "load_view",
-    "open_in_topology",
     "register_callbacks",
+    "remove_from_canvas",
 ]
+
 
 def register_callbacks(app: Dash, settings: Settings) -> None:
     """Wire explorer interactions against ``settings`` artifacts."""
-
-    @app.callback(
-        Output("search-results", "children"),
-        Input("search-button", "n_clicks"),
-        Input("search-input", "n_submit"),
-        State("search-input", "value"),
-        prevent_initial_call=True,
-    )
-    def run_search(
-        n_clicks: int | None,
-        n_submit: int | None,
-        query: str | None,
-    ) -> Any:
-        del n_clicks, n_submit
-        if not callback_context.triggered:
-            raise PreventUpdate
-        rows = search_nodes(settings, query or "", limit=25)
-        return _search_results_list(rows)
 
     @app.callback(
         Output("controls-panel", "className"),
@@ -106,48 +79,40 @@ def register_callbacks(app: Dash, settings: Settings) -> None:
             return [], {"display": "none"}
         return _hover_card_children(mouseover)
 
-    # --- Canvas mutations split into three registered callbacks ---
+    @app.callback(
+        Output("time-slider-label", "children"),
+        Input("time-slider", "value"),
+    )
+    def update_time_label(hour_epoch: int | None) -> str:
+        return format_hour_label(hour_epoch)
 
     @app.callback(
         *_canvas_callback_outputs(allow_duplicate=False),
-        Input("view-mode", "value"),
         Input("reset-button", "n_clicks"),
         State("confidence-filter", "value"),
         State("inference-filter", "value"),
-        State("skip-view-reload", "data"),
+        State("time-slider", "value"),
         prevent_initial_call=True,
     )
-    def load_or_reset_view(
-        view_mode_input: str | None,
+    def reset_view(
         reset_clicks: int | None,
         min_confidence: float | None,
         inference_method: str | None,
-        skip_view_reload: bool | None,
+        hour_epoch: int | None,
     ) -> CanvasMutation:
         del reset_clicks
         if not callback_context.triggered:
             raise PreventUpdate
-        triggered = callback_context.triggered[0]["prop_id"]
-        conf = float(min_confidence or 0.0)
-        method = inference_method or ""
-        view_mode = view_mode_input or VIEW_BRACKET
-        if triggered.startswith("reset-button"):
-            return load_view(
-                settings, view_mode, conf, method, reset=True
-            )
-        if triggered.startswith("view-mode"):
-            return load_view(
-                settings,
-                view_mode,
-                conf,
-                method,
-                skip_view_reload=bool(skip_view_reload),
-            )
-        raise PreventUpdate
+        return load_view(
+            settings,
+            float(min_confidence or 0.0),
+            inference_method or "",
+            hour_epoch=hour_epoch,
+            reset=True,
+        )
 
     @app.callback(
         *_canvas_callback_outputs(allow_duplicate=True),
-        Input("type-filter", "value"),
         Input("confidence-filter", "value"),
         Input("inference-filter", "value"),
         Input("graph-cyto", "tapNodeData"),
@@ -155,7 +120,6 @@ def register_callbacks(app: Dash, settings: Settings) -> None:
         prevent_initial_call=True,
     )
     def highlight_and_filter(
-        visible_types: list[str] | None,
         min_confidence: float | None,
         inference_method: str | None,
         tap_node: dict[str, Any] | None,
@@ -173,130 +137,67 @@ def register_callbacks(app: Dash, settings: Settings) -> None:
                 raise PreventUpdate
             return result
 
-        if (
-            triggered.startswith("type-filter")
-            or triggered.startswith("confidence-filter")
-            or triggered.startswith("inference-filter")
+        if triggered.startswith("confidence-filter") or triggered.startswith(
+            "inference-filter"
         ):
-            return filter_canvas(elements, visible_types, conf, method)
+            return filter_canvas(elements, conf, method)
 
         raise PreventUpdate
 
     @app.callback(
         *_canvas_callback_outputs(allow_duplicate=True),
-        Input("expand-button", "n_clicks"),
-        Input("remove-button", "n_clicks"),
-        Input("view-in-topology-button", "n_clicks"),
-        Input({"type": "search-result", "index": ALL}, "n_clicks"),
+        Input("time-slider", "value"),
         State("graph-cyto", "elements"),
-        State("selected-node-id", "data"),
-        State("view-mode", "value"),
-        State("type-filter", "value"),
         State("confidence-filter", "value"),
         State("inference-filter", "value"),
         prevent_initial_call=True,
     )
-    def expand_search_mutations(
-        expand_clicks: int | None,
-        remove_clicks: int | None,
-        topology_clicks: int | None,
-        search_clicks: list[int] | None,
+    def scrub_time(
+        hour_epoch: int | None,
         elements: list[dict[str, Any]] | None,
-        selected_node_id: str | None,
-        view_mode_state: str | None,
-        visible_types: list[str] | None,
         min_confidence: float | None,
         inference_method: str | None,
     ) -> CanvasMutation:
-        del expand_clicks, remove_clicks, topology_clicks, search_clicks
         if not callback_context.triggered:
             raise PreventUpdate
-
-        triggered = callback_context.triggered[0]["prop_id"]
-        conf = float(min_confidence or 0.0)
-        method = inference_method or ""
-        view_mode = view_mode_state or VIEW_BRACKET
-
-        if triggered.startswith("view-in-topology-button"):
-            return open_in_topology(
-                settings,
-                selected_node_id,
-                conf,
-                method,
-                current_view_mode=view_mode,
-            )
-
-        if triggered.startswith("expand-button"):
-            return expand_neighbors(
-                settings,
-                selected_node_id,
-                view_mode,
-                elements,
-                visible_types,
-                conf,
-                method,
-            )
-
-        if triggered.startswith("remove-button"):
-            return remove_from_canvas(
-                selected_node_id, elements, visible_types, conf, method
-            )
-
-        if "search-result" in triggered:
-            prop = triggered.rsplit(".", 1)[0]
-            try:
-                payload = json.loads(prop)
-            except json.JSONDecodeError:
-                return (
-                    no_update,
-                    "Failed to parse search result.",
-                    no_update,
-                    no_update,
-                    no_update,
-                    no_update,
-                    no_update,
-                    no_update,
-                    no_update,
-                )
-            node_id = payload.get("index")
-            if not node_id:
-                return _noop_mutation()
-            if not callback_context.triggered[0]["value"]:
-                raise PreventUpdate
-            return add_search_result(
-                settings,
-                str(node_id),
-                view_mode,
-                elements,
-                visible_types,
-                conf,
-                method,
-            )
-
-        raise PreventUpdate
+        return apply_time_slider(
+            elements,
+            hour_epoch,
+            float(min_confidence or 0.0),
+            inference_method or "",
+        )
 
     @app.callback(
-        Output("graph-cyto", "layout"),
-        Input("layout-dropdown", "value"),
-        State("view-mode", "value"),
+        *_canvas_callback_outputs(allow_duplicate=True),
+        Input("remove-button", "n_clicks"),
+        State("graph-cyto", "elements"),
+        State("selected-node-id", "data"),
+        State("confidence-filter", "value"),
+        State("inference-filter", "value"),
         prevent_initial_call=True,
     )
-    def update_layout(
-        layout_name: str | None,
-        view_mode: str | None,
-    ) -> dict[str, Any]:
-        name = layout_name or ("preset" if view_mode != VIEW_TOPOLOGY else "breadthfirst")
-        if name == "preset":
-            return bracket_layout()
-        return topology_layout(name)
+    def remove_selected(
+        remove_clicks: int | None,
+        elements: list[dict[str, Any]] | None,
+        selected_node_id: str | None,
+        min_confidence: float | None,
+        inference_method: str | None,
+    ) -> CanvasMutation:
+        del remove_clicks
+        if not callback_context.triggered:
+            raise PreventUpdate
+        return remove_from_canvas(
+            selected_node_id,
+            elements,
+            float(min_confidence or 0.0),
+            inference_method or "",
+        )
 
     @app.callback(
         Output("inspector-panel", "children"),
         Output("selected-node-id", "data"),
         Output("selected-edge-id", "data"),
-        Output("expand-button", "disabled"),
         Output("remove-button", "disabled"),
-        Output("view-in-topology-button", "disabled"),
         Input("graph-cyto", "tapNodeData"),
         Input("graph-cyto", "tapEdgeData"),
         prevent_initial_call=True,
@@ -304,7 +205,7 @@ def register_callbacks(app: Dash, settings: Settings) -> None:
     def inspect_selection(
         node_data: dict[str, Any] | None,
         edge_data: dict[str, Any] | None,
-    ) -> tuple[Any, Any, Any, bool, bool, bool]:
+    ) -> tuple[Any, Any, Any, bool]:
         if not callback_context.triggered:
             raise PreventUpdate
         triggered = callback_context.triggered[0]["prop_id"]
@@ -319,15 +220,11 @@ def register_callbacks(app: Dash, settings: Settings) -> None:
                     node_id,
                     None,
                     False,
-                    False,
-                    False,
                 )
             return (
                 _inspector_sheet("Node", row, stage=stage),
                 node_id,
                 None,
-                False,
-                False,
                 False,
             )
 
@@ -347,9 +244,7 @@ def register_callbacks(app: Dash, settings: Settings) -> None:
                     None,
                     edge_id,
                     True,
-                    True,
-                    True,
                 )
-            return _inspector_sheet("Edge", row), None, edge_id, True, True, True
+            return _inspector_sheet("Edge", row), None, edge_id, True
 
         raise PreventUpdate

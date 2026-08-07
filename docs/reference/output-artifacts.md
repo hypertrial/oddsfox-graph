@@ -66,6 +66,24 @@ Optional on-demand export from `oddsgraph closure`. Same columns as
 `edges.parquet`; rows are transitive `IMPLIES` edges with
 `derivation_type=transitive` and `premises` holding the shortest path.
 
+## `odds_history.parquet`
+
+Optional export from `oddsgraph odds-history` (also produced by `oddsgraph run`).
+Hourly knockout win probabilities from Polymarket `soccer_team_to_advance`
+markets.
+
+| Column | Type | Description |
+| --- | --- | --- |
+| `match_canonical_id` | string | Knockout MATCH id |
+| `home_team` | string | Canonical home team label |
+| `away_team` | string | Canonical away team label |
+| `odds_hour_epoch` | int64 | Hour bucket start (UTC epoch seconds) |
+| `home_prob` | float | Probability home advances / wins |
+| `away_prob` | float | Probability away advances / wins |
+| `match_start_epoch` | int64 | Kickoff / game start epoch |
+| `match_end_epoch` | int64 | Match finished epoch (or last observed hour) |
+| `winner_team` | string \| null | Locked winner when known |
+
 ## `ontology.json`
 
 Dump of node types, edge types, allowed patterns, progression edge types, and

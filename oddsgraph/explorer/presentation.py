@@ -49,35 +49,6 @@ _VS_SPLIT_RE = re.compile(r"\s+vs\.?\s+", re.IGNORECASE)
 # Interaction / visibility classes preserved independently of type classes.
 PRESERVED_CLASSES = frozenset({"hidden", "path-active", "path-muted", "hovered"})
 
-NODE_COLORS: dict[str, str] = {
-    "COMPETITION": "#1f4e79",
-    "STAGE": "#2e75b6",
-    "GROUP": "#5b9bd5",
-    "ROUND": "#9dc3e6",
-    "MATCH": "#ed7d31",
-    "TEAM": "#70ad47",
-    "EVENT": "#7030a0",
-    "MARKET": "#ffc000",
-    "OUTCOME": "#a5a5a5",
-    "CONSTRAINT": "#c45911",
-}
-
-EDGE_COLORS: dict[str, str] = {
-    "PART_OF": "#5b9bd5",
-    "PARTICIPATES_IN": "#70ad47",
-    "QUALIFIES_FOR": "#ed7d31",
-    "ADVANCES_TO": "#0f766e",
-    "HAS_MARKET": "#7030a0",
-    "HAS_OUTCOME": "#a5a5a5",
-    "PRICES": "#ffc000",
-    "IMPLIES": "#7f7f7f",
-    "REFERS_TO": "#5b9bd5",
-    "EQUIVALENT": "#7030a0",
-    "COMPLEMENT": "#a5a5a5",
-    "MUTEX": "#c00000",
-    "EXACTLY_ONE": "#c45911",
-}
-
 
 def short_match_label(label: str) -> str:
     """Return a two-line card label from ``Home vs. Away``."""
@@ -86,6 +57,88 @@ def short_match_label(label: str) -> str:
         return label.strip()
     home, away = parts[0].strip(), parts[1].strip()
     return f"{home}\n{away}"
+
+
+def split_match_teams(label: str) -> tuple[str, str] | None:
+    """Return ``(home, away)`` display names from a MATCH label, if parseable."""
+    parts = _VS_SPLIT_RE.split(label.strip(), maxsplit=1)
+    if len(parts) != 2:
+        return None
+    home, away = parts[0].strip(), parts[1].strip()
+    if not home or not away:
+        return None
+    return home, away
+
+
+def home_prob_at_hour(
+    data: dict[str, Any],
+    hour_epoch: int | None,
+) -> float | None:
+    """Return home win-probability at ``hour_epoch``, locking after match end.
+
+    Uses the latest ``odds_series`` point with ``h <= hour_epoch``. When the
+    slider is at or past ``match_end_epoch`` and ``winner_team`` is known,
+    returns ``1.0`` / ``0.0`` for home / away winners.
+    """
+    series = data.get("odds_series") or []
+    if not isinstance(series, list) or not series:
+        return None
+
+    end_epoch = data.get("match_end_epoch")
+    winner = data.get("winner_team")
+    home = data.get("home_team")
+    if (
+        hour_epoch is not None
+        and end_epoch is not None
+        and int(hour_epoch) >= int(end_epoch)
+        and winner
+        and home
+    ):
+        return 1.0 if str(winner) == str(home) else 0.0
+
+    if hour_epoch is None:
+        point = series[0]
+    else:
+        hour = int(hour_epoch)
+        eligible = [p for p in series if int(p.get("h") or 0) <= hour]
+        point = eligible[-1] if eligible else series[0]
+    try:
+        return float(point["home"])
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def apply_time_slice(
+    elements: list[dict[str, Any]],
+    hour_epoch: int | None,
+) -> list[dict[str, Any]]:
+    """Stamp ``current_home_prob`` onto MATCH nodes from their odds series."""
+    updated: list[dict[str, Any]] = []
+    for el in elements:
+        if is_stage_header(el) or _is_edge(el):
+            updated.append(el)
+            continue
+        data = dict(el.get("data") or {})
+        if str(data.get("type") or "") != "MATCH":
+            updated.append(el)
+            continue
+        prob = home_prob_at_hour(data, hour_epoch)
+        if prob is None:
+            data.pop("current_home_prob", None)
+        else:
+            data["current_home_prob"] = prob
+        updated.append({**el, "data": data})
+    return updated
+
+
+def format_hour_label(hour_epoch: int | None) -> str:
+    """Human-readable UTC label for the time slider."""
+    if hour_epoch is None:
+        return "No odds history"
+    from datetime import datetime, timezone
+
+    dt = datetime.fromtimestamp(int(hour_epoch), tz=timezone.utc)
+    return dt.strftime("%Y-%m-%d %H:%M UTC")
 
 
 def fifa_match_id(aliases: list[str] | None) -> int | None:
@@ -438,26 +491,6 @@ def bracket_layout() -> dict[str, Any]:
     }
 
 
-def topology_layout(name: str = "breadthfirst") -> dict[str, Any]:
-    """Cytoscape layout config for the full topology view."""
-    if name == "dagre":
-        return {
-            "name": "dagre",
-            "rankDir": "LR",
-            "nodeSep": 40,
-            "rankSep": 80,
-            "animate": True,
-            "padding": 20,
-        }
-    if name == "preset":
-        return bracket_layout()
-    layout: dict[str, Any] = {"name": name, "animate": True, "padding": 20}
-    if name == "breadthfirst":
-        layout["directed"] = True
-        layout["spacingFactor"] = 1.2
-    return layout
-
-
 def bracket_stylesheet() -> list[dict[str, Any]]:
     """Cytoscape stylesheet tuned for LR match-card bracket view."""
     styles: list[dict[str, Any]] = [
@@ -578,7 +611,6 @@ def bracket_stylesheet() -> list[dict[str, Any]]:
             "style": {
                 "border-color": "#9a3412",
                 "border-width": 2.5,
-                "background-color": "#ffedd5",
                 "width": 160,
                 "height": 52,
                 "font-size": "12px",
@@ -588,112 +620,16 @@ def bracket_stylesheet() -> list[dict[str, Any]]:
             "selector": 'node[stage = "Third Place"]',
             "style": {
                 "border-color": "#78716c",
-                "background-color": "#f5f5f4",
+            },
+        },
+        {
+            # Away-favored (red) → home-favored (green). Stage borders stay orthogonal.
+            "selector": "node[current_home_prob]",
+            "style": {
+                "background-color": (
+                    "mapData(current_home_prob, 0, 1, #fecaca, #bbf7d0)"
+                ),
             },
         },
     ]
     return styles
-
-
-def topology_stylesheet(
-    node_colors: dict[str, str],
-    edge_colors: dict[str, str],
-) -> list[dict[str, Any]]:
-    """Cytoscape stylesheet for the full topology / mixed-type view."""
-    styles: list[dict[str, Any]] = [
-        {
-            "selector": "node",
-            "style": {
-                "label": "data(label)",
-                "text-valign": "center",
-                "text-halign": "center",
-                "font-size": "10px",
-                "color": "#111",
-                "background-color": "#888",
-                "width": 28,
-                "height": 28,
-                "text-wrap": "wrap",
-                "text-max-width": 80,
-                "min-zoomed-font-size": 8,
-                "shape": "ellipse",
-            },
-        },
-        {
-            "selector": "edge",
-            "style": {
-                "label": "data(label)",
-                "font-size": "8px",
-                "color": "#444",
-                "curve-style": "bezier",
-                "target-arrow-shape": "triangle",
-                "arrow-scale": 0.8,
-                "width": 1.5,
-                "line-color": "#999",
-                "target-arrow-color": "#999",
-                "text-rotation": "autorotate",
-                "text-margin-y": -8,
-            },
-        },
-        {
-            "selector": ":selected",
-            "style": {
-                "border-width": 3,
-                "border-color": "#000",
-                "line-color": "#000",
-                "target-arrow-color": "#000",
-                "z-index": 999,
-            },
-        },
-        {
-            "selector": ".hidden",
-            "style": {"display": "none"},
-        },
-        {
-            "selector": ".path-muted",
-            "style": {"opacity": 0.25},
-        },
-        {
-            "selector": ".path-active",
-            "style": {
-                "opacity": 1,
-                "border-width": 3,
-                "line-color": "#0f766e",
-                "target-arrow-color": "#0f766e",
-                "width": 2.5,
-                "z-index": 900,
-            },
-        },
-    ]
-    for node_type, color in node_colors.items():
-        styles.append(
-            {
-                "selector": f".{node_type}",
-                "style": {"background-color": color},
-            }
-        )
-    for edge_type, color in edge_colors.items():
-        styles.append(
-            {
-                "selector": f".{edge_type}",
-                "style": {
-                    "line-color": color,
-                    "target-arrow-color": color,
-                },
-            }
-        )
-    styles.append(
-        {
-            "selector": ".ADVANCES_TO",
-            "style": {"width": 2.5},
-        }
-    )
-    return styles
-
-
-def stylesheet_for(view_mode: str) -> list[dict[str, Any]]:
-    """Return the Cytoscape stylesheet for bracket or topology view."""
-    from oddsgraph.explorer import VIEW_TOPOLOGY
-
-    if view_mode == VIEW_TOPOLOGY:
-        return topology_stylesheet(NODE_COLORS, EDGE_COLORS)
-    return bracket_stylesheet()

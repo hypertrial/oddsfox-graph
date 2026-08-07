@@ -1,4 +1,4 @@
-"""Pure canvas filter/merge helpers for the graph explorer (no Dash dependency)."""
+"""Pure canvas filter helpers for the graph explorer (no Dash dependency)."""
 
 from __future__ import annotations
 
@@ -24,46 +24,6 @@ def is_edge(el: dict[str, Any]) -> bool:
 
 def is_node(el: dict[str, Any]) -> bool:
     return not is_edge(el)
-
-
-def merge_elements(
-    current: list[dict[str, Any]] | None,
-    incoming: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    """Deduplicate Cytoscape elements by id, preserving interaction classes."""
-    merged: dict[str, dict[str, Any]] = {}
-    for el in current or []:
-        eid = element_id(el)
-        if eid is not None:
-            merged[eid] = el
-    for el in incoming:
-        eid = element_id(el)
-        if eid is None:
-            continue
-        existing = merged.get(eid)
-        if existing is not None:
-            _, preserved = split_classes(existing.get("classes"))
-            semantic, _ = split_classes(el.get("classes"))
-            # Keep prior interaction/visibility classes; take new semantic type.
-            combined = merge_class_sets(semantic, preserved)
-            el = {**el, "classes": combined}
-            # Preserve preset positions when the incoming element lacks them.
-            if "position" in existing and "position" not in el:
-                el = {**el, "position": existing["position"]}
-        merged[eid] = el
-    return list(merged.values())
-
-
-def node_types_in_elements(elements: list[dict[str, Any]]) -> list[str]:
-    """Return sorted unique node ``type`` values present in ``elements``."""
-    types: set[str] = set()
-    for el in elements:
-        if not is_node(el) or is_stage_header(el):
-            continue
-        node_type = (el.get("data") or {}).get("type")
-        if node_type:
-            types.add(str(node_type))
-    return sorted(types)
 
 
 def apply_filters(
@@ -134,17 +94,6 @@ def apply_filters(
             preserved.add("hidden")
         result.append({**el, "classes": merge_class_sets(semantic, preserved)})
     return result
-
-
-def union_types(current: list[str] | None, extra: list[str]) -> list[str]:
-    """Return ``current`` extended with any missing types from ``extra`` (stable order)."""
-    merged = list(current or [])
-    seen = set(merged)
-    for item in extra:
-        if item not in seen:
-            merged.append(item)
-            seen.add(item)
-    return merged
 
 
 def clear_interaction_classes(

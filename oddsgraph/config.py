@@ -28,6 +28,7 @@ class Settings:
     ontology_path: Path = build_dir / "ontology.json"
     inference_report_path: Path = build_dir / "inference_report.json"
     implies_closure_path: Path = build_dir / "implies_closure.parquet"
+    odds_history_path: Path = build_dir / "odds_history.parquet"
 
     model_path: Path = models_dir / "qwen3-4b-q4_k_m.gguf"
     mlx_model_path: Path = models_dir / "qwen3-4b-mlx"
@@ -76,6 +77,7 @@ class Settings:
         self.ontology_path = build_dir / "ontology.json"
         self.inference_report_path = build_dir / "inference_report.json"
         self.implies_closure_path = build_dir / "implies_closure.parquet"
+        self.odds_history_path = build_dir / "odds_history.parquet"
 
     def configure_data_dir(self, data_dir: Path) -> None:
         self.data_dir = data_dir

@@ -9,28 +9,18 @@ from dash import Dash, dcc, html
 import dash_cytoscape as cyto
 
 from oddsgraph.config import Settings
-from oddsgraph.explorer import VIEW_BRACKET, VIEW_TOPOLOGY
-from oddsgraph.explorer.data import bracket_elements, graph_counts
+from oddsgraph.explorer.data import bracket_elements, graph_counts, odds_time_bounds
 from oddsgraph.explorer.presentation import (
     BRACKET_COLUMN_HEADERS,
+    apply_time_slice,
     bracket_layout,
-    stylesheet_for,
+    bracket_stylesheet,
+    format_hour_label,
 )
-from oddsgraph.ontology import NodeType
-
-# Extra layouts used by the explorer (dagre lives in the extra bundle).
-cyto.load_extra_layouts()
 
 ASSETS_DIR = Path(__file__).resolve().parent / "assets"
 
-ALL_NODE_TYPES = [t.value for t in NodeType]
-
 STAGE_STRIP = [label for _, label in BRACKET_COLUMN_HEADERS]
-
-
-def default_stylesheet(view_mode: str = VIEW_BRACKET) -> list[dict[str, Any]]:
-    """Return the Cytoscape stylesheet for the active view."""
-    return stylesheet_for(view_mode)
 
 
 def _counts_summary(counts: dict[str, Any]) -> str:
@@ -40,12 +30,33 @@ def _counts_summary(counts: dict[str, Any]) -> str:
     )
 
 
+def _time_slider_marks(min_hour: int, max_hour: int) -> dict[int, str]:
+    mid = min_hour + ((max_hour - min_hour) // 2)
+    return {
+        min_hour: format_hour_label(min_hour).replace(" UTC", "").strip(),
+        mid: format_hour_label(mid).replace(" UTC", "").strip(),
+        max_hour: format_hour_label(max_hour).replace(" UTC", "").strip(),
+    }
+
+
 def build_app(settings: Settings) -> Dash:
     """Build the Dash explorer app bound to ``settings`` build artifacts."""
     from oddsgraph.explorer.callbacks import register_callbacks
 
     initial = bracket_elements(settings)
     counts = graph_counts(settings)
+    min_hour, max_hour = odds_time_bounds(settings)
+    if min_hour is None or max_hour is None:
+        min_hour, max_hour = 0, 1
+        slider_disabled = True
+        slider_value = 0
+        marks = {0: "n/a", 1: "n/a"}
+    else:
+        slider_disabled = False
+        slider_value = min_hour
+        marks = _time_slider_marks(min_hour, max_hour)
+
+    initial_elements = apply_time_slice(initial.to_elements(), slider_value)
 
     app = Dash(
         __name__,
@@ -119,63 +130,39 @@ def build_app(settings: Settings) -> Dash:
                                 className="panel-section",
                                 children=[
                                     html.Label(
-                                        "View",
-                                        htmlFor="view-mode",
+                                        "Knockout time",
+                                        htmlFor="time-slider",
                                         className="panel-label",
                                     ),
-                                    dcc.RadioItems(
-                                        id="view-mode",
-                                        options=[
-                                            {
-                                                "label": "Knockout bracket",
-                                                "value": VIEW_BRACKET,
-                                            },
-                                            {
-                                                "label": "Full topology",
-                                                "value": VIEW_TOPOLOGY,
-                                            },
-                                        ],
-                                        value=VIEW_BRACKET,
-                                        className="view-mode-radio",
+                                    html.Div(
+                                        id="time-slider-label",
+                                        className="time-slider-label",
+                                        children=format_hour_label(
+                                            None if slider_disabled else slider_value
+                                        ),
+                                    ),
+                                    dcc.Slider(
+                                        id="time-slider",
+                                        min=min_hour,
+                                        max=max_hour,
+                                        step=3600,
+                                        value=slider_value,
+                                        marks=marks,
+                                        disabled=slider_disabled,
+                                        tooltip={
+                                            "placement": "bottom",
+                                            "always_visible": False,
+                                        },
                                     ),
                                     html.P(
-                                        "Left-to-right knockout bracket: 32 MATCH "
-                                        "cards, ADVANCES_TO edges, preset layout. "
-                                        "Search or expand switches to Full topology.",
+                                        "Hourly team-to-advance probability colors "
+                                        "each match (green = home favored, red = away). "
+                                        "After kickoff ends, the winner locks to 1.",
                                         className="panel-hint",
                                     ),
                                 ],
                             ),
                             html.Hr(className="panel-divider"),
-                            html.Div(
-                                className="panel-section",
-                                children=[
-                                    html.Label(
-                                        "Search nodes",
-                                        htmlFor="search-input",
-                                        className="panel-label",
-                                    ),
-                                    dcc.Input(
-                                        id="search-input",
-                                        type="text",
-                                        placeholder="label, id, or alias…",
-                                        debounce=True,
-                                        className="search-input",
-                                    ),
-                                    html.Button(
-                                        "Search",
-                                        id="search-button",
-                                        n_clicks=0,
-                                        className="btn btn-primary",
-                                        type="button",
-                                    ),
-                                    html.Div(
-                                        id="search-results",
-                                        className="search-results",
-                                        role="list",
-                                    ),
-                                ],
-                            ),
                             html.Button(
                                 "Reset view",
                                 id="reset-button",
@@ -187,24 +174,10 @@ def build_app(settings: Settings) -> Dash:
                                 className="advanced-details",
                                 open=False,
                                 children=[
-                                    html.Summary("Advanced filters & layout"),
+                                    html.Summary("Advanced filters"),
                                     html.Div(
                                         className="advanced-body",
                                         children=[
-                                            html.Label(
-                                                "Node types on canvas",
-                                                htmlFor="type-filter",
-                                                className="panel-label",
-                                            ),
-                                            dcc.Checklist(
-                                                id="type-filter",
-                                                options=[
-                                                    {"label": t, "value": t}
-                                                    for t in ALL_NODE_TYPES
-                                                ],
-                                                value=["MATCH"],
-                                                className="type-filter",
-                                            ),
                                             html.Label(
                                                 "Min confidence",
                                                 htmlFor="confidence-filter",
@@ -245,46 +218,6 @@ def build_app(settings: Settings) -> Dash:
                                                 value="",
                                                 clearable=False,
                                             ),
-                                            html.Label(
-                                                "Layout",
-                                                htmlFor="layout-dropdown",
-                                                className="panel-label",
-                                            ),
-                                            dcc.Dropdown(
-                                                id="layout-dropdown",
-                                                options=[
-                                                    {
-                                                        "label": "preset (bracket)",
-                                                        "value": "preset",
-                                                    },
-                                                    {
-                                                        "label": "dagre",
-                                                        "value": "dagre",
-                                                    },
-                                                    {
-                                                        "label": "breadthfirst",
-                                                        "value": "breadthfirst",
-                                                    },
-                                                    {
-                                                        "label": "cose (force)",
-                                                        "value": "cose",
-                                                    },
-                                                    {
-                                                        "label": "circle",
-                                                        "value": "circle",
-                                                    },
-                                                    {
-                                                        "label": "grid",
-                                                        "value": "grid",
-                                                    },
-                                                    {
-                                                        "label": "concentric",
-                                                        "value": "concentric",
-                                                    },
-                                                ],
-                                                value="preset",
-                                                clearable=False,
-                                            ),
                                         ],
                                     ),
                                 ],
@@ -296,8 +229,8 @@ def build_app(settings: Settings) -> Dash:
                         children=[
                             cyto.Cytoscape(
                                 id="graph-cyto",
-                                elements=initial.to_elements(),
-                                stylesheet=default_stylesheet(VIEW_BRACKET),
+                                elements=initial_elements,
+                                stylesheet=bracket_stylesheet(),
                                 layout=bracket_layout(),
                                 style={"width": "100%", "height": "100%"},
                                 minZoom=0.15,
@@ -333,29 +266,11 @@ def build_app(settings: Settings) -> Dash:
                                 className="action-row",
                                 children=[
                                     html.Button(
-                                        "Expand neighbors",
-                                        id="expand-button",
-                                        n_clicks=0,
-                                        disabled=True,
-                                        type="button",
-                                    ),
-                                    html.Button(
                                         "Remove from canvas",
                                         id="remove-button",
                                         n_clicks=0,
                                         disabled=True,
                                         type="button",
-                                    ),
-                                    html.Button(
-                                        "View in topology",
-                                        id="view-in-topology-button",
-                                        n_clicks=0,
-                                        disabled=True,
-                                        type="button",
-                                        title=(
-                                            "Open this node in the Full topology "
-                                            "view with its neighbors"
-                                        ),
                                     ),
                                 ],
                             ),
@@ -373,7 +288,6 @@ def build_app(settings: Settings) -> Dash:
             dcc.Store(id="selected-edge-id", data=None),
             dcc.Store(id="controls-open", data=True),
             dcc.Store(id="inspector-open", data=True),
-            dcc.Store(id="skip-view-reload", data=False),
         ],
     )
 

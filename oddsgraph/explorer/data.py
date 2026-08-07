@@ -11,11 +11,13 @@ from typing import Any
 import duckdb
 
 from oddsgraph.config import Settings
-from oddsgraph.explorer import KNOCKOUT_STAGE_LABELS, TOPOLOGY_NODE_TYPES
+from oddsgraph.explorer import KNOCKOUT_STAGE_LABELS
 from oddsgraph.explorer.presentation import (
     bracket_positions,
     bracket_stage_headers,
+    home_prob_at_hour,
     short_match_label,
+    split_match_teams,
     stage_column,
     stage_rank,
 )
@@ -98,17 +100,106 @@ def _fetch_dicts(conn: duckdb.DuckDBPyConnection, sql: str, params: list[Any] | 
     return [dict(zip(columns, row)) for row in result.fetchall()]
 
 
-def _parquet_mtimes(nodes_path: Path, edges_path: Path) -> tuple[float, float]:
+def _parquet_mtimes(
+    nodes_path: Path,
+    edges_path: Path,
+    odds_path: Path | None = None,
+) -> tuple[float, float, float]:
     return (
         nodes_path.stat().st_mtime if nodes_path.exists() else -1.0,
         edges_path.stat().st_mtime if edges_path.exists() else -1.0,
+        odds_path.stat().st_mtime if odds_path is not None and odds_path.exists() else -1.0,
     )
+
+
+def _load_odds_history_by_match(path: Path) -> dict[str, dict[str, Any]]:
+    """Group odds-history rows by match_canonical_id and by team pair."""
+    if not path.exists():
+        return {}
+    conn = duckdb.connect(database=":memory:")
+    try:
+        rows = _fetch_dicts(
+            conn,
+            f"""
+            SELECT *
+            FROM read_parquet('{quote_path(path)}')
+            ORDER BY match_canonical_id, odds_hour_epoch
+            """,
+        )
+    finally:
+        conn.close()
+
+    by_match: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        match_id = str(row["match_canonical_id"])
+        entry = by_match.setdefault(
+            match_id,
+            {
+                "home_team": row.get("home_team"),
+                "away_team": row.get("away_team"),
+                "match_start_epoch": row.get("match_start_epoch"),
+                "match_end_epoch": row.get("match_end_epoch"),
+                "winner_team": row.get("winner_team"),
+                "odds_series": [],
+            },
+        )
+        entry["odds_series"].append(
+            {
+                "h": int(row["odds_hour_epoch"]),
+                "home": float(row["home_prob"]),
+                "away": float(row["away_prob"]),
+            }
+        )
+    return by_match
+
+
+def _odds_indexes(
+    odds_by_match: dict[str, dict[str, Any]],
+) -> tuple[dict[str, dict[str, Any]], dict[frozenset[str], dict[str, Any]]]:
+    by_teams: dict[frozenset[str], dict[str, Any]] = {}
+    for entry in odds_by_match.values():
+        home = entry.get("home_team")
+        away = entry.get("away_team")
+        if home and away:
+            by_teams[frozenset({str(home), str(away)})] = entry
+    return odds_by_match, by_teams
+
+
+def _enrich_match_with_odds(
+    element: dict[str, Any],
+    odds_by_match: dict[str, dict[str, Any]],
+    odds_by_teams: dict[frozenset[str], dict[str, Any]],
+) -> dict[str, Any]:
+    data = dict(element.get("data") or {})
+    match_id = str(data.get("id") or "")
+    odds = odds_by_match.get(match_id)
+    teams = split_match_teams(str(data.get("label") or ""))
+    if odds is None and teams is not None:
+        odds = odds_by_teams.get(frozenset(teams))
+    if odds is None:
+        if teams is not None:
+            data["home_team"], data["away_team"] = teams
+        return {**element, "data": data}
+
+    data["home_team"] = odds.get("home_team") or (teams[0] if teams else None)
+    data["away_team"] = odds.get("away_team") or (teams[1] if teams else None)
+    data["match_start_epoch"] = odds.get("match_start_epoch")
+    data["match_end_epoch"] = odds.get("match_end_epoch")
+    data["winner_team"] = odds.get("winner_team")
+    data["odds_series"] = list(odds.get("odds_series") or [])
+    initial_hour = data.get("match_start_epoch")
+    if data["odds_series"] and initial_hour is None:
+        initial_hour = data["odds_series"][0]["h"]
+    prob = home_prob_at_hour(data, initial_hour)
+    if prob is not None:
+        data["current_home_prob"] = prob
+    return {**element, "data": data}
 
 
 class ExplorerDataStore:
     """Process-session DuckDB connection with materialized nodes/edges tables.
 
-    Caches topology and bracket ``GraphSlice`` values keyed by parquet mtimes.
+    Caches bracket ``GraphSlice`` values keyed by parquet mtimes.
     Thread-safe enough for a single-user Dash explorer.
     """
 
@@ -118,8 +209,10 @@ class ExplorerDataStore:
         self._conn: duckdb.DuckDBPyConnection | None = None
         self._nodes_mtime: float = -1.0
         self._edges_mtime: float = -1.0
-        self._topology_cache: GraphSlice | None = None
+        self._odds_mtime: float = -1.0
         self._bracket_cache: GraphSlice | None = None
+        self._odds_by_match: dict[str, dict[str, Any]] = {}
+        self._odds_by_teams: dict[frozenset[str], dict[str, Any]] = {}
         self._open()
 
     @property
@@ -130,16 +223,23 @@ class ExplorerDataStore:
     def edges_path(self) -> Path:
         return self.settings.edges_path
 
+    @property
+    def odds_history_path(self) -> Path:
+        return self.settings.odds_history_path
+
     def close(self) -> None:
         with self._lock:
             if self._conn is not None:
                 self._conn.close()
                 self._conn = None
-            self._topology_cache = None
             self._bracket_cache = None
+            self._odds_by_match = {}
+            self._odds_by_teams = {}
 
     def _open(self) -> None:
-        nodes_mtime, edges_mtime = _parquet_mtimes(self.nodes_path, self.edges_path)
+        nodes_mtime, edges_mtime, odds_mtime = _parquet_mtimes(
+            self.nodes_path, self.edges_path, self.odds_history_path
+        )
         conn = duckdb.connect(database=":memory:")
         nodes_sql = quote_path(self.nodes_path)
         edges_sql = quote_path(self.edges_path)
@@ -161,16 +261,21 @@ class ExplorerDataStore:
         self._conn = conn
         self._nodes_mtime = nodes_mtime
         self._edges_mtime = edges_mtime
-        self._topology_cache = None
+        self._odds_mtime = odds_mtime
         self._bracket_cache = None
+        self._odds_by_match = _load_odds_history_by_match(self.odds_history_path)
+        self._odds_by_match, self._odds_by_teams = _odds_indexes(self._odds_by_match)
 
     def refresh_if_stale(self) -> None:
         """Close and recreate the connection when parquet mtimes change."""
         with self._lock:
-            nodes_mtime, edges_mtime = _parquet_mtimes(self.nodes_path, self.edges_path)
+            nodes_mtime, edges_mtime, odds_mtime = _parquet_mtimes(
+                self.nodes_path, self.edges_path, self.odds_history_path
+            )
             if (
                 nodes_mtime == self._nodes_mtime
                 and edges_mtime == self._edges_mtime
+                and odds_mtime == self._odds_mtime
                 and self._conn is not None
             ):
                 return
@@ -181,46 +286,6 @@ class ExplorerDataStore:
         self.refresh_if_stale()
         assert self._conn is not None
         return self._conn
-
-    def topology_elements(self) -> GraphSlice:
-        with self._lock:
-            self.refresh_if_stale()
-            if self._topology_cache is not None:
-                return self._topology_cache
-            conn = self._connection()
-            topology_types = sorted(TOPOLOGY_NODE_TYPES)
-            placeholders = ", ".join(["?"] * len(topology_types))
-            nodes = _fetch_dicts(
-                conn,
-                f"""
-                SELECT *
-                FROM nodes
-                WHERE type IN ({placeholders})
-                ORDER BY type, label
-                """,
-                topology_types,
-            )
-            edges = _fetch_dicts(
-                conn,
-                f"""
-                SELECT e.*
-                FROM edges e
-                INNER JOIN nodes s
-                  ON e.source_id = s.canonical_id
-                INNER JOIN nodes t
-                  ON e.target_id = t.canonical_id
-                WHERE s.type IN ({placeholders})
-                  AND t.type IN ({placeholders})
-                ORDER BY e.edge_type, e.source_id, e.target_id
-                """,
-                [*topology_types, *topology_types],
-            )
-            slice_ = GraphSlice(
-                nodes=[node_element(n) for n in nodes],
-                edges=[edge_element(e) for e in edges],
-            )
-            self._topology_cache = slice_
-            return slice_
 
     def bracket_elements(self) -> GraphSlice:
         with self._lock:
@@ -269,7 +334,14 @@ class ExplorerDataStore:
                 [*match_ids, *match_ids],
             )
 
-            node_els = [node_element(n, bracket=True) for n in nodes]
+            node_els = [
+                _enrich_match_with_odds(
+                    node_element(n, bracket=True),
+                    self._odds_by_match,
+                    self._odds_by_teams,
+                )
+                for n in nodes
+            ]
             edge_els = [edge_element(e) for e in edges]
             positions = bracket_positions(node_els, edge_els)
             positioned: list[dict[str, Any]] = []
@@ -290,101 +362,21 @@ class ExplorerDataStore:
             self._bracket_cache = slice_
             return slice_
 
-    def search_nodes(self, query: str, limit: int = 25) -> list[dict[str, Any]]:
-        cleaned = query.strip()
-        if not cleaned:
-            return []
-        if limit < 1:
-            return []
-
-        pattern = f"%{_escape_like(cleaned)}%"
+    def odds_time_bounds(self) -> tuple[int | None, int | None]:
+        """Return global min/max hour epochs from loaded odds history."""
         with self._lock:
-            conn = self._connection()
-            return _fetch_dicts(
-                conn,
-                """
-                SELECT *
-                FROM nodes
-                WHERE canonical_id ILIKE ? ESCAPE '\\'
-                   OR label ILIKE ? ESCAPE '\\'
-                   OR EXISTS (
-                        SELECT 1
-                        FROM UNNEST(COALESCE(aliases, [])) AS a(alias)
-                        WHERE alias ILIKE ? ESCAPE '\\'
-                   )
-                ORDER BY
-                  CASE
-                    WHEN lower(label) = lower(?) THEN 0
-                    WHEN lower(canonical_id) = lower(?) THEN 1
-                    ELSE 2
-                  END,
-                  CASE type
-                    WHEN 'TEAM' THEN 0
-                    WHEN 'MATCH' THEN 1
-                    WHEN 'EVENT' THEN 2
-                    WHEN 'GROUP' THEN 3
-                    WHEN 'STAGE' THEN 4
-                    WHEN 'ROUND' THEN 5
-                    WHEN 'COMPETITION' THEN 6
-                    WHEN 'MARKET' THEN 7
-                    WHEN 'OUTCOME' THEN 8
-                    ELSE 9
-                  END,
-                  label
-                LIMIT ?
-                """,
-                [pattern, pattern, pattern, cleaned, cleaned, limit],
-            )
-
-    def node_neighbors(self, node_id: str, limit: int = 300) -> GraphSlice:
-        if not node_id:
-            return GraphSlice()
-        if limit < 1:
-            return GraphSlice()
-
-        with self._lock:
-            conn = self._connection()
-            # Fetch one extra row so we can detect truncation.
-            edges = _fetch_dicts(
-                conn,
-                """
-                SELECT *
-                FROM edges
-                WHERE source_id = ? OR target_id = ?
-                ORDER BY edge_type, source_id, target_id
-                LIMIT ?
-                """,
-                [node_id, node_id, limit + 1],
-            )
-            truncated = len(edges) > limit
-            if truncated:
-                edges = edges[:limit]
-
-            neighbor_ids: set[str] = {node_id}
-            for edge in edges:
-                neighbor_ids.add(edge["source_id"])
-                neighbor_ids.add(edge["target_id"])
-
-            if not neighbor_ids:
-                return GraphSlice()
-
-            placeholders = ", ".join(["?"] * len(neighbor_ids))
-            nodes = _fetch_dicts(
-                conn,
-                f"""
-                SELECT *
-                FROM nodes
-                WHERE canonical_id IN ({placeholders})
-                ORDER BY type, label
-                """,
-                sorted(neighbor_ids),
-            )
-
-        return GraphSlice(
-            nodes=[node_element(n) for n in nodes],
-            edges=[edge_element(e) for e in edges],
-            truncated=truncated,
-        )
+            self.refresh_if_stale()
+            hours: list[int] = []
+            for entry in self._odds_by_match.values():
+                for point in entry.get("odds_series") or []:
+                    hours.append(int(point["h"]))
+                for key in ("match_start_epoch", "match_end_epoch"):
+                    value = entry.get(key)
+                    if value is not None:
+                        hours.append(int(value))
+            if not hours:
+                return None, None
+            return min(hours), max(hours)
 
     def get_node(self, node_id: str) -> dict[str, Any] | None:
         if not node_id:
@@ -511,34 +503,20 @@ def clear_stores() -> None:
         _STORES.clear()
 
 
-def topology_elements(settings: Settings) -> GraphSlice:
-    """Return the competition/stage/group/round/match/team subgraph."""
-    return get_store(settings).topology_elements()
-
-
 def bracket_elements(settings: Settings) -> GraphSlice:
     """Return the knockout MATCH DAG plus column stage headers.
 
     Each MATCH node is enriched with ``stage``, ``stage_rank``, ``short_label``,
-    and a deterministic left-to-right ``position`` for the preset bracket layout.
+    a deterministic left-to-right ``position``, and optional hourly
+    ``odds_series`` / ``current_home_prob`` when ``odds_history.parquet`` exists.
     Non-interactive ``STAGE_HEADER`` nodes label occupied columns.
     """
     return get_store(settings).bracket_elements()
 
 
-def search_nodes(settings: Settings, query: str, limit: int = 25) -> list[dict[str, Any]]:
-    """Search nodes by label, canonical_id, or aliases (case-insensitive)."""
-    return get_store(settings).search_nodes(query, limit=limit)
-
-
-def _escape_like(value: str) -> str:
-    """Escape ``\\``, ``%``, and ``_`` for use in ILIKE patterns."""
-    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-
-
-def node_neighbors(settings: Settings, node_id: str, limit: int = 300) -> GraphSlice:
-    """Return 1-hop neighbors of ``node_id`` (edges + connected nodes)."""
-    return get_store(settings).node_neighbors(node_id, limit=limit)
+def odds_time_bounds(settings: Settings) -> tuple[int | None, int | None]:
+    """Return global min/max hour epochs for the knockout time slider."""
+    return get_store(settings).odds_time_bounds()
 
 
 def get_node(settings: Settings, node_id: str) -> dict[str, Any] | None:

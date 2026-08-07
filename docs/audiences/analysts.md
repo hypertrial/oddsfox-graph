@@ -19,6 +19,7 @@ dataset.
     ```text
     build/nodes.parquet
     build/edges.parquet
+    build/odds_history.parquet
     build/rejected_edges.parquet
     build/ontology.json
     build/inference_report.json
@@ -30,10 +31,12 @@ dataset.
     duckdb -c "SELECT type, count(*) FROM 'build/nodes.parquet' GROUP BY 1 ORDER BY 2 DESC"
     ```
 
-    Or launch the local explorer:
+    Or launch the local explorer (run `odds-history` first if the temporal
+    slider artifact is missing):
 
     ```bash
     uv sync --extra explore
+    oddsgraph odds-history
     oddsgraph explore
     ```
 
@@ -46,18 +49,18 @@ dataset.
     [Running the pipeline](../guides/running-the-pipeline.md), then return here.
     Analysts do not need a live LLM for ordinary post-build queries.
 
-## Topology vs market layer
+## Knockout bracket explorer
 
-The default explorer view is a left-to-right knockout bracket (32 `MATCH`
-cards, stage column headers, `ADVANCES_TO` edges, path highlight on click).
-Switch to **Full topology** for `COMPETITION` / `STAGE` / `GROUP` / `ROUND` /
-`MATCH` / `TEAM`.
-Compiled market outcomes bridge into topology via `REFERS_TO` (and related
-logical edges) when the proposition compiler covers the market template —
-see [Logical layer](../guides/logical-layer.md) for predicates and rules.
-Residual / unrecognized markets may still lack that bridge — check
-`proposition_json` on outcomes. Search for an event title or market id to
-explore the market layer directly.
+The explorer is a left-to-right knockout bracket (32 `MATCH` cards, stage
+column headers, `ADVANCES_TO` edges, path highlight on click) with an hourly
+time slider over Polymarket `soccer_team_to_advance` probabilities when
+`build/odds_history.parquet` is present.
+
+Compiled market outcomes still bridge into the exported graph via `REFERS_TO`
+(and related logical edges) when the proposition compiler covers the market
+template — see [Logical layer](../guides/logical-layer.md) for predicates and
+rules. Residual / unrecognized markets may still lack that bridge — check
+`proposition_json` on outcomes.
 
 ## Next pages
 

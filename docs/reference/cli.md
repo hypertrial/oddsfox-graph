@@ -52,6 +52,13 @@ Resolve entities, compile propositions, apply logical rules, and export artifact
 | `--propositions` / `--no-propositions` | Compile formal propositions onto OUTCOME nodes (default: on) |
 | `--reasoning` / `--no-reasoning` | Apply deterministic logical rules over propositions (default: on) |
 
+## `oddsgraph odds-history`
+
+Build hourly knockout win-probability history from Polymarket
+`soccer_team_to_advance` markets into `build/odds_history.parquet`.
+
+No command-specific flags. Reads the same hourly-odds parquet as `reduce`.
+
 ## `oddsgraph validate`
 
 Validate exported graph artifacts. Exits non-zero on failure.
@@ -75,8 +82,8 @@ Requires `--extra explore`.
 
 ## `oddsgraph run`
 
-Full pipeline: reduce → infer → build → validate. Accepts the infer flags and
-build flags listed above.
+Full pipeline: reduce → infer → build → odds-history → validate. Accepts the
+infer flags and build flags listed above.
 
 ## See also
 

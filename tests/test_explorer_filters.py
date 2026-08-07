@@ -2,12 +2,7 @@
 
 from __future__ import annotations
 
-from oddsgraph.explorer.filters import (
-    apply_filters,
-    merge_elements,
-    node_types_in_elements,
-    union_types,
-)
+from oddsgraph.explorer.filters import apply_filters, clear_interaction_classes
 
 
 def _node(node_id: str, node_type: str, confidence: float = 1.0, method: str = "deterministic") -> dict:
@@ -76,34 +71,7 @@ def test_apply_filters_confidence_and_inference_method() -> None:
     assert "hidden" in by_id["team:b"]["classes"].split()
 
 
-def test_merge_and_union_helpers() -> None:
-    current = [_node("team:a", "TEAM")]
-    current[0]["classes"] = "TEAM hidden"
-    incoming = [_node("team:a", "TEAM"), _node("match:1", "MATCH")]
-    merged = merge_elements(current, incoming)
-    by_id = {el["data"]["id"]: el for el in merged}
-    assert set(by_id) == {"team:a", "match:1"}
-    assert "hidden" in by_id["team:a"]["classes"].split()
-    assert "TEAM" in by_id["team:a"]["classes"].split()
-
-    assert node_types_in_elements(merged) == ["MATCH", "TEAM"]
-    assert union_types(["TEAM"], ["EVENT", "TEAM", "MARKET"]) == [
-        "TEAM",
-        "EVENT",
-        "MARKET",
-    ]
-
-
-def test_merge_and_filters_preserve_path_classes() -> None:
-    current = [_node("match:1", "MATCH")]
-    current[0]["classes"] = "MATCH path-active"
-    current[0]["position"] = {"x": 10, "y": 20}
-    incoming = [_node("match:1", "MATCH")]
-    merged = merge_elements(current, incoming)
-    by_id = {el["data"]["id"]: el for el in merged}
-    assert "path-active" in by_id["match:1"]["classes"].split()
-    assert by_id["match:1"]["position"] == {"x": 10, "y": 20}
-
+def test_filters_preserve_path_classes() -> None:
     elements = [
         {
             "data": {
@@ -147,9 +115,7 @@ def test_apply_filters_keeps_stage_headers_visible() -> None:
     by_id = {el["data"]["id"]: el for el in filtered}
     assert "hidden" not in by_id["match:1"]["classes"].split()
     assert "hidden" not in by_id["stage-header:0"]["classes"].split()
-    assert node_types_in_elements(elements) == ["MATCH"]
 
-    # Even with an empty type filter, column headers stay visible.
     filtered_empty = apply_filters(
         elements, [], min_confidence=0.0, inference_method=""
     )
@@ -159,8 +125,6 @@ def test_apply_filters_keeps_stage_headers_visible() -> None:
 
 
 def test_clear_interaction_classes_keeps_hidden() -> None:
-    from oddsgraph.explorer.filters import clear_interaction_classes
-
     elements = [
         {
             "data": {"id": "match:1", "type": "MATCH"},
