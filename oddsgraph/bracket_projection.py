@@ -47,7 +47,8 @@ class ProjectedMatch:
     probability_available: bool
 
 
-def _split_match_teams(label: str) -> tuple[str, str] | None:
+def split_match_teams(label: str) -> tuple[str, str] | None:
+    """Return ``(home, away)`` display names from a MATCH label, if parseable."""
     parts = _VS_SPLIT_RE.split(label.strip(), maxsplit=1)
     if len(parts) != 2:
         return None
@@ -72,8 +73,16 @@ def _is_stage_header(el: dict[str, Any]) -> bool:
     return str(data.get("type") or "") == "STAGE_HEADER"
 
 
-def _home_prob_at_hour(data: dict[str, Any], hour_epoch: int | None) -> float | None:
-    """Mirror explorer ``home_prob_at_hour`` without importing presentation."""
+def home_prob_at_hour(
+    data: dict[str, Any],
+    hour_epoch: int | None,
+) -> float | None:
+    """Return home win-probability at ``hour_epoch``, locking after match end.
+
+    Uses the latest ``odds_series`` point with ``h <= hour_epoch``. When the
+    slider is at or past ``match_end_epoch`` and ``winner_team`` is known,
+    returns ``1.0`` / ``0.0`` for home / away winners.
+    """
     series = data.get("odds_series") or []
     if not isinstance(series, list) or not series:
         return None
@@ -185,7 +194,7 @@ def _match_teams(data: dict[str, Any]) -> tuple[str, str] | None:
     away = data.get("away_team") or data.get("schedule_away")
     if home and away:
         return str(home), str(away)
-    return _split_match_teams(str(data.get("label") or data.get("schedule_label") or ""))
+    return split_match_teams(str(data.get("label") or data.get("schedule_label") or ""))
 
 
 def _pick_branch_team(
@@ -224,7 +233,7 @@ def _pick_branch_team(
     if not scored:
         # Stage-reach unavailable: fall back to feeder advance-market odds.
         # Do not invent schedule-home favorites when those are also missing.
-        home_prob = _home_prob_at_hour(feeder_data, hour_epoch)
+        home_prob = home_prob_at_hour(feeder_data, hour_epoch)
         if home_prob is None:
             return None
         home, away = teams
@@ -308,7 +317,7 @@ def project_match_at_hour(
         ),
     )
     if not schedule_teams[0] or not schedule_teams[1]:
-        parsed = _split_match_teams(
+        parsed = split_match_teams(
             str(data.get("schedule_label") or data.get("label") or "")
         )
         if parsed:
@@ -331,7 +340,7 @@ def project_match_at_hour(
         elif winner == away:
             home_prob = 0.0
         else:
-            home_prob = _home_prob_at_hour(data, hour_epoch)
+            home_prob = home_prob_at_hour(data, hour_epoch)
         return ProjectedMatch(
             home=ProjectedSide(home, home_prob),
             away=ProjectedSide(away, None if home_prob is None else 1.0 - home_prob),
@@ -341,7 +350,7 @@ def project_match_at_hour(
             probability_available=home_prob is not None,
         )
 
-    direct = _home_prob_at_hour(data, hour_epoch)
+    direct = home_prob_at_hour(data, hour_epoch)
     if predecessors:
         predecessors = order_feeders_for_slots(
             predecessors, schedule_teams[0], schedule_teams[1]
@@ -575,7 +584,7 @@ def apply_bracket_projection(
         data = dict(nodes_by_id[node_id])
         if not data.get("schedule_label"):
             data["schedule_label"] = str(data.get("label") or "")
-        teams = _split_match_teams(str(data.get("schedule_label") or ""))
+        teams = split_match_teams(str(data.get("schedule_label") or ""))
         if teams:
             data.setdefault("schedule_home", teams[0])
             data.setdefault("schedule_away", teams[1])

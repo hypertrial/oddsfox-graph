@@ -225,7 +225,6 @@ def build_app(settings: Settings) -> Dash:
                                         ],
                                         value="",
                                         clearable=False,
-                                        className="dark-dropdown",
                                     ),
                                     html.Button(
                                         "Reset filters",

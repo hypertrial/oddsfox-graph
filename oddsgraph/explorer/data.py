@@ -11,14 +11,13 @@ from typing import Any
 import duckdb
 
 from oddsgraph.bracket import tournament_playback_bounds, tournament_time_bounds
+from oddsgraph.bracket_projection import home_prob_at_hour, split_match_teams
 from oddsgraph.config import Settings
 from oddsgraph.explorer import KNOCKOUT_STAGE_LABELS
 from oddsgraph.explorer.presentation import (
     bracket_positions,
     bracket_stage_headers,
-    home_prob_at_hour,
     short_match_label,
-    split_match_teams,
     stage_column,
     stage_rank,
 )

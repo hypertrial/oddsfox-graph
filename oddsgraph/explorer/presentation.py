@@ -13,7 +13,10 @@ from oddsgraph.bracket import (
     StageWindow,
     schedule_stage_windows,
 )
-
+from oddsgraph.bracket_projection import (
+    home_prob_at_hour as home_prob_at_hour,
+    split_match_teams,
+)
 # Reverse map: stage label -> rank (Final and Third Place both rank 5).
 STAGE_LABEL_TO_RANK: dict[str, int] = {
     STAGE_KEY_TO_LABEL[key]: rank for key, rank in KNOCKOUT_STAGE_RANK.items()
@@ -63,7 +66,6 @@ THIRD_PLACE_Y_OFFSET = 200
 BRACKET_LAYOUT_PADDING = 48
 
 _FIFA_ALIAS_RE = re.compile(r"^fifa-match-(\d+)$")
-_VS_SPLIT_RE = re.compile(r"\s+vs\.?\s+", re.IGNORECASE)
 
 # Interaction / visibility classes preserved independently of type classes.
 PRESERVED_CLASSES = frozenset({"hidden", "path-active", "path-muted"})
@@ -95,62 +97,10 @@ class TournamentPhase:
 
 def short_match_label(label: str) -> str:
     """Return a two-line card label from ``Home vs. Away``."""
-    parts = _VS_SPLIT_RE.split(label.strip(), maxsplit=1)
-    if len(parts) != 2:
+    teams = split_match_teams(label)
+    if teams is None:
         return label.strip()
-    home, away = parts[0].strip(), parts[1].strip()
-    return f"{home}\n{away}"
-
-
-def split_match_teams(label: str) -> tuple[str, str] | None:
-    """Return ``(home, away)`` display names from a MATCH label, if parseable."""
-    parts = _VS_SPLIT_RE.split(label.strip(), maxsplit=1)
-    if len(parts) != 2:
-        return None
-    home, away = parts[0].strip(), parts[1].strip()
-    if not home or not away:
-        return None
-    return home, away
-
-
-def home_prob_at_hour(
-    data: dict[str, Any],
-    hour_epoch: int | None,
-) -> float | None:
-    """Return home win-probability at ``hour_epoch``, locking after match end.
-
-    Uses the latest ``odds_series`` point with ``h <= hour_epoch``. When the
-    slider is at or past ``match_end_epoch`` and ``winner_team`` is known,
-    returns ``1.0`` / ``0.0`` for home / away winners.
-    """
-    series = data.get("odds_series") or []
-    if not isinstance(series, list) or not series:
-        return None
-
-    end_epoch = data.get("match_end_epoch")
-    winner = data.get("winner_team")
-    home = data.get("home_team")
-    if (
-        hour_epoch is not None
-        and end_epoch is not None
-        and int(hour_epoch) >= int(end_epoch)
-        and winner
-        and home
-    ):
-        return 1.0 if str(winner) == str(home) else 0.0
-
-    if hour_epoch is None:
-        point = series[0]
-    else:
-        hour = int(hour_epoch)
-        eligible = [p for p in series if int(p.get("h") or 0) <= hour]
-        if not eligible:
-            return None
-        point = eligible[-1]
-    try:
-        return float(point["home"])
-    except (KeyError, TypeError, ValueError):
-        return None
+    return f"{teams[0]}\n{teams[1]}"
 
 
 def apply_time_slice(

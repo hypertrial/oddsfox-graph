@@ -468,7 +468,6 @@ button:hover:not(:disabled) {
 button:focus-visible,
 input:focus-visible,
 select:focus-visible,
-.Select-control:focus-within,
 .stage-step:focus-visible {
   outline: 2px solid var(--of-cyan);
   outline-offset: 2px;
@@ -742,9 +741,8 @@ button:disabled {
 }
 
 /*
- * Dash 4 slider theme (replaces legacy rc-slider). Default Dash tokens use a
- * white inverse fill for number inputs/tooltips — hide inputs in app props and
- * restyle the track/thumb/tooltip here.
+ * Dash 4 slider theme. Direct-entry inputs/tooltips are disabled in app.py
+ * (``allow_direct_input=False``, ``tooltip=False``).
  */
 .dash-slider-track {
   background-color: #1e293b !important;
@@ -765,20 +763,7 @@ button:disabled {
   color: var(--of-faint) !important;
 }
 
-.dash-slider-tooltip {
-  background-color: #0b1220 !important;
-  color: var(--of-text) !important;
-  border: 1px solid var(--of-border-strong);
-  fill: #0b1220 !important;
-}
-
-/* Belt-and-suspenders: never show direct-entry boxes in the dark shell. */
-.explorer-root .dash-range-slider-input,
-.explorer-root .dash-input-container.dash-range-slider-input {
-  display: none !important;
-}
-
-/* Legacy rc-slider hooks (older Dash) */
+/* Legacy rc-slider hooks (Dash 2.x / explore extra allows dash>=2.18). */
 .rc-slider-rail {
   background-color: #1e293b !important;
 }
@@ -798,33 +783,6 @@ button:disabled {
 
 .rc-slider-mark-text {
   color: var(--of-faint) !important;
-}
-
-.Select-control,
-.dark-dropdown .Select-control {
-  background-color: var(--of-surface-raised) !important;
-  border-color: var(--of-border-strong) !important;
-  color: var(--of-text) !important;
-}
-
-.Select-menu-outer {
-  background: var(--of-surface) !important;
-  border-color: var(--of-border-strong) !important;
-}
-
-.Select-option {
-  background: var(--of-surface) !important;
-  color: var(--of-text) !important;
-}
-
-.Select-option.is-focused,
-.Select-option:hover {
-  background: #1d2b42 !important;
-}
-
-.Select-value-label,
-.Select-placeholder {
-  color: var(--of-text) !important;
 }
 
 @media (max-width: 900px) {
