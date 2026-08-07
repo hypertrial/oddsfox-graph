@@ -18,7 +18,7 @@ flags and output schema as pre-1.0 and subject to change.
 ### Added
 
 - Explorer dark sports-data shell: branded header, persistent phase tracker,
-  floating playback dock, and on-demand Filters & legend / Inspector drawers.
+  bottom playback dock, and on-demand Filters & legend drawer.
 - Schedule-derived tournament phase model with active, intermission, Final
   weekend, and complete states; compact UTC timestamps (`Jun 28 · 19:00 UTC`)
   plus full tooltip/ISO forms.
@@ -32,15 +32,20 @@ flags and output schema as pre-1.0 and subject to change.
 - Explorer Final / Third Place cards lock winners to **100%** / **0%** at full
   time (Spain and England in the curated WC2026 schedule) with the same teal
   resolved styling as other locked matches (thicker border on Final / 3rd).
+- Explorer playback highlights matches that just finished: when the scrubbed
+  hour equals a match’s full-time milestone, the card shows a **Just finished**
+  badge and pulse (simultaneous fixtures share the highlight).
 
 ### Changed
 
+- Explorer UI is a mirrored HTML/CSS knockout tree (website-style cards and SVG
+  connectors) instead of Dash Cytoscape; Inspector / path-highlight / hide-match
+  interactions were removed with that migration.
 - Explorer match cards use a wider dark layout with aligned probability
   columns, row-aligned flags, and taxi connectors without arrowheads.
 - Explorer Controls moved into a closed-by-default utility drawer; playback
-  lives in the floating dock instead of a persistent left sidebar. Hide/reset
-  action status also lives in the dock so feedback stays visible when the
-  inspector is closed.
+  lives in a reserved bottom dock (not an overlay) instead of a persistent left
+  sidebar. Action status stays in the dock.
 - Explorer match-card tint encodes resolution, not favorite: teal fill means
   the match is resolved at the selected tournament hour; unfinished cards
   rely on numeric percentages and dashed borders when projected.
@@ -53,6 +58,9 @@ flags and output schema as pre-1.0 and subject to change.
 
 ### Fixed
 
+- Explorer playback dock no longer covers bottom bracket cards on short /
+  non-maximized viewports: the dock is a normal-flow flex sibling below the
+  scrollable canvas instead of an absolute overlay inside it.
 - Explorer Final / Third Place locked cards use the same teal resolved tint as
   other finished matches (gold/silver champion overrides removed).
 - Explorer attaches curated schedule winners by team pair when MATCH ids
@@ -63,8 +71,8 @@ flags and output schema as pre-1.0 and subject to change.
   ``allow_direct_input=False`` and restyle ``.dash-slider-*`` for the dark shell).
 - Explorer match-card flag SVGs use node-relative sizes so they scale with
   zoom instead of shrinking when zooming in.
-- Flag SVG assets now declare explicit ``width`` / ``height`` (Cytoscape
-  requires this for SVG background images to scale with zoom).
+- Flag SVG assets declare explicit ``width`` / ``height`` for consistent
+  rendering in match cards.
 - Explorer projection maps feeder branches onto schedule home/away slots
   (not alphabetical feeder labels) and ranks Third Place candidates by
   `P(reach Final)`.

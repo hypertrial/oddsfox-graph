@@ -313,92 +313,92 @@ def build_app(settings: Settings) -> Dash:
                                 id="bracket-canvas",
                                 children=initial_children,
                             ),
+                        ],
+                    ),
+                    html.Div(
+                        className="playback-dock",
+                        children=[
                             html.Div(
-                                className="playback-dock",
+                                className="playback-dock-main",
                                 children=[
+                                    html.Button(
+                                        "Play",
+                                        id="time-play-button",
+                                        n_clicks=0,
+                                        className="btn btn-play",
+                                        type="button",
+                                        disabled=slider_disabled,
+                                        title=(
+                                            "Advance one kickoff or full-time "
+                                            "at a time"
+                                        ),
+                                        **{
+                                            "aria-label": "Play tournament timeline",
+                                            "aria-pressed": "false",
+                                        },
+                                    ),
                                     html.Div(
-                                        className="playback-dock-main",
+                                        className="playback-meta",
                                         children=[
-                                            html.Button(
-                                                "Play",
-                                                id="time-play-button",
-                                                n_clicks=0,
-                                                className="btn btn-play",
-                                                type="button",
-                                                disabled=slider_disabled,
-                                                title=(
-                                                    "Advance one kickoff or full-time "
-                                                    "at a time"
+                                            html.Div(
+                                                id="time-slider-label",
+                                                className="playback-time",
+                                                children=playback_time_children(
+                                                    None if slider_disabled else slider_value
                                                 ),
-                                                **{
-                                                    "aria-label": "Play tournament timeline",
-                                                    "aria-pressed": "false",
-                                                },
                                             ),
                                             html.Div(
-                                                className="playback-meta",
-                                                children=[
-                                                    html.Div(
-                                                        id="time-slider-label",
-                                                        className="playback-time",
-                                                        children=playback_time_children(
-                                                            None if slider_disabled else slider_value
-                                                        ),
-                                                    ),
-                                                    html.Div(
-                                                        id="phase-badge",
-                                                        className="phase-badge",
-                                                        children=phase_badge_children(
-                                                            None if slider_disabled else slider_value
-                                                        ),
-                                                    ),
-                                                ],
-                                            ),
-                                            html.Button(
-                                                "Reset view",
-                                                id="reset-button",
-                                                n_clicks=0,
-                                                className="btn btn-secondary",
-                                                type="button",
-                                                title="Restore the full knockout bracket",
+                                                id="phase-badge",
+                                                className="phase-badge",
+                                                children=phase_badge_children(
+                                                    None if slider_disabled else slider_value
+                                                ),
                                             ),
                                         ],
                                     ),
+                                    html.Button(
+                                        "Reset view",
+                                        id="reset-button",
+                                        n_clicks=0,
+                                        className="btn btn-secondary",
+                                        type="button",
+                                        title="Restore the full knockout bracket",
+                                    ),
+                                ],
+                            ),
+                            html.Div(
+                                className="playback-slider-wrap",
+                                children=[
+                                    html.Label(
+                                        "Tournament time",
+                                        htmlFor="time-slider",
+                                        className="visually-hidden",
+                                    ),
+                                    dcc.Slider(
+                                        id="time-slider",
+                                        min=min_hour,
+                                        max=max_hour,
+                                        step=None,
+                                        value=slider_value,
+                                        marks=marks,
+                                        disabled=slider_disabled,
+                                        allow_direct_input=False,
+                                        tooltip=False,
+                                    ),
+                                    html.P(
+                                        (
+                                            "Schedule bounds unavailable."
+                                            if slider_disabled
+                                            else ""
+                                        ),
+                                        id="playback-status",
+                                        className="playback-status",
+                                    ),
                                     html.Div(
-                                        className="playback-slider-wrap",
-                                        children=[
-                                            html.Label(
-                                                "Tournament time",
-                                                htmlFor="time-slider",
-                                                className="visually-hidden",
-                                            ),
-                                            dcc.Slider(
-                                                id="time-slider",
-                                                min=min_hour,
-                                                max=max_hour,
-                                                step=None,
-                                                value=slider_value,
-                                                marks=marks,
-                                                disabled=slider_disabled,
-                                                allow_direct_input=False,
-                                                tooltip=False,
-                                            ),
-                                            html.P(
-                                                (
-                                                    "Schedule bounds unavailable."
-                                                    if slider_disabled
-                                                    else ""
-                                                ),
-                                                id="playback-status",
-                                                className="playback-status",
-                                            ),
-                                            html.Div(
-                                                id="action-status",
-                                                className="action-status",
-                                                role="status",
-                                                **{"aria-live": "polite"},
-                                            ),
-                                        ],
+                                        id="action-status",
+                                        className="action-status",
+                                        role="status",
+                                        **{"aria-live": "polite"},
                                     ),
                                 ],
                             ),

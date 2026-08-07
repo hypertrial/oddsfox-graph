@@ -335,11 +335,21 @@ def timeline_state_for_stage(
     return "future"
 
 
+def _match_just_finished(data: dict[str, Any], hour_epoch: int | None) -> bool:
+    """True when the scrubbed hour is exactly this match's full-time milestone."""
+    if hour_epoch is None or not data.get("resolved"):
+        return False
+    end_epoch = data.get("match_end_epoch")
+    if end_epoch is None:
+        return False
+    return int(hour_epoch) == int(end_epoch)
+
+
 def stamp_timeline_states(
     elements: list[dict[str, Any]],
     hour_epoch: int | None,
 ) -> list[dict[str, Any]]:
-    """Stamp ``timeline_state`` onto MATCH nodes."""
+    """Stamp ``timeline_state`` and ``just_finished`` onto MATCH nodes."""
     phase = phase_at_hour(hour_epoch)
     updated: list[dict[str, Any]] = []
     for el in elements:
@@ -350,6 +360,7 @@ def stamp_timeline_states(
         stage = str(data.get("stage") or "")
         if str(data.get("type") or "") == "MATCH" or stage:
             data["timeline_state"] = timeline_state_for_stage(stage, phase)
+            data["just_finished"] = _match_just_finished(data, hour_epoch)
             updated.append({**el, "data": data})
             continue
         updated.append(el)

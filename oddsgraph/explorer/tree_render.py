@@ -173,6 +173,8 @@ def render_match_card(
         frame.append("is-hidden")
     if data.get("resolved"):
         frame.append("is-resolved")
+    if data.get("just_finished"):
+        frame.append("is-just-finished")
     if data.get("projected"):
         frame.append("is-projected")
     timeline = data.get("timeline_state")
@@ -197,6 +199,7 @@ def render_match_card(
     grade = match_grade_status(data)
     # Always show a mark when teams are present: numeric % or "—" when unavailable.
     show_prob = bool(home or away)
+    just_finished = bool(data.get("just_finished"))
 
     # Highlight locked/favored side only when a probability or locked winner exists.
     home_wins: bool | None = None
@@ -214,15 +217,20 @@ def render_match_card(
             f"{aria}; {home_label} {format_prob_label(home_prob)}, "
             f"{away_label} {format_prob_label(away_prob)}"
         )
+    if just_finished:
+        aria = f"{aria}; just finished"
 
-    return html.Fieldset(
-        className=" ".join(frame),
-        **{
-            "data-slot": "match-card",
-            "data-match-id": str(data.get("id") or ""),
-            "aria-label": aria,
-        },
-        children=[
+    children: list[Any] = []
+    if just_finished:
+        children.append(
+            html.Span(
+                "Just finished",
+                className="match-just-finished-badge",
+                **{"aria-hidden": "true"},
+            )
+        )
+    children.extend(
+        [
             _team_row(
                 team_name=str(home) if home else None,
                 flag_url=data.get("home_flag"),
@@ -235,13 +243,25 @@ def render_match_card(
             _team_row(
                 team_name=str(away) if away else None,
                 flag_url=data.get("away_flag"),
-                is_winner=(None if home_wins is None else (not home_wins)) if away else None,
+                is_winner=(
+                    (None if home_wins is None else (not home_wins)) if away else None
+                ),
                 probability=away_prob,
                 show_prob=show_prob,
                 grade_status=grade,
                 compact=compact,
             ),
-        ],
+        ]
+    )
+
+    return html.Fieldset(
+        className=" ".join(frame),
+        **{
+            "data-slot": "match-card",
+            "data-match-id": str(data.get("id") or ""),
+            "aria-label": aria,
+        },
+        children=children,
     )
 
 

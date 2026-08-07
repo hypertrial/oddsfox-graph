@@ -128,7 +128,7 @@ oddsgraph explore         # http://127.0.0.1:8050
 ```
 
 Default view is a mirrored knockout tree (desktop) with flags, numeric advance
-probabilities, a floating playback dock, and a schedule-aware phase tracker
+probabilities, a bottom playback dock, and a schedule-aware phase tracker
 (when `odds_history.parquet` and `stage_odds_history.parquet` are present).
 Compiled propositions still bridge covered markets into the exported graph via
 `REFERS_TO` — residual types may still lack that bridge; see

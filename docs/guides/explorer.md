@@ -45,8 +45,9 @@ canvas (desktop ≥1400px). Narrower viewports use stacked rounds:
 - Pill legend: Resolved / Pending / Diverged
 - A persistent **phase tracker** (Groups → Final weekend) highlights the
   schedule window for the selected hour, including intermissions
-- Floating **playback dock**: compact UTC time (`Jun 28 · 19:00 UTC`), phase
-  badge, game-milestone slider, Play/Pause, Reset view, and live action status
+- Bottom **playback dock** (reserved below the scrollable bracket, not an
+  overlay): compact UTC time (`Jun 28 · 19:00 UTC`), phase badge,
+  game-milestone slider, Play/Pause, Reset view, and live action status
 
 ### Projection rules
 
@@ -67,10 +68,13 @@ At the selected hour:
    green probability styling; pending cards use cyan; unavailable paths use gray.
 6. When a match is locked, cards show **100%** / **0%** for the winner and
    loser.
+7. When the scrubbed hour lands exactly on a match’s full-time milestone, that
+   card (and any simultaneous fixtures sharing the step) shows a **Just
+   finished** badge and pulse highlight until the next milestone.
 
 ### Progressive controls
 
-- Primary: floating playback dock (tournament start → Final full-time), Play
+- Primary: playback dock (tournament start → Final full-time), Play
   (one kickoff or full-time per step; ~184 steps end-to-end; simultaneous
   fixtures share a step), Reset view. Manual scrubbing snaps to the same
   game milestones.

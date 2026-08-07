@@ -28,7 +28,6 @@ class GraphSlice:
 
     nodes: list[dict[str, Any]] = field(default_factory=list)
     edges: list[dict[str, Any]] = field(default_factory=list)
-    truncated: bool = False
 
     def to_elements(self) -> list[dict[str, Any]]:
         return [*self.nodes, *self.edges]

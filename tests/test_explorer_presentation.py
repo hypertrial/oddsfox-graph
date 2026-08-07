@@ -155,12 +155,73 @@ def test_apply_time_slice_stamps_current_home_prob() -> None:
     stamped = apply_time_slice(elements, 100)
     assert stamped[0]["data"]["current_home_prob"] == 0.3
     assert stamped[0]["data"]["resolved"] is False
+    assert stamped[0]["data"]["just_finished"] is False
     assert "30%" in stamped[0]["data"]["short_label"]
+    at_full_time = apply_time_slice(elements, 200)
+    assert at_full_time[0]["data"]["resolved"] is True
+    assert at_full_time[0]["data"]["just_finished"] is True
     locked = apply_time_slice(elements, 300)
     assert locked[0]["data"]["current_home_prob"] == 0.0
     assert locked[0]["data"]["resolved"] is True
+    assert locked[0]["data"]["just_finished"] is False
     assert "2026" not in format_hour_label(None)
     assert "UTC" in format_hour_label(1_783_200_000)
+
+
+def test_apply_time_slice_marks_simultaneous_full_times() -> None:
+    elements = [
+        {
+            "data": {
+                "id": "match:a",
+                "type": "MATCH",
+                "stage": "Round of 32",
+                "home_team": "Brazil",
+                "away_team": "France",
+                "schedule_home": "Brazil",
+                "schedule_away": "France",
+                "match_end_epoch": 200,
+                "winner_team": "Brazil",
+                "odds_series": [{"h": 100, "home": 0.6, "away": 0.4}],
+            },
+            "classes": "MATCH",
+        },
+        {
+            "data": {
+                "id": "match:b",
+                "type": "MATCH",
+                "stage": "Round of 32",
+                "home_team": "Spain",
+                "away_team": "Germany",
+                "schedule_home": "Spain",
+                "schedule_away": "Germany",
+                "match_end_epoch": 200,
+                "winner_team": "Spain",
+                "odds_series": [{"h": 100, "home": 0.55, "away": 0.45}],
+            },
+            "classes": "MATCH",
+        },
+        {
+            "data": {
+                "id": "match:c",
+                "type": "MATCH",
+                "stage": "Round of 32",
+                "home_team": "England",
+                "away_team": "Portugal",
+                "schedule_home": "England",
+                "schedule_away": "Portugal",
+                "match_end_epoch": 400,
+                "winner_team": "England",
+                "odds_series": [{"h": 100, "home": 0.5, "away": 0.5}],
+            },
+            "classes": "MATCH",
+        },
+    ]
+    stamped = apply_time_slice(elements, 200)
+    by_id = {el["data"]["id"]: el["data"] for el in stamped}
+    assert by_id["match:a"]["just_finished"] is True
+    assert by_id["match:b"]["just_finished"] is True
+    assert by_id["match:c"]["just_finished"] is False
+    assert by_id["match:c"]["resolved"] is False
 
 
 def test_bracket_summary_text_omits_counts_without_elements() -> None:

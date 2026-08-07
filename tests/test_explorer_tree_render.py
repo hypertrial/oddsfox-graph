@@ -100,6 +100,26 @@ def test_render_match_card_shows_both_probs_and_avoids_false_winner() -> None:
     assert "is-winner" not in text2
     assert "is-neutral" in text2
 
+
+def test_render_match_card_marks_just_finished() -> None:
+    finished = _match("m1", "Round of 32", fifa=1, home_prob=1.0, resolved=True)
+    finished["data"]["just_finished"] = True
+    finished["data"]["winner_team"] = "Brazil"
+    card = render_match_card(finished, compact=True)
+    text = str(card)
+    assert "is-just-finished" in text
+    assert "Just finished" in text
+    assert "just finished" in text
+
+    settled = _match("m2", "Round of 32", fifa=2, home_prob=1.0, resolved=True)
+    settled["data"]["just_finished"] = False
+    settled["data"]["winner_team"] = "Brazil"
+    settled_text = str(render_match_card(settled, compact=True))
+    assert "is-just-finished" not in settled_text
+    assert "Just finished" not in settled_text
+
+
+def test_render_match_card_in_tree_smoke() -> None:
     elements = [
         _match("l-sf", "Semifinals", fifa=30),
         _match("r-sf", "Semifinals", fifa=31, home="Spain", away="Germany"),
