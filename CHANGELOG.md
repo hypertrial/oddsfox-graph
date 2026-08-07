@@ -30,8 +30,8 @@ flags and output schema as pre-1.0 and subject to change.
   shows numeric advance probabilities on every card, and renders local SVG
   country flags on both sides of each match node.
 - Explorer Final / Third Place cards lock winners to **100%** / **0%** at full
-  time (Spain and England in the curated WC2026 schedule) with distinct
-  champion / third-place card styling once the match is locked.
+  time (Spain and England in the curated WC2026 schedule) with the same teal
+  resolved styling as other locked matches (thicker border on Final / 3rd).
 
 ### Changed
 
@@ -53,6 +53,8 @@ flags and output schema as pre-1.0 and subject to change.
 
 ### Fixed
 
+- Explorer Final / Third Place locked cards use the same teal resolved tint as
+  other finished matches (gold/silver champion overrides removed).
 - Explorer attaches curated schedule winners by team pair when MATCH ids
   drift by kickoff date, so completed knockout cards resolve to teal at
   tournament end instead of staying projected.

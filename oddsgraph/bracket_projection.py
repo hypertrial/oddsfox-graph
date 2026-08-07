@@ -515,8 +515,8 @@ def card_short_label(
 
     Resolved Final / Third Place (and other knockout) winners keep numeric
     ``100%`` / ``0%`` on the card. Champion / 3rd meaning is carried by
-    ``is_champion`` / ``is_third_place_winner`` styling and inspector copy.
-    ``winner`` / ``stage`` remain in the signature for call-site compatibility.
+    ``is_champion`` / ``is_third_place_winner`` (inspector copy and thicker
+    teal border). ``winner`` / ``stage`` remain for call-site compatibility.
     """
     del winner, stage
     home_mark = format_prob_label(home_prob)

@@ -30,8 +30,6 @@
   --of-cyan-soft: rgba(34, 211, 238, 0.14);
   --of-teal: #14b8a6;
   --of-teal-soft: rgba(20, 184, 166, 0.16);
-  --of-gold: #eab308;
-  --of-gold-soft: rgba(234, 179, 8, 0.16);
   --of-danger: #f87171;
   --of-shadow: 0 10px 30px rgba(2, 6, 23, 0.45);
   --of-radius: 14px;
@@ -431,11 +429,6 @@ body {
 .legend-swatch.is-path {
   border-color: var(--of-cyan);
   box-shadow: 0 0 0 1px rgba(34, 211, 238, 0.35);
-}
-
-.legend-swatch.is-champion {
-  background: #2a2412;
-  border-color: var(--of-gold);
 }
 
 .legend-swatch.is-unavailable {

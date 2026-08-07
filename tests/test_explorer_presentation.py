@@ -269,6 +269,18 @@ def test_bracket_stylesheet_and_layout_contract() -> None:
     )
     assert resolved_style["background-color"] == "#0f2f28"
     assert resolved_style["border-color"] == "#14b8a6"
+    champion_style = next(
+        rule["style"] for rule in styles if rule["selector"] == "node[?is_champion]"
+    )
+    third_style = next(
+        rule["style"]
+        for rule in styles
+        if rule["selector"] == "node[?is_third_place_winner]"
+    )
+    assert champion_style["border-color"] == "#14b8a6"
+    assert champion_style["background-color"] == "#0f2f28"
+    assert third_style["border-color"] == "#14b8a6"
+    assert third_style["background-color"] == "#0f2f28"
     assert edge_style["target-arrow-shape"] == "none"
     assert header_style["width"] == node_style["width"]
     assert "node[timeline_state = \"active\"]" in selectors

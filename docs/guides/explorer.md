@@ -67,9 +67,8 @@ At the selected hour:
    matches resolved at the selected hour; numeric percentages remain the
    primary odds signal for unfinished games.
 6. When a match is locked, cards show **100%** / **0%** for the winner and
-   loser. The Final uses champion card styling and Third Place uses third-place
-   winner styling (Spain / England in the curated schedule) once those results
-   lock at full time.
+   loser with the same teal resolved styling. Final and Third Place use a
+   slightly thicker teal border once those results lock at full time.
 
 ### Progressive controls
 

@@ -1002,21 +1002,23 @@ def bracket_stylesheet() -> list[dict[str, Any]]:
                 "border-style": "dashed",
             },
         },
+        # Final / Third Place stay on the same teal resolved palette; thicker
+        # borders mark the locked weekend cards without gold/silver overrides.
         {
             "selector": "node[?is_champion]",
             "style": {
-                "border-color": "#eab308",
+                "border-color": "#14b8a6",
                 "border-width": 3,
-                "background-color": "#2a2412",
+                "background-color": "#0f2f28",
                 "font-weight": 700,
             },
         },
         {
             "selector": "node[?is_third_place_winner]",
             "style": {
-                "border-color": "#94a3b8",
+                "border-color": "#14b8a6",
                 "border-width": 2.5,
-                "background-color": "#1a2333",
+                "background-color": "#0f2f28",
                 "font-weight": 700,
             },
         },

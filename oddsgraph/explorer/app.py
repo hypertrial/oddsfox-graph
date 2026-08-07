@@ -262,12 +262,6 @@ def build_app(settings: Settings) -> Dash:
                                             ),
                                             html.Li(
                                                 [
-                                                    html.Span(className="legend-swatch is-champion"),
-                                                    "Champion / 3rd locked",
-                                                ]
-                                            ),
-                                            html.Li(
-                                                [
                                                     html.Span(className="legend-swatch is-unavailable"),
                                                     "Odds unavailable (—)",
                                                 ]
@@ -295,8 +289,8 @@ def build_app(settings: Settings) -> Dash:
                                                 "Each card shows projected participants and the probability "
                                                 "each advances from that round (normalized from stage markets). "
                                                 "Teal tint = match resolved; dashed borders mark projected "
-                                                "future matchups. Resolved games lock to 100% / 0%; Final and "
-                                                "Third Place keep champion / third-place card styling once locked.",
+                                                "future matchups. Resolved games lock to 100% / 0%, including "
+                                                "Final and Third Place once those results lock at full time.",
                                                 className="panel-hint",
                                             ),
                                         ],
