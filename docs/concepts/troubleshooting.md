@@ -87,14 +87,15 @@ with this backend.
 from a completed `oddsgraph build` (or `run`) first. Confirm `--build-dir`
 matches between the build and explore invocations.
 
-### Explorer time slider is missing or all matches stay uncolored
+### Explorer time slider shows no probabilities / cards stay uncolored
 
-The Knockout time slider needs `build/odds_history.parquet` and
-`build/stage_odds_history.parquet` from `oddsgraph odds-history` (also
-produced by `oddsgraph run`). Without those artifacts the bracket still loads
-from `nodes.parquet` / `edges.parquet`, but MATCH cards lack advance
-probabilities and future-round projection. Confirm `--build-dir` matches and
-that the source parquet includes `soccer_team_to_advance` plus reaches-stage /
+The tournament time slider always spans official schedule kickoffs (first →
+last fixture). Advance probabilities and future-round projection need
+`build/odds_history.parquet` and `build/stage_odds_history.parquet` from
+`oddsgraph odds-history` (also produced by `oddsgraph run`). Without those
+artifacts the bracket still loads from `nodes.parquet` / `edges.parquet`, but
+MATCH cards lack advance probabilities. Confirm `--build-dir` matches and that
+the source parquet includes `soccer_team_to_advance` plus reaches-stage /
 World Cup Winner markets.
 
 ## Docs

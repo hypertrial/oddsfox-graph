@@ -248,3 +248,53 @@ def test_toggle_controls_and_inspector_classnames() -> None:
     classes, opened = toggle(False, kind="inspector")
     assert opened is True
     assert classes == "explorer-inspector is-open"
+
+
+def test_next_play_toggle_and_advance() -> None:
+    from oddsgraph.explorer.callbacks import next_play_advance, next_play_toggle
+
+    assert next_play_toggle(
+        playing=False,
+        hour_epoch=100,
+        min_hour=0,
+        max_hour=200,
+        slider_disabled=True,
+    ) == (True, "Play", False, None)
+
+    assert next_play_toggle(
+        playing=True,
+        hour_epoch=100,
+        min_hour=0,
+        max_hour=200,
+        slider_disabled=False,
+    ) == (True, "Play", False, None)
+
+    assert next_play_toggle(
+        playing=False,
+        hour_epoch=100,
+        min_hour=0,
+        max_hour=200,
+        slider_disabled=False,
+    ) == (False, "Pause", True, None)
+
+    assert next_play_toggle(
+        playing=False,
+        hour_epoch=200,
+        min_hour=0,
+        max_hour=200,
+        slider_disabled=False,
+    ) == (False, "Pause", True, 0)
+
+    assert next_play_advance(playing=False, hour_epoch=100, max_hour=10_000) is None
+    assert next_play_advance(playing=True, hour_epoch=100, max_hour=10_000) == (
+        3700,
+        False,
+        "Pause",
+        True,
+    )
+    assert next_play_advance(playing=True, hour_epoch=10_000 - 3600, max_hour=10_000) == (
+        10_000,
+        True,
+        "Play",
+        False,
+    )

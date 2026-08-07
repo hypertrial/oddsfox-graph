@@ -10,6 +10,7 @@ from typing import Any
 
 import duckdb
 
+from oddsgraph.bracket import tournament_time_bounds
 from oddsgraph.config import Settings
 from oddsgraph.explorer import KNOCKOUT_STAGE_LABELS
 from oddsgraph.explorer.presentation import (
@@ -426,9 +427,17 @@ class ExplorerDataStore:
             return slice_
 
     def odds_time_bounds(self) -> tuple[int | None, int | None]:
-        """Return global min/max hour epochs from match + stage odds history."""
+        """Return hour-aligned tournament start/end for the time slider.
+
+        Bounds come from the official schedule (first → last kickoff), not the
+        full odds-history span, so early Champion markets do not extend the
+        scrubber. Falls back to odds-history extrema when the schedule is empty.
+        """
         with self._lock:
             self.refresh_if_stale()
+            start, end = tournament_time_bounds()
+            if start is not None and end is not None:
+                return start, end
             hours: list[int] = []
             for entry in self._odds_by_match.values():
                 for point in entry.get("odds_series") or []:
@@ -587,7 +596,7 @@ def bracket_elements(settings: Settings) -> GraphSlice:
 
 
 def odds_time_bounds(settings: Settings) -> tuple[int | None, int | None]:
-    """Return global min/max hour epochs for the knockout time slider."""
+    """Return hour-aligned tournament start/end for the explorer time slider."""
     return get_store(settings).odds_time_bounds()
 
 

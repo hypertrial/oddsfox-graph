@@ -416,6 +416,17 @@ button:disabled {
   margin-bottom: 2px;
 }
 
+.time-play-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0 4px;
+}
+
+.time-play-row .btn {
+  min-width: 72px;
+}
+
 @media (max-width: 1100px) {
   :root {
     --of-controls-width: 250px;

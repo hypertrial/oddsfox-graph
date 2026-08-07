@@ -105,7 +105,7 @@ def _write_minimal_build(build_dir: Path) -> None:
 
 
 def test_build_app_registers_layout_assets_and_callbacks(tmp_path: Path) -> None:
-    from oddsgraph.explorer.app import ASSETS_DIR, build_app
+    from oddsgraph.explorer.app import ASSETS_DIR, TIME_PLAY_MS_PER_HOUR, build_app
     from oddsgraph.explorer.presentation import bracket_stylesheet
 
     settings = make_settings(tmp_path)
@@ -113,6 +113,7 @@ def test_build_app_registers_layout_assets_and_callbacks(tmp_path: Path) -> None
 
     assert ASSETS_DIR.exists()
     assert (ASSETS_DIR / "explorer.css").exists()
+    assert TIME_PLAY_MS_PER_HOUR == round(2000 / 24)
 
     app = build_app(settings)
     assert app.title == "oddsgraph explorer"
@@ -123,6 +124,9 @@ def test_build_app_registers_layout_assets_and_callbacks(tmp_path: Path) -> None
     for component_id in (
         "time-slider",
         "time-slider-label",
+        "time-play-button",
+        "time-play-interval",
+        "time-play-state",
         "graph-cyto",
         "inspector-panel",
         "reset-button",

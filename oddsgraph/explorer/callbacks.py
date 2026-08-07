@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from dash import Dash, Input, Output, State, callback_context, html
+from dash import Dash, Input, Output, State, callback_context, html, no_update
 from dash.exceptions import PreventUpdate
 
 from oddsgraph.config import Settings
@@ -21,14 +21,68 @@ from oddsgraph.explorer.data import get_edge, get_node
 from oddsgraph.explorer.inspector import _hover_card_children, _inspector_sheet
 from oddsgraph.explorer.presentation import format_hour_label
 
+_HOUR_SECONDS = 3600
+
 # Re-export public canvas helpers so existing test imports keep working.
 __all__ = [
     "apply_time_slider",
     "highlight_on_tap",
     "load_view",
+    "next_play_advance",
+    "next_play_toggle",
     "register_callbacks",
     "remove_from_canvas",
 ]
+
+
+def next_play_toggle(
+    *,
+    playing: bool,
+    hour_epoch: int | None,
+    min_hour: int | None,
+    max_hour: int | None,
+    slider_disabled: bool,
+) -> tuple[bool, str, bool, int | None]:
+    """Compute Play/Pause toggle result.
+
+    Returns ``(interval_disabled, button_label, playing, restart_hour)``.
+    ``restart_hour`` is set when playback should jump back to tournament start;
+    otherwise it is ``None`` (leave the slider unchanged).
+    """
+    if slider_disabled:
+        return True, "Play", False, None
+    if playing:
+        return True, "Play", False, None
+    if (
+        hour_epoch is not None
+        and max_hour is not None
+        and min_hour is not None
+        and int(hour_epoch) >= int(max_hour)
+    ):
+        return False, "Pause", True, int(min_hour)
+    return False, "Pause", True, None
+
+
+def next_play_advance(
+    *,
+    playing: bool,
+    hour_epoch: int | None,
+    max_hour: int | None,
+) -> tuple[int, bool, str, bool] | None:
+    """Advance one hour while playing, or ``None`` when idle / incomplete.
+
+    Returns ``(next_hour, interval_disabled, button_label, playing)``. Hitting
+    the end pauses playback at ``max_hour``.
+    """
+    if not playing:
+        return None
+    if hour_epoch is None or max_hour is None:
+        return None
+    next_hour = int(hour_epoch) + _HOUR_SECONDS
+    end = int(max_hour)
+    if next_hour >= end:
+        return end, True, "Play", False
+    return next_hour, False, "Pause", True
 
 
 def register_callbacks(app: Dash, settings: Settings) -> None:
@@ -85,6 +139,74 @@ def register_callbacks(app: Dash, settings: Settings) -> None:
     )
     def update_time_label(hour_epoch: int | None) -> str:
         return format_hour_label(hour_epoch)
+
+    @app.callback(
+        Output("time-play-interval", "disabled"),
+        Output("time-play-button", "children"),
+        Output("time-play-state", "data"),
+        Output("time-slider", "value", allow_duplicate=True),
+        Input("time-play-button", "n_clicks"),
+        State("time-play-state", "data"),
+        State("time-slider", "value"),
+        State("time-slider", "min"),
+        State("time-slider", "max"),
+        State("time-slider", "disabled"),
+        prevent_initial_call=True,
+    )
+    def toggle_time_play(
+        n_clicks: int | None,
+        playing: bool | None,
+        hour_epoch: int | None,
+        min_hour: int | None,
+        max_hour: int | None,
+        slider_disabled: bool | None,
+    ) -> tuple[bool, str, bool, Any]:
+        del n_clicks
+        if not callback_context.triggered:
+            raise PreventUpdate
+        interval_disabled, label, now_playing, restart = next_play_toggle(
+            playing=bool(playing),
+            hour_epoch=hour_epoch,
+            min_hour=min_hour,
+            max_hour=max_hour,
+            slider_disabled=bool(slider_disabled),
+        )
+        return (
+            interval_disabled,
+            label,
+            now_playing,
+            no_update if restart is None else restart,
+        )
+
+    @app.callback(
+        Output("time-slider", "value", allow_duplicate=True),
+        Output("time-play-interval", "disabled", allow_duplicate=True),
+        Output("time-play-button", "children", allow_duplicate=True),
+        Output("time-play-state", "data", allow_duplicate=True),
+        Input("time-play-interval", "n_intervals"),
+        State("time-play-state", "data"),
+        State("time-slider", "value"),
+        State("time-slider", "max"),
+        prevent_initial_call=True,
+    )
+    def advance_time_play(
+        n_intervals: int | None,
+        playing: bool | None,
+        hour_epoch: int | None,
+        max_hour: int | None,
+    ) -> tuple[Any, Any, Any, Any]:
+        del n_intervals
+        result = next_play_advance(
+            playing=bool(playing),
+            hour_epoch=hour_epoch,
+            max_hour=max_hour,
+        )
+        if result is None:
+            raise PreventUpdate
+        next_hour, interval_disabled, label, now_playing = result
+        if now_playing:
+            return next_hour, no_update, no_update, no_update
+        return next_hour, interval_disabled, label, now_playing
 
     @app.callback(
         *_canvas_callback_outputs(allow_duplicate=False),

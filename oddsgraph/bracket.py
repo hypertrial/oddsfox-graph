@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections import defaultdict
+from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
 
@@ -71,6 +72,39 @@ def _kickoff_date(kickoff_at_utc: str | None) -> str | None:
         return None
     # ISO timestamps are YYYY-MM-DDTHH:MM:SS…
     return kickoff_at_utc[:10]
+
+
+def _kickoff_epoch(kickoff_at_utc: str | None) -> int | None:
+    if not kickoff_at_utc:
+        return None
+    text = str(kickoff_at_utc).replace("Z", "+00:00")
+    dt = datetime.fromisoformat(text)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return int(dt.timestamp())
+
+
+def tournament_time_bounds() -> tuple[int | None, int | None]:
+    """Hour-aligned UTC bounds from the first to last schedule kickoff.
+
+    The explorer time slider uses this window so scrubbing stays inside the
+    tournament rather than early Champion-market history.
+    """
+    schedule = load_wc2026_schedule()
+    epochs: list[int] = []
+    for raw in schedule.get("fixtures") or []:
+        if not isinstance(raw, dict):
+            continue
+        epoch = _kickoff_epoch(raw.get("kickoff_at_utc"))
+        if epoch is not None:
+            epochs.append(epoch)
+    if not epochs:
+        return None, None
+    start = min(epochs)
+    end = max(epochs)
+    start_hour = start - (start % 3600)
+    end_hour = end - (end % 3600)
+    return start_hour, end_hour
 
 
 def _match_local_id(team_a: str, team_b: str, kickoff_at_utc: str | None) -> str:

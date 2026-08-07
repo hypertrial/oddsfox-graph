@@ -27,6 +27,9 @@ ASSETS_DIR = Path(__file__).resolve().parent / "assets"
 
 STAGE_STRIP = [label for _, label in BRACKET_COLUMN_HEADERS]
 
+# Playback advances one hour at a time; one tournament day takes 2 real seconds.
+TIME_PLAY_MS_PER_HOUR = max(1, round(2000 / 24))
+
 
 def _counts_summary(counts: dict[str, Any]) -> str:
     return (
@@ -139,7 +142,7 @@ def build_app(settings: Settings) -> Dash:
                                 className="panel-section",
                                 children=[
                                     html.Label(
-                                        "Knockout time",
+                                        "Tournament time",
                                         htmlFor="time-slider",
                                         className="panel-label",
                                     ),
@@ -163,7 +166,26 @@ def build_app(settings: Settings) -> Dash:
                                             "always_visible": False,
                                         },
                                     ),
+                                    html.Div(
+                                        className="time-play-row",
+                                        children=[
+                                            html.Button(
+                                                "Play",
+                                                id="time-play-button",
+                                                n_clicks=0,
+                                                className="btn",
+                                                type="button",
+                                                disabled=slider_disabled,
+                                                title=(
+                                                    "Advance one hour at a time "
+                                                    "(1 day = 2 seconds)"
+                                                ),
+                                            ),
+                                        ],
+                                    ),
                                     html.P(
+                                        "Scrub from tournament start to end. Play advances "
+                                        "one hour at a time (one day every 2 seconds). "
                                         "Each card shows projected participants and the "
                                         "probability each advances from that round "
                                         "(normalized from stage markets). Green tint = "
@@ -299,6 +321,13 @@ def build_app(settings: Settings) -> Dash:
             dcc.Store(id="selected-edge-id", data=None),
             dcc.Store(id="controls-open", data=True),
             dcc.Store(id="inspector-open", data=False),
+            dcc.Store(id="time-play-state", data=False),
+            dcc.Interval(
+                id="time-play-interval",
+                interval=TIME_PLAY_MS_PER_HOUR,
+                n_intervals=0,
+                disabled=True,
+            ),
         ],
     )
 

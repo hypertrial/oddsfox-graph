@@ -9,6 +9,7 @@ from oddsgraph.bracket import (
     STAGE_KEY_TO_LABEL,
     build_official_bracket_fragment,
     load_wc2026_schedule,
+    tournament_time_bounds,
 )
 from oddsgraph.config import Settings
 from oddsgraph.ontology import EdgeType, NodeType
@@ -46,6 +47,29 @@ def test_schedule_has_104_fixtures_with_expected_stage_counts() -> None:
         "final": 1,
     }
     assert set(STAGE_KEY_TO_LABEL) == set(counts)
+
+
+def test_tournament_time_bounds_span_first_to_last_kickoff() -> None:
+    from datetime import datetime, timezone
+
+    schedule = load_wc2026_schedule()
+    kickoffs = [
+        datetime.fromisoformat(str(f["kickoff_at_utc"])).replace(tzinfo=timezone.utc)
+        for f in schedule["fixtures"]
+    ]
+    expected_start = int(min(kickoffs).timestamp())
+    expected_end = int(max(kickoffs).timestamp())
+    expected_start -= expected_start % 3600
+    expected_end -= expected_end % 3600
+
+    start, end = tournament_time_bounds()
+    assert start == expected_start
+    assert end == expected_end
+    assert start == 1_781_204_400  # 2026-06-11 19:00 UTC
+    assert end == 1_784_487_600  # 2026-07-19 19:00 UTC
+    assert end > start
+    assert start % 3600 == 0
+    assert end % 3600 == 0
 
 
 def test_official_bracket_stage_ladder_and_match_placement() -> None:

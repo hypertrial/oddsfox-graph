@@ -15,6 +15,7 @@ from oddsgraph.explorer.data import (
     get_node,
     get_store,
     graph_counts,
+    odds_time_bounds,
 )
 from oddsgraph.export import export_graph_artifacts
 from oddsgraph.ontology import EdgeType, NodeType
@@ -483,3 +484,40 @@ def test_bracket_elements_enrich_odds_series(tmp_path: Path) -> None:
     assert match["odds_series"] == [{"h": 1000, "home": 0.55, "away": 0.45}]
     assert match["current_home_prob"] == 0.55
     assert "odds_series" not in by_id["match:final"]
+
+
+def test_odds_time_bounds_prefer_tournament_schedule(tmp_path: Path) -> None:
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    from oddsgraph.bracket import tournament_time_bounds
+    from oddsgraph.odds_history import ODDS_HISTORY_SCHEMA
+
+    settings = make_settings(tmp_path)
+    _write_fixture_graph(settings.build_dir)
+    # Early Champion-style history far before tournament kickoff must not widen
+    # the scrubber.
+    early = 1_751_497_200
+    pq.write_table(
+        pa.Table.from_pylist(
+            [
+                {
+                    "match_canonical_id": "match:brazil-vs-france",
+                    "home_team": "Brazil",
+                    "away_team": "France",
+                    "odds_hour_epoch": early,
+                    "home_prob": 0.55,
+                    "away_prob": 0.45,
+                    "match_start_epoch": early,
+                    "match_end_epoch": early + 3600,
+                    "winner_team": None,
+                }
+            ],
+            schema=ODDS_HISTORY_SCHEMA,
+        ),
+        settings.odds_history_path,
+    )
+
+    expected = tournament_time_bounds()
+    assert odds_time_bounds(settings) == expected
+    assert expected[0] is not None and early < expected[0]

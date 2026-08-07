@@ -24,6 +24,13 @@ flags and output schema as pre-1.0 and subject to change.
   country flags on both sides of each match node.
 - Modernized explorer shell: denser spacing, contextual inspector (opens on
   selection), softer probability tints, dashed borders for projected cards.
+- Explorer Play control advances tournament time one hour at a time at a rate
+  of one day every two seconds.
+
+### Changed
+
+- Explorer time slider spans official tournament kickoffs (first → last
+  fixture), not the full early Champion-market odds-history window.
 
 ### Fixed
 

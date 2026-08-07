@@ -11,7 +11,7 @@ artifacts.
 
 ```bash
 uv sync --extra explore
-oddsgraph odds-history   # optional; enables the Knockout time slider + projections
+oddsgraph odds-history   # optional; enables projections on the tournament time slider
 oddsgraph explore
 ```
 
@@ -38,7 +38,8 @@ The **knockout bracket** is a classic left-to-right tournament:
 - Deterministic `preset` layout (not a force-directed hairball)
 - Orthogonal taxi edges without repeated `ADVANCES_TO` labels
 - Click a match to open the inspector and highlight its path through the DAG
-- Hourly **Knockout time** slider reprojects unresolved future matchups
+- Hourly **Tournament time** slider (official start → end) reprojects unresolved
+  future matchups; **Play** advances one hour at a time (one day / 2 seconds)
 
 ### Projection rules
 
@@ -58,7 +59,8 @@ At the selected hour:
 
 ### Progressive controls
 
-- Primary: Knockout time slider, Reset
+- Primary: Tournament time slider (start → end of the official schedule), Play
+  (one hour per step; one day every 2 seconds), Reset
 - Advanced (collapsed by default): confidence and inference-method filters
 - Hover a card for a compact preview; the inspector opens on selection and
   shows identity, provenance, and evidence
