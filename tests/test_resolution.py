@@ -197,6 +197,43 @@ def test_match_local_id_preferred_over_label_only_id() -> None:
     )
 
 
+def test_distinct_dateful_match_ids_do_not_collapse() -> None:
+    """Same display label on different dates must stay distinct fixtures."""
+    june = GraphFragment(
+        nodes=[
+            Node(
+                local_id="match:brazil-vs-morocco-2026-06-13",
+                type=NodeType.MATCH,
+                label="Brazil vs. Morocco",
+                confidence=1.0,
+                evidence_market_ids=["m1"],
+            )
+        ],
+        edges=[],
+    )
+    july = GraphFragment(
+        nodes=[
+            Node(
+                local_id="match:brazil-vs-morocco-2026-07-13",
+                type=NodeType.MATCH,
+                label="Brazil vs. Morocco",
+                confidence=1.0,
+                evidence_market_ids=["m2"],
+            )
+        ],
+        edges=[],
+    )
+    state = resolve_fragments([june, july], Settings())
+    assert "match:brazil-vs-morocco-2026-06-13" in state.canonical_nodes
+    assert "match:brazil-vs-morocco-2026-07-13" in state.canonical_nodes
+    assert state.local_to_canonical["match:brazil-vs-morocco-2026-06-13"] == (
+        "match:brazil-vs-morocco-2026-06-13"
+    )
+    assert state.local_to_canonical["match:brazil-vs-morocco-2026-07-13"] == (
+        "match:brazil-vs-morocco-2026-07-13"
+    )
+
+
 def test_match_dateful_id_upgrades_when_label_only_arrives_first() -> None:
     """Bracket is appended after topology; dateful MATCH ids must still win."""
     dateful, label_only = _brazil_morocco_match_fragments()

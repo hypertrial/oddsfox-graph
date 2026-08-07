@@ -53,9 +53,9 @@ def test_cli_explore_missing_artifacts(tmp_path: Path) -> None:
     assert "--llm-backend" in output
     assert "--server-url" in output
     assert "--concurrency" in output
-    # Rich may truncate long dual flags in narrow terminals.
-    assert "deterministic-top" in output
-    assert "no-deterministic" in output
+    # Rich may truncate long dual flags in narrow terminals (ellipsis \u2026).
+    assert "deterministic-" in output
+    assert "no-determinis" in output
 
 
 def test_cli_run_help_includes_infer_and_build_options() -> None:
@@ -64,9 +64,9 @@ def test_cli_run_help_includes_infer_and_build_options() -> None:
     output = _plain_output(help_result.output)
     assert "--llm-backend" in output
     assert "--concurrency" in output
-    assert "official-bracket" in output
-    assert "--minimum-confidence" in output
-    assert "verify-deterministic" in output or "verify-determini" in output
+    assert "official-brack" in output
+    assert "minimum-confid" in output
+    assert "verify-determi" in output
     assert "few-shot" in output
     assert "mlx" in output.lower() or "--mlx-model-path" in output
     assert "propositions" in output

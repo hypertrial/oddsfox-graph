@@ -23,6 +23,37 @@ def _outcome(
     )
 
 
+def test_unknown_stage_does_not_get_monotonic_implies() -> None:
+    competition = ids.competition_id("World Cup 2026")
+    team = ids.team_id("Brazil")
+    nodes = [
+        _outcome(
+            "outcome:final",
+            Proposition(
+                predicate="reaches_stage",
+                arguments={
+                    "team": team,
+                    "competition": competition,
+                    "stage": ids.stage_id("World Cup 2026", "Final"),
+                },
+            ),
+        ),
+        _outcome(
+            "outcome:unknown",
+            Proposition(
+                predicate="reaches_stage",
+                arguments={
+                    "team": team,
+                    "competition": competition,
+                    "stage": "stage:world-cup-2026:golden-round",
+                },
+            ),
+        ),
+    ]
+    edges = apply_rules(nodes)
+    assert not any(e.rule_id == "wc.stage_monotonicity" for e in edges)
+
+
 def test_stage_rank_from_stage_id() -> None:
     assert stage_rank_for_proposition("stage:world-cup-2026:final") > stage_rank_for_proposition(
         "stage:world-cup-2026:semifinals"

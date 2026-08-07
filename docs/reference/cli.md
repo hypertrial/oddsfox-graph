@@ -28,10 +28,10 @@ Infer graph fragments per event using deterministic topology and/or a local LLM.
 | --- | --- |
 | `--model-path` | Path to GGUF model file |
 | `--mlx-model-path` | Path to MLX model directory |
-| `--limit-events N` | Limit number of events to infer |
+| `--limit-events N` | Limit number of events to infer (`N >= 0`) |
 | `--event-id <id>` | Specific event ID (repeatable) |
 | `--resume` / `--no-resume` | Skip residual fragments and existing `__verified.json` artifacts (default: on) |
-| `--llm-backend` | `inprocess`, `server`, or `mlx` |
+| `--llm-backend` | `inprocess`, `server`, or `mlx` (invalid values error) |
 | `--server-url` | Base URL when `--llm-backend server` |
 | `--concurrency N` | Concurrent LLM requests (server backend only) |
 | `--deterministic-topology` / `--no-deterministic-topology` | Extract TEAM/MATCH/GROUP/STAGE without LLM when possible |

@@ -67,14 +67,21 @@ def build_pipeline_from_markets(
     *,
     verified_event_ids: set[str] | None = None,
 ) -> BuildPipelineResult:
-    verified_ids = verified_event_ids or set()
+    allowed_event_ids = {m.event_id for m in markets}
+    verified_ids = {
+        eid for eid in (verified_event_ids or set()) if eid in allowed_event_ids
+    }
     deterministic = build_deterministic_fragments_by_event(
         markets,
         include_topology=settings.deterministic_topology,
         competition_label=settings.competition_label,
         skip_topology_event_ids=verified_ids,
     )
-    inferred = inferred_fragments or {}
+    inferred = {
+        eid: fragment
+        for eid, fragment in (inferred_fragments or {}).items()
+        if eid in allowed_event_ids
+    }
     det_fragments = list(deterministic.values())
     inferred_items = list(inferred.items())
     inf_fragments = [fragment for _, fragment in inferred_items]

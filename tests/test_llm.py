@@ -170,6 +170,15 @@ def test_parse_compact_fragment_json(tmp_path) -> None:
     assert fragment.nodes[0].label == "Brazil"
 
 
+def test_build_graph_llm_rejects_invalid_backend() -> None:
+    from oddsgraph import llm as llm_mod
+
+    settings = Settings()
+    settings.llm_backend = "servre"
+    with pytest.raises(ValueError, match="Invalid llm_backend"):
+        llm_mod.build_graph_llm(settings)
+
+
 def test_build_graph_llm_dispatches_mlx(monkeypatch) -> None:
     from oddsgraph import llm as llm_mod
     import oddsgraph.llm_mlx as mlx_mod

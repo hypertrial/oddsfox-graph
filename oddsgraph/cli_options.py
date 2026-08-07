@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Annotated, Optional
+from typing import Annotated, Literal, Optional
 
 import typer
+
+LLM_BACKENDS = ("inprocess", "server", "mlx")
+LlmBackend = Literal["inprocess", "server", "mlx"]
 
 ModelPathOpt = Annotated[
     Optional[Path],
@@ -17,7 +20,7 @@ MlxModelPathOpt = Annotated[
 ]
 LimitEventsOpt = Annotated[
     Optional[int],
-    typer.Option(help="Limit number of events to infer"),
+    typer.Option(help="Limit number of events to infer (>= 0)"),
 ]
 EventIdOpt = Annotated[
     list[str],
@@ -28,8 +31,11 @@ ResumeOpt = Annotated[
     typer.Option(help="Skip events with existing fragments/verified artifacts"),
 ]
 LlmBackendOpt = Annotated[
-    Optional[str],
-    typer.Option(help="LLM backend: inprocess, server, or mlx"),
+    Optional[LlmBackend],
+    typer.Option(
+        help="LLM backend: inprocess, server, or mlx",
+        metavar="BACKEND",
+    ),
 ]
 ServerUrlOpt = Annotated[
     Optional[str],

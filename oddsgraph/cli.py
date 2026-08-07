@@ -50,6 +50,8 @@ def _apply_infer_options(
     if mlx_model_path is not None:
         settings.mlx_model_path = mlx_model_path
     if limit_events is not None:
+        if limit_events < 0:
+            raise typer.BadParameter("--limit-events must be >= 0")
         settings.limit_events = limit_events
     if event_id:
         settings.event_ids = list(event_id)

@@ -8,6 +8,46 @@ import sys
 from pathlib import Path
 
 
+def test_export_finetune_dataset_removes_stale_valid_split(tmp_path: Path) -> None:
+    out = tmp_path / "finetune"
+    first = subprocess.run(
+        [
+            sys.executable,
+            "scripts/export_finetune_dataset.py",
+            "--from-fixtures",
+            "--output-dir",
+            str(out),
+            "--val-ratio",
+            "0.5",
+        ],
+        cwd=Path(__file__).resolve().parents[1],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert first.returncode == 0, first.stderr
+    assert (out / "valid.jsonl").exists()
+    second = subprocess.run(
+        [
+            sys.executable,
+            "scripts/export_finetune_dataset.py",
+            "--from-fixtures",
+            "--output-dir",
+            str(out),
+            "--val-ratio",
+            "0",
+        ],
+        cwd=Path(__file__).resolve().parents[1],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert second.returncode == 0, second.stderr
+    meta = json.loads((out / "dataset_meta.json").read_text(encoding="utf-8"))
+    assert meta["valid_path"] is None
+    assert not (out / "valid.jsonl").exists()
+
+
 def test_export_finetune_dataset_from_fixtures(tmp_path: Path) -> None:
     out = tmp_path / "finetune"
     result = subprocess.run(

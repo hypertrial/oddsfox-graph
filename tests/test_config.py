@@ -6,6 +6,22 @@ import pyarrow.parquet as pq
 from oddsgraph.config import Settings
 
 
+def test_resolve_input_glob_explicit_default_data_dir_is_exclusive(
+    tmp_path: Path,
+) -> None:
+    """Passing --data-dir equal to <repo>/data must still skip repo-root fallback."""
+    (tmp_path / "data").mkdir()
+    root_parquet = tmp_path / "polymarket_wc2026_market_hourly_odds_root.parquet"
+    pq.write_table(pa.table({"market_id": ["1"]}), root_parquet)
+
+    settings = Settings()
+    settings.configure_repo_root(tmp_path)
+    settings.configure_data_dir(tmp_path / "data")
+    resolved = settings.resolve_input_glob()
+    assert resolved.startswith(str(tmp_path / "data"))
+    assert "root.parquet" not in resolved
+
+
 def test_resolve_input_glob_uses_data_dir(tmp_path: Path) -> None:
     data_dir = tmp_path / "custom-data"
     data_dir.mkdir()

@@ -6,19 +6,30 @@ import re
 from pathlib import Path
 
 # Single path segment only: no separators, no ``..``, no empty names.
-_SAFE_EVENT_ID = re.compile(r"^[A-Za-z0-9._-]+$")
+# Disallow ``__`` so artifact suffixes like ``__verified.json`` / ``__partN.json``
+# cannot collide with a literal event id.
+_SAFE_EVENT_ID = re.compile(r"^(?!.*__)[A-Za-z0-9._-]+$")
+_PART_FRAGMENT_NAME = re.compile(r"^.+__part\d+\.json$")
 
 
 def sanitize_event_id_for_path(event_id: str) -> str:
     """Return ``event_id`` if it is safe as a single filesystem path segment.
 
-    Rejects empty values, path separators, and ``..`` so fragment writes cannot
-    escape ``build/fragments`` (or nest unexpectedly under it).
+    Rejects empty values, surrounding whitespace, path separators, ``..``, and
+    embedded ``__`` so fragment writes cannot escape ``build/fragments`` or
+    collide with reserved artifact suffixes.
     """
-    cleaned = str(event_id).strip()
+    cleaned = str(event_id)
+    if cleaned != cleaned.strip():
+        raise ValueError(f"Unsafe event_id for filesystem path: {event_id!r}")
     if cleaned in {".", ".."} or not _SAFE_EVENT_ID.fullmatch(cleaned):
         raise ValueError(f"Unsafe event_id for filesystem path: {event_id!r}")
     return cleaned
+
+
+def is_part_fragment_name(name: str) -> bool:
+    """True for ``<event_id>__partN.json`` chunk artifacts."""
+    return bool(_PART_FRAGMENT_NAME.fullmatch(name))
 
 
 def event_artifact_path(directory: Path, event_id: str, suffix: str) -> Path:

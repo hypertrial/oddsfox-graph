@@ -21,6 +21,29 @@ def _market(**kwargs) -> SemanticMarket:
     return SemanticMarket(**defaults)
 
 
+def test_match_moneylines_without_draw_skip_exactly_one() -> None:
+    """Team-only moneylines must not claim an exclusive match-result partition."""
+    markets = [
+        _market(
+            market_id="10",
+            group_item_title="Brazil",
+            sports_market_type="moneyline",
+            question="Will Brazil win on 2026-06-13?",
+        ),
+        _market(
+            market_id="11",
+            group_item_title="Morocco",
+            sports_market_type="moneyline",
+            question="Will Morocco win on 2026-06-13?",
+        ),
+    ]
+    result = compile_propositions_by_event(markets)["100"]
+    assert result.fully_covered is True
+    assert len(result.propositions) == 4
+    assert not any(e.type == EdgeType.EXACTLY_ONE for e in result.fragment.edges)
+    assert not any(n.type == NodeType.CONSTRAINT for n in result.fragment.nodes)
+
+
 def test_match_moneyline_and_draw_compile_with_exactly_one() -> None:
     markets = [
         _market(

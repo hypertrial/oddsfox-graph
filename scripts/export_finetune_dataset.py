@@ -22,19 +22,33 @@ from oddsgraph.schema import CompactGraphFragment, GraphFragment, SemanticMarket
 
 
 def _load_fragments(fragments_dir: Path) -> dict[str, GraphFragment]:
+    from oddsgraph.paths import is_part_fragment_name, sanitize_event_id_for_path
+
     out: dict[str, GraphFragment] = {}
     for path in sorted(fragments_dir.glob("*.json")):
         if path.name.startswith("_"):
             continue
-        if "__part" in path.name or "__chunk_manifest" in path.name:
+        if is_part_fragment_name(path.name) or path.name.endswith(
+            "__chunk_manifest.json"
+        ):
+            continue
+        if path.name.endswith("__verify_manifest.json"):
             continue
         if path.name.endswith("__verified.json"):
             event_id = path.name[: -len("__verified.json")]
+            try:
+                sanitize_event_id_for_path(event_id)
+            except ValueError:
+                continue
             out[event_id] = GraphFragment.model_validate_json(
                 path.read_text(encoding="utf-8")
             )
             continue
         event_id = path.stem
+        try:
+            sanitize_event_id_for_path(event_id)
+        except ValueError:
+            continue
         if event_id not in out:
             out[event_id] = GraphFragment.model_validate_json(
                 path.read_text(encoding="utf-8")
@@ -176,6 +190,8 @@ def main() -> None:
     _write_split(train_path, train_rows, args.format)
     if val_rows:
         _write_split(val_path, val_rows, args.format)
+    elif val_path.exists():
+        val_path.unlink()
 
     meta = {
         "train_rows": len(train_rows),

@@ -228,14 +228,12 @@ def build_graph_from_fragments(
         for edge in fragment.edges:
             source_id = resolution_state.local_to_canonical.get(edge.source)
             target_id = resolution_state.local_to_canonical.get(edge.target)
-            if not source_id or not target_id:
-                continue
-            if source_id.startswith("unresolved:") or target_id.startswith("unresolved:"):
-                continue
+            # Keep unresolved / missing endpoints so accept_edges can reject them
+            # with ``missing_endpoint`` instead of silently dropping the edge.
             raw_edges.append(
                 CanonicalEdge(
-                    source_id=source_id,
-                    target_id=target_id,
+                    source_id=source_id or edge.source,
+                    target_id=target_id or edge.target,
                     edge_type=edge.type,
                     confidence=edge.confidence,
                     evidence_market_ids=list(edge.evidence_market_ids),

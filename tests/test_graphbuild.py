@@ -11,6 +11,35 @@ from oddsgraph.schema import CanonicalEdge, Edge, GraphFragment, Node
 from tests.helpers import load_fixture_fragment
 
 
+def test_rejects_missing_endpoint() -> None:
+    fragment = GraphFragment(
+        nodes=[
+            Node(
+                local_id="team:argentina",
+                type=NodeType.TEAM,
+                label="Argentina",
+                confidence=0.9,
+                evidence_market_ids=["1"],
+            ),
+        ],
+        edges=[
+            Edge(
+                source="team:argentina",
+                target="match:missing",
+                type=EdgeType.PARTICIPATES_IN,
+                confidence=0.9,
+                evidence_market_ids=["1"],
+                evidence_text="dangling",
+            )
+        ],
+    )
+    settings = Settings()
+    state = resolve_fragments([fragment], settings, inference_method="llm")
+    result = build_graph_from_fragments([fragment], state, settings)
+    assert not result.edges
+    assert any(e.rejection_reason == "missing_endpoint" for e in result.rejected_edges)
+
+
 def test_rejects_invalid_edge_pattern() -> None:
     fragment = GraphFragment(
         nodes=[

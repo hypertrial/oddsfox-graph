@@ -16,6 +16,8 @@ class Settings:
     models_dir: Path = repo_root / "models"
     fragments_dir: Path = build_dir / "fragments"
     failed_fragments_dir: Path = build_dir / "fragments" / "_failed"
+    # True once ``configure_data_dir`` runs (including when path equals the default).
+    data_dir_explicit: bool = False
 
     input_glob: str = "data/*market_hourly_odds*.parquet"
     fallback_glob: str = "polymarket_wc2026_market_hourly_odds_*.parquet"
@@ -77,6 +79,7 @@ class Settings:
 
     def configure_data_dir(self, data_dir: Path) -> None:
         self.data_dir = data_dir
+        self.data_dir_explicit = True
 
     def configure_repo_root(self, repo_root: Path) -> None:
         """Point repo_root and keep data_dir/models_dir aligned when still defaults."""
@@ -84,7 +87,7 @@ class Settings:
         previous_data = previous_root / "data"
         previous_models = previous_root / "models"
         self.repo_root = repo_root
-        if self.data_dir == previous_data:
+        if not self.data_dir_explicit and self.data_dir == previous_data:
             self.data_dir = repo_root / "data"
         if self.models_dir == previous_models:
             self.models_dir = repo_root / "models"
@@ -103,8 +106,9 @@ class Settings:
         data_glob = self.input_glob.replace("data/", "")
         default_data_dir = self.repo_root / "data"
 
-        # Explicit --data-dir: search only there (do not silently fall back).
-        if self.data_dir != default_data_dir:
+        # Explicit --data-dir: search only there (do not silently fall back),
+        # including when the path equals the default ``<repo>/data``.
+        if self.data_dir_explicit or self.data_dir != default_data_dir:
             if list(self.data_dir.glob(data_glob)):
                 return str(self.data_dir / data_glob)
             if list(self.data_dir.glob(self.fallback_glob)):

@@ -212,12 +212,17 @@ class LocalGraphLLM(BaseGraphLLM):
 
 
 def build_graph_llm(settings: Settings) -> BaseGraphLLM:
-    if settings.llm_backend == "server":
+    backend = settings.llm_backend
+    if backend == "server":
         from oddsgraph.llm_remote import RemoteGraphLLM
 
         return RemoteGraphLLM(settings)
-    if settings.llm_backend == "mlx":
+    if backend == "mlx":
         from oddsgraph.llm_mlx import MLXGraphLLM
 
         return MLXGraphLLM(settings)
-    return LocalGraphLLM(settings)
+    if backend == "inprocess":
+        return LocalGraphLLM(settings)
+    raise ValueError(
+        f"Invalid llm_backend {backend!r}; expected one of: inprocess, server, mlx"
+    )

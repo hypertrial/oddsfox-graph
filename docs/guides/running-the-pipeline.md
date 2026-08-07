@@ -23,7 +23,7 @@ OddsFox Graph exposes a Typer CLI named `oddsgraph`. Every command shares
 
 ```bash
 oddsgraph reduce
-oddsgraph infer --limit-events 10 -v
+oddsgraph -v infer --limit-events 10
 oddsgraph build
 oddsgraph validate
 oddsgraph closure   # optional
@@ -32,7 +32,7 @@ oddsgraph closure   # optional
 Or one shot:
 
 ```bash
-oddsgraph run --limit-events 10 -v
+oddsgraph -v run --limit-events 10
 ```
 
 `oddsgraph run` with `--event-id` / `--limit-events` reuses the same in-memory

@@ -384,6 +384,8 @@ def test_fragments_equal_considers_aliases(tmp_path: Path) -> None:
         ".",
         "..",
         "has space",
+        " event ",
+        "a__b",
         "O'Brien",
     ],
 )
@@ -399,6 +401,97 @@ def test_fragment_paths_reject_unsafe_event_ids(
         _chunk_manifest_path(settings, event_id)
     with pytest.raises(ValueError, match="Unsafe event_id"):
         _verified_fragment_path(settings, event_id)
+
+
+def test_load_all_fragments_ignores_stale_verified_without_manifest(
+    tmp_path: Path,
+) -> None:
+    from oddsgraph.infer import load_all_fragments
+
+    settings = _settings(tmp_path)
+    settings.resume = True
+    verified = GraphFragment(
+        nodes=[
+            Node(
+                local_id="team:stale",
+                type=NodeType.TEAM,
+                label="STALE VERIFIED",
+                aliases=[],
+                confidence=1.0,
+                evidence_market_ids=["m"],
+            )
+        ],
+        edges=[],
+    )
+    _verified_fragment_path(settings, "99").write_text(
+        verified.model_dump_json(), encoding="utf-8"
+    )
+    loaded = load_all_fragments(settings)
+    assert "99" not in loaded.fragments
+    assert "99" not in loaded.verified_event_ids
+
+
+def test_verify_failure_deletes_stale_verified_artifacts(tmp_path: Path) -> None:
+    from oddsgraph.infer import (
+        _save_verify_manifest,
+        load_all_fragments,
+        verify_deterministic_fragments,
+    )
+    from oddsgraph.topology import classify_events
+
+    settings = _settings(tmp_path)
+    settings.verify_deterministic = True
+    settings.deterministic_topology = True
+    eid = "99"
+    markets = [
+        SemanticMarket(
+            market_id="1",
+            event_id=eid,
+            event_title="Brazil vs. Morocco",
+            event_slug="fifwc-bra-mar-2026-06-13",
+            question="Will Brazil win?",
+            group_item_title="Brazil",
+            sports_market_type="moneyline",
+            outcomes=["Yes", "No"],
+        )
+    ]
+    classified = classify_events(markets, competition_label=settings.competition_label)
+    candidate = classified[eid].fragment
+    stale = GraphFragment(
+        nodes=[
+            Node(
+                local_id="team:brazil",
+                type=NodeType.TEAM,
+                label="STALE VERIFIED",
+                aliases=[],
+                confidence=1.0,
+                evidence_market_ids=["m"],
+            )
+        ],
+        edges=[],
+    )
+    _verified_fragment_path(settings, eid).write_text(
+        stale.model_dump_json(), encoding="utf-8"
+    )
+    _save_verify_manifest(settings, eid, candidate, "deterministic_verified")
+
+    class BoomLLM(BaseGraphLLM):
+        def _complete(
+            self, user_prompt: str, max_tokens: int, temperature: float
+        ) -> str:
+            raise RuntimeError("boom")
+
+    verified, status = verify_deterministic_fragments(
+        settings,
+        {eid: markets},
+        covered={eid},
+        llm=BoomLLM(settings),
+    )
+    assert status[eid] == "deterministic"
+    assert eid not in verified
+    assert not _verified_fragment_path(settings, eid).exists()
+    loaded = load_all_fragments(settings)
+    assert eid not in loaded.verified_event_ids
 
 
 def test_fragment_paths_stay_under_fragments_dir(tmp_path: Path) -> None:

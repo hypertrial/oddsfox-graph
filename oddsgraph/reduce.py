@@ -99,6 +99,8 @@ def select_event_ids(
         allowed = set(event_ids)
         selected = [event_id for event_id in selected if event_id in allowed]
     if limit_events is not None:
+        if limit_events < 0:
+            raise ValueError(f"limit_events must be >= 0, got {limit_events}")
         selected = selected[:limit_events]
     return selected
 
@@ -153,7 +155,7 @@ def reduce_semantic_markets(settings: Settings) -> Path:
     total = 0
     try:
         if table.num_rows == 0:
-            pq.write_table(pa.Table.from_pylist([]), output_path)
+            pq.write_table(_semantic_markets_arrow_schema().empty_table(), output_path)
         else:
             for start in range(0, table.num_rows, batch_size):
                 batch = table.slice(start, batch_size)

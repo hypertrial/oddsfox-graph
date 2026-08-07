@@ -313,3 +313,47 @@ def test_pipeline_cycle_preserves_fragment_implies(monkeypatch) -> None:
     assert len(rejected) == 1
     assert rejected[0].source_id == fragment_pair["b"]
     assert rejected[0].target_id == fragment_pair["a"]
+
+
+def test_pipeline_ignores_fragments_outside_selected_markets(tmp_path) -> None:
+    """Stale on-disk fragments for other events must not enter a scoped build."""
+    from oddsgraph.ontology import NodeType
+    from oddsgraph.pipeline import run_build_and_export
+    from oddsgraph.schema import GraphFragment, Node, SemanticMarket
+
+    markets = [
+        SemanticMarket(
+            market_id="20",
+            event_id="keep",
+            event_title="Brazil vs. Morocco",
+            event_slug="fifwc-bra-mar-2026-06-13",
+            question="Will Brazil win?",
+            group_item_title="Brazil",
+            sports_market_type="moneyline",
+            outcomes=["Yes", "No"],
+        )
+    ]
+    settings = Settings()
+    settings.configure_build_dir(tmp_path / "build")
+    settings.ensure_dirs()
+    settings.official_bracket = False
+    settings.compile_propositions = False
+    settings.apply_rules = False
+    stale = GraphFragment(
+        nodes=[
+            Node(
+                local_id="team:stale",
+                type=NodeType.TEAM,
+                label="STALE B",
+                confidence=1.0,
+                evidence_market_ids=["z"],
+            )
+        ],
+        edges=[],
+    )
+    (settings.fragments_dir / "other.json").write_text(
+        stale.model_dump_json(), encoding="utf-8"
+    )
+    result = run_build_and_export(settings, markets=markets)
+    labels = [n.label for n in result.graph.nodes]
+    assert "STALE B" not in labels

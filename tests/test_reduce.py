@@ -15,6 +15,7 @@ from oddsgraph.reduce import (
     list_semantic_market_event_ids,
     load_semantic_markets,
     reduce_semantic_markets,
+    select_event_ids,
 )
 
 
@@ -51,6 +52,59 @@ def _market_row(
 def test_quote_sql_literal_escapes_apostrophes() -> None:
     assert quote_sql_literal("O'Brien") == "O''Brien"
     assert quote_path(Path("/tmp/O'Brien/data.parquet")) == "/tmp/O''Brien/data.parquet"
+
+
+def test_select_event_ids_rejects_negative_limit() -> None:
+    with pytest.raises(ValueError, match="limit_events must be >= 0"):
+        select_event_ids(["a", "b", "c"], [], -1)
+
+
+def test_select_event_ids_zero_limit_returns_empty() -> None:
+    assert select_event_ids(["a", "b"], [], 0) == []
+
+
+def test_empty_reduce_writes_typed_schema(tmp_path: Path) -> None:
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    cols = [
+        "market_id",
+        "event_id",
+        "event_slug",
+        "event_title",
+        "event_description",
+        "question",
+        "description",
+        "market_slug",
+        "sports_market_type",
+        "group_item_title",
+        "outcomes",
+        "tags",
+        "event_tags",
+        "game_start_time",
+        "end_time",
+    ]
+    arrays = {
+        c: pa.array(
+            [],
+            type=pa.list_(pa.string())
+            if c in ("outcomes", "tags", "event_tags")
+            else pa.string(),
+        )
+        for c in cols
+    }
+    pq.write_table(
+        pa.table(arrays),
+        data_dir / "polymarket_wc2026_market_hourly_odds_empty.parquet",
+    )
+    settings = Settings()
+    settings.configure_repo_root(tmp_path)
+    settings.configure_data_dir(data_dir)
+    settings.configure_build_dir(tmp_path / "build")
+    out = reduce_semantic_markets(settings)
+    table = pq.read_table(out)
+    assert "event_id" in table.schema.names
+    assert table.num_rows == 0
+    assert list_semantic_market_event_ids(out) == []
 
 
 def test_list_and_load_handle_apostrophe_in_path(tmp_path: Path) -> None:

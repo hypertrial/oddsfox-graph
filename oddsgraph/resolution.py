@@ -181,6 +181,29 @@ def _more_specific_match_id(candidate: str, current: str) -> bool:
     return candidate != current and candidate.startswith(current + "-")
 
 
+def _match_bind_allowed(existing: CanonicalNode, node: Node) -> bool:
+    """Allow MATCH merges only for identical IDs or label-only↔dateful upgrades.
+
+    Two different dateful MATCH ids (same display label, different dates) must
+    remain distinct fixtures even when exact_slug/label would otherwise collide.
+    """
+    if node.type != NodeType.MATCH:
+        return True
+    existing_id = existing.canonical_id
+    candidate_id = (
+        node.local_id if node.local_id.startswith("match:") else existing_id
+    )
+    if not existing_id.startswith("match:") or not candidate_id.startswith("match:"):
+        return True
+    if existing_id == candidate_id:
+        return True
+    if _more_specific_match_id(candidate_id, existing_id):
+        return True
+    if _more_specific_match_id(existing_id, candidate_id):
+        return True
+    return False
+
+
 def _remap_fuzzy_canonical_id(
     fuzzy: _FuzzyIndex, node_type: NodeType, old_id: str, new_id: str
 ) -> None:
@@ -283,7 +306,14 @@ def _bind_existing(
     method: str,
     tier: str,
     indexes: _ResolutionIndexes,
-) -> None:
+) -> bool:
+    """Bind ``node`` onto ``existing`` when the merge is allowed.
+
+    Returns False when a MATCH dateful-id conflict blocks the bind so the
+    caller can fall through to registering a new canonical node.
+    """
+    if not _match_bind_allowed(existing, node):
+        return False
     # Official bracket arrives after topology; promote label-only MATCH ids to dateful.
     if (
         node.type == NodeType.MATCH
@@ -296,6 +326,7 @@ def _bind_existing(
     _merge_canonical(state, existing, node, method, indexes)
     state.local_to_canonical[node.local_id] = existing.canonical_id
     _register_tier(state, tier)
+    return True
 
 
 def _try_exact_id(
@@ -308,7 +339,7 @@ def _try_exact_id(
     if not polymarket_id:
         return False
     if polymarket_id in state.canonical_nodes:
-        _bind_existing(
+        return _bind_existing(
             state,
             state.canonical_nodes[polymarket_id],
             node,
@@ -316,7 +347,6 @@ def _try_exact_id(
             "exact_id",
             indexes,
         )
-        return True
     _register_canonical(
         state, polymarket_id, node, "exact_id", method, indexes
     )
@@ -333,8 +363,7 @@ def _try_exact_slug(
     existing = indexes.by_slug.get(slug_key)
     if existing is None:
         return False
-    _bind_existing(state, existing, node, "exact_slug", "exact_slug", indexes)
-    return True
+    return _bind_existing(state, existing, node, "exact_slug", "exact_slug", indexes)
 
 
 def _try_exact_label(
@@ -347,8 +376,7 @@ def _try_exact_label(
     existing = indexes.by_label.get(label_key)
     if existing is None:
         return False
-    _bind_existing(state, existing, node, "exact_label", "exact_label", indexes)
-    return True
+    return _bind_existing(state, existing, node, "exact_label", "exact_label", indexes)
 
 
 def _try_alias(
@@ -363,8 +391,9 @@ def _try_alias(
             node.type != NodeType.TEAM
             or _team_alias_compatible(alias, node.label, existing.label)
         ):
-            _bind_existing(state, existing, node, "alias", "alias", indexes)
-            return True
+            if _bind_existing(state, existing, node, "alias", "alias", indexes):
+                return True
+            continue
         if node.type != NodeType.TEAM:
             continue
         if not _team_code_maps_to_label(alias, node.label):
@@ -374,8 +403,8 @@ def _try_alias(
             existing = indexes.by_alias.get(code_key)
             if existing is None:
                 continue
-            _bind_existing(state, existing, node, "alias", "alias", indexes)
-            return True
+            if _bind_existing(state, existing, node, "alias", "alias", indexes):
+                return True
     return False
 
 
@@ -392,7 +421,7 @@ def _try_fuzzy(
     )
     if best_canonical_id is None:
         return False
-    _bind_existing(
+    return _bind_existing(
         state,
         state.canonical_nodes[best_canonical_id],
         node,
@@ -400,7 +429,6 @@ def _try_fuzzy(
         "fuzzy",
         indexes,
     )
-    return True
 
 
 def _register_new(

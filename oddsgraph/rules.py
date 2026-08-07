@@ -113,7 +113,12 @@ def stage_monotonicity(a: Proposition, b: Proposition) -> bool:
     b_stage = b.arguments.get("stage")
     if not a_stage or not b_stage or a_stage == b_stage:
         return False
-    return stage_rank_for_proposition(a_stage) > stage_rank_for_proposition(b_stage)
+    a_rank = stage_rank_for_proposition(a_stage)
+    b_rank = stage_rank_for_proposition(b_stage)
+    # Unknown stages use sentinel -1; do not invent ordering against them.
+    if a_rank < 0 or b_rank < 0:
+        return False
+    return a_rank > b_rank
 
 
 @rule("wc.champion_reaches_final", EdgeType.IMPLIES)

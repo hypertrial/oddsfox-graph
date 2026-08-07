@@ -15,6 +15,28 @@ flags and output schema as pre-1.0 and subject to change.
 
 ## [Unreleased]
 
+### Fixed
+
+- Match-result `EXACTLY_ONE` only emits when a draw market is present in the
+  partition (team-only moneylines no longer claim exclusivity).
+- Distinct dateful MATCH ids with the same display label no longer collapse
+  during entity resolution.
+- Scoped `run`/`build` market lists ignore on-disk fragments for other events.
+- Failed `--verify-deterministic` deletes stale `__verified.json` artifacts;
+  load requires a usable verify manifest.
+- Stage monotonicity rules skip unknown stage ranks (`-1`).
+- Empty `reduce` writes a typed zero-row semantic-markets parquet.
+- Invalid `--llm-backend` values error instead of silently selecting inprocess.
+- Explicit `--data-dir` (including the default path) is exclusive of repo-root
+  fallback.
+- Fragment edges with missing endpoints are rejected as `missing_endpoint`.
+- Negative `--limit-events` is rejected.
+- Event IDs reject surrounding whitespace and embedded `__` (artifact-suffix
+  collisions).
+- Fine-tune export removes stale `valid.jsonl` when no validation split is
+  written.
+- Docs place global `-v` before subcommands.
+
 ### Changed
 
 - Public export schema API (`NODE_SCHEMA`, `EDGE_SCHEMA`, `write_parquet`,

@@ -13,7 +13,7 @@ from typing import Any
 
 from oddsgraph.config import Settings
 from oddsgraph.llm import BaseGraphLLM, build_graph_llm
-from oddsgraph.paths import event_artifact_path, sanitize_event_id_for_path
+from oddsgraph.paths import event_artifact_path, is_part_fragment_name, sanitize_event_id_for_path
 from oddsgraph.prompts import (
     build_event_prompt,
     build_verification_prompt,
@@ -368,6 +368,11 @@ def verify_deterministic_fragments(
                     "Verification failed for deterministic event %s", task.event_id
                 )
                 status[task.event_id] = "deterministic"
+                # Drop stale verified artifacts so build cannot prefer them.
+                _verified_fragment_path(settings, task.event_id).unlink(
+                    missing_ok=True
+                )
+                _verify_manifest_path(settings, task.event_id).unlink(missing_ok=True)
                 continue
             verified[event_id] = fragment
             status[event_id] = event_status
@@ -548,23 +553,55 @@ def load_markets_for_infer(settings: Settings) -> list[SemanticMarket]:
     return load_semantic_markets(path, event_ids=target_event_ids)
 
 
+def _verified_manifest_usable(manifest_path: Path) -> bool:
+    """Return True when a verify manifest marks a successful verification."""
+    if not manifest_path.exists():
+        return False
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return False
+    return manifest.get("status") in {
+        "deterministic_verified",
+        "deterministic_corrected",
+    }
+
+
 def load_all_fragments(settings: Settings) -> FragmentLoadResult:
     fragments: dict[str, GraphFragment] = {}
     verified_event_ids: set[str] = set()
     for path in sorted(settings.fragments_dir.glob("*.json")):
         if path.name.startswith("_"):
             continue
-        if "__part" in path.name or "__chunk_manifest" in path.name:
+        if is_part_fragment_name(path.name) or path.name.endswith(
+            "__chunk_manifest.json"
+        ):
             continue
         if path.name.endswith("__verify_manifest.json"):
             continue
         if path.name.endswith("__verified.json"):
-            # Prefer verified topology fragments when present.
+            # Prefer verified topology fragments when present and usable.
             event_id = path.name[: -len("__verified.json")]
+            try:
+                sanitize_event_id_for_path(event_id)
+            except ValueError:
+                logger.warning("Skipping unsafe verified fragment name %s", path.name)
+                continue
+            if not _verified_manifest_usable(_verify_manifest_path(settings, event_id)):
+                logger.warning(
+                    "Ignoring stale verified fragment without usable manifest: %s",
+                    path.name,
+                )
+                continue
             fragments[event_id] = _load_fragment(path)
             verified_event_ids.add(event_id)
             continue
         event_id = path.stem
+        try:
+            sanitize_event_id_for_path(event_id)
+        except ValueError:
+            logger.warning("Skipping unsafe fragment name %s", path.name)
+            continue
         if event_id not in fragments:
             fragments[event_id] = _load_fragment(path)
     return FragmentLoadResult(
