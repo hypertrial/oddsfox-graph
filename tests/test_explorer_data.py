@@ -212,9 +212,6 @@ def test_canvas_elements_strip_evidence_payloads(tmp_path: Path) -> None:
         data = el["data"]
         assert "evidence_market_ids" not in data
         assert "evidence_text" not in data
-        if data.get("type") == "STAGE_HEADER":
-            assert data["evidence_count"] == 0
-            continue
         assert data["evidence_count"] >= 1
 
     row = get_node(settings, "match:brazil-vs-france")
@@ -253,7 +250,6 @@ def test_bracket_elements_returns_only_knockout_matches(tmp_path: Path) -> None:
 
     slice_ = bracket_elements(settings)
     match_nodes = [el for el in slice_.nodes if el["data"]["type"] == "MATCH"]
-    headers = [el for el in slice_.nodes if el["data"]["type"] == "STAGE_HEADER"]
     node_ids = {el["data"]["id"] for el in match_nodes}
     node_types = {el["data"]["type"] for el in match_nodes}
     edge_types = {el["data"]["edge_type"] for el in slice_.edges}
@@ -265,11 +261,10 @@ def test_bracket_elements_returns_only_knockout_matches(tmp_path: Path) -> None:
     assert len(slice_.edges) == 1
     assert slice_.edges[0]["data"]["source"] == "match:brazil-vs-france"
     assert slice_.edges[0]["data"]["target"] == "match:final"
-    assert {h["data"]["label"] for h in headers} == {"Round of 16", "Final / 3rd"}
-    assert all(h["selectable"] is False for h in headers)
+    assert all(el["data"]["type"] == "MATCH" for el in slice_.nodes)
 
 
-def test_bracket_elements_enrich_stage_labels_and_positions(tmp_path: Path) -> None:
+def test_bracket_elements_enrich_stage_labels(tmp_path: Path) -> None:
     settings = make_settings(tmp_path)
     _write_fixture_graph(settings.build_dir)
 
@@ -284,18 +279,8 @@ def test_bracket_elements_enrich_stage_labels_and_positions(tmp_path: Path) -> N
     assert final["data"]["stage_rank"] == 5
     assert r16["data"]["short_label"] == "Brazil\nFrance"
     assert final["data"]["short_label"] == "Brazil\nSpain"
-    assert "position" in r16 and "position" in final
-    assert r16["position"]["x"] < final["position"]["x"]
-    # Final sits near the vertical midpoint of its predecessor.
-    assert abs(final["position"]["y"] - r16["position"]["y"]) < 1e-6
-    r16_header = by_id["stage-header:1"]
-    final_header = by_id["stage-header:4"]
-    assert r16_header["data"]["label"] == "Round of 16"
-    assert final_header["data"]["label"] == "Final / 3rd"
-    assert r16_header["position"]["y"] < r16["position"]["y"]
-    assert r16_header["position"]["x"] == r16["position"]["x"]
-    assert final_header["position"]["x"] == final["position"]["x"]
-
+    assert "position" not in r16
+    assert "position" not in final
 
 def test_bracket_elements_is_acyclic(tmp_path: Path) -> None:
     settings = make_settings(tmp_path)
@@ -395,33 +380,22 @@ def test_bracket_elements_on_real_build_if_present() -> None:
         pytest.skip("build/nodes.parquet and build/edges.parquet not present")
     slice_ = bracket_elements(settings)
     matches = [n for n in slice_.nodes if n["data"]["type"] == "MATCH"]
-    headers = [n for n in slice_.nodes if n["data"]["type"] == "STAGE_HEADER"]
     assert len(matches) == 32
-    assert len(headers) == 5
     assert len(slice_.edges) == 32
-    assert {n["data"]["type"] for n in slice_.nodes} == {"MATCH", "STAGE_HEADER"}
+    assert {n["data"]["type"] for n in slice_.nodes} == {"MATCH"}
     assert {e["data"]["edge_type"] for e in slice_.edges} == {"ADVANCES_TO"}
     assert all(n["data"].get("stage") for n in matches)
     assert all(n["data"].get("short_label") for n in matches)
-    assert all("position" in n for n in slice_.nodes)
-    assert [h["data"]["label"] for h in headers] == [
-        "Round of 32",
-        "Round of 16",
-        "Quarterfinals",
-        "Semifinals",
-        "Final / 3rd",
-    ]
+    assert all("position" not in n for n in slice_.nodes)
 
-    xs = {n["data"]["stage"]: n["position"]["x"] for n in matches}
-    assert xs["Round of 32"] < xs["Round of 16"] < xs["Quarterfinals"]
-    assert xs["Semifinals"] < xs["Final"]
-    assert xs["Final"] == xs["Third Place"]
+    stages = {n["data"]["stage"] for n in matches}
+    assert "Round of 32" in stages
+    assert "Final" in stages
+    assert "Third Place" in stages
 
     finals = [n for n in matches if n["data"]["stage"] == "Final"]
     thirds = [n for n in matches if n["data"]["stage"] == "Third Place"]
     assert len(finals) == 1 and len(thirds) == 1
-    assert thirds[0]["position"]["y"] > finals[0]["position"]["y"]
-    assert headers[0]["position"]["y"] < min(n["position"]["y"] for n in matches)
     if settings.odds_history_path.exists():
         import pyarrow.parquet as pq
 

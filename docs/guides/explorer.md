@@ -1,11 +1,12 @@
 ---
-description: Launch the local Dash and Cytoscape explorer over OddsFox Graph nodes and edges parquet exports.
+description: Launch the local Dash knockout-tree explorer over OddsFox Graph nodes and edges parquet exports.
 ---
 
 # Explorer
 
-Launch a local, read-only Dash + Cytoscape explorer over exported graph
-artifacts.
+Launch a local, read-only Dash explorer over exported graph artifacts. The
+knockout stage is rendered as a mirrored tournament tree (website-style cards
+and SVG connectors) with a time-slider-driven odds animation.
 
 ## Install and start
 
@@ -32,21 +33,20 @@ Both are produced by `oddsgraph odds-history` and by `oddsgraph run`.
 
 ## Default view
 
-The **knockout bracket** is a classic left-to-right tournament on a dark
-sports-data canvas:
+The **knockout bracket** is a mirrored two-halves tree on a dark sports-data
+canvas (desktop ≥1400px). Narrower viewports use stacked rounds:
 
-- Exactly 32 `MATCH` cards connected by `ADVANCES_TO` edges
-- Round of 32 → Round of 16 → Quarterfinals → Semifinals → Final / Third Place
-- Each card shows **country flags**, team names, and **advance probabilities**
-- Non-interactive column headers label each stage across the canvas
+- Knockout `MATCH` cards connected by `ADVANCES_TO` edges (32 on a full
+  official build)
+- Round of 32 on both outer edges → Round of 16 → Quarterfinals → Semifinals →
+  centered Final / Third Place / predicted champion column
+- Each card shows **country flags**, team names, and **both teams’ advance
+  probabilities** (or `—` when unavailable)
+- Pill legend: Resolved / Pending / Diverged
 - A persistent **phase tracker** (Groups → Final weekend) highlights the
   schedule window for the selected hour, including intermissions
-- Deterministic `preset` layout (not a force-directed hairball)
-- Orthogonal taxi edges without arrowheads or repeated `ADVANCES_TO` labels
-- Click a match to open the inspector and highlight its path through the DAG
 - Floating **playback dock**: compact UTC time (`Jun 28 · 19:00 UTC`), phase
   badge, game-milestone slider, Play/Pause, Reset view, and live action status
-  (hide/reset feedback stays visible even when the inspector is closed)
 
 ### Projection rules
 
@@ -63,12 +63,10 @@ At the selected hour:
 4. Third Place projects the most likely semifinal loser from each branch; it
    uses direct matchup odds when available, otherwise shows an explicit
    unavailable probability (`—`) rather than inventing 50/50 odds.
-5. Dashed borders mark projected (not yet locked) matchups. Teal fill marks
-   matches resolved at the selected hour; numeric percentages remain the
-   primary odds signal for unfinished games.
+5. Dashed borders mark projected (not yet locked) matchups. Resolved cards use
+   green probability styling; pending cards use cyan; unavailable paths use gray.
 6. When a match is locked, cards show **100%** / **0%** for the winner and
-   loser with the same teal resolved styling. Final and Third Place use a
-   slightly thicker teal border once those results lock at full time.
+   loser.
 
 ### Progressive controls
 
@@ -77,9 +75,7 @@ At the selected hour:
   fixtures share a step), Reset view. Manual scrubbing snaps to the same
   game milestones.
 - **Filters & legend** drawer (closed by default): confidence / inference
-  filters, visual legend, projection help, and data-source metadata
-- Hover a card for a compact preview; the inspector opens on selection and
-  leads with match status / odds before graph metadata
+  filters, pill legend, projection help, and data-source metadata
 - Phase tracker stays visible on laptop and tablet widths; narrow viewports
   use abbreviated labels with full accessible names
 

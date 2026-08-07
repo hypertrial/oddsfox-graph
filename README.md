@@ -127,7 +127,7 @@ oddsgraph odds-history    # optional match + stage odds for explorer projection
 oddsgraph explore         # http://127.0.0.1:8050
 ```
 
-Default view is a left-to-right knockout bracket with flags, numeric advance
+Default view is a mirrored knockout tree (desktop) with flags, numeric advance
 probabilities, a floating playback dock, and a schedule-aware phase tracker
 (when `odds_history.parquet` and `stage_odds_history.parquet` are present).
 Compiled propositions still bridge covered markets into the exported graph via
@@ -147,7 +147,7 @@ Compiled propositions still bridge covered markets into the exported graph via
 - `rapidfuzz` — entity, alias, and few-shot exemplar matching
 - `rustworkx` — graph construction and validation
 - `typer` — CLI
-- `dash` / `dash-cytoscape` — optional local graph explorer (`--extra explore`)
+- `dash` — optional local knockout-tree explorer (`--extra explore`)
 - `pytest` — tests
 
 ## Testing

@@ -370,7 +370,7 @@ def test_all_schedule_teams_have_local_flags() -> None:
 
 
 def test_flag_svgs_declare_explicit_root_dimensions() -> None:
-    """Cytoscape SVG backgrounds need root width/height to scale with zoom."""
+    """Flag SVGs declare root width/height so browsers scale them reliably."""
     import re
     from pathlib import Path
 

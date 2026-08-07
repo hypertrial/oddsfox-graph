@@ -15,10 +15,7 @@ from oddsgraph.bracket_projection import home_prob_at_hour, split_match_teams
 from oddsgraph.config import Settings
 from oddsgraph.explorer import KNOCKOUT_STAGE_LABELS
 from oddsgraph.explorer.presentation import (
-    bracket_positions,
-    bracket_stage_headers,
     short_match_label,
-    stage_column,
     stage_rank,
 )
 from oddsgraph.export import EDGE_SCHEMA, NODE_SCHEMA, table_with_schema
@@ -27,7 +24,7 @@ from oddsgraph.reduce import quote_path
 
 @dataclass
 class GraphSlice:
-    """A set of Cytoscape-ready nodes and edges."""
+    """A set of bracket node/edge elements for the tree UI."""
 
     nodes: list[dict[str, Any]] = field(default_factory=list)
     edges: list[dict[str, Any]] = field(default_factory=list)
@@ -43,10 +40,10 @@ def _evidence_count(row: dict[str, Any]) -> int:
 
 
 def node_element(row: dict[str, Any], *, bracket: bool = False) -> dict[str, Any]:
-    """Convert a parquet node row into a Cytoscape element.
+    """Convert a parquet node row into a bracket element.
 
-    Canvas elements carry ``evidence_count`` only — full ``evidence_market_ids``
-    stay in parquet and are loaded by inspector ``get_node``.
+    Elements carry ``evidence_count`` only — full ``evidence_market_ids``
+    stay in parquet.
 
     When ``bracket`` is True, attach short card labels and stage metadata.
     """
@@ -73,10 +70,9 @@ def node_element(row: dict[str, Any], *, bracket: bool = False) -> dict[str, Any
 
 
 def edge_element(row: dict[str, Any]) -> dict[str, Any]:
-    """Convert a parquet edge row into a Cytoscape element.
+    """Convert a parquet edge row into a bracket edge element.
 
-    Canvas elements omit full ``evidence_market_ids`` / ``evidence_text``;
-    inspector ``get_edge`` returns the complete row.
+    Elements omit full ``evidence_market_ids`` / ``evidence_text``.
     """
     edge_id = f"{row['source_id']}|{row['edge_type']}|{row['target_id']}"
     return {
@@ -459,22 +455,7 @@ class ExplorerDataStore:
                 for n in nodes
             ]
             edge_els = [edge_element(e) for e in edges]
-            positions = bracket_positions(node_els, edge_els)
-            positioned: list[dict[str, Any]] = []
-            occupied_columns: set[int] = set()
-            for el in node_els:
-                node_id = el["data"]["id"]
-                pos = positions.get(node_id)
-                if pos is not None:
-                    positioned.append({**el, "position": pos})
-                else:
-                    positioned.append(el)
-                occupied_columns.add(
-                    stage_column(str(el["data"].get("stage") or ""))
-                )
-
-            headers = bracket_stage_headers(columns=occupied_columns)
-            slice_ = GraphSlice(nodes=[*headers, *positioned], edges=edge_els)
+            slice_ = GraphSlice(nodes=node_els, edges=edge_els)
             self._bracket_cache = slice_
             return slice_
 
@@ -640,12 +621,11 @@ def clear_stores() -> None:
 
 
 def bracket_elements(settings: Settings) -> GraphSlice:
-    """Return the knockout MATCH DAG plus column stage headers.
+    """Return the knockout MATCH DAG for the mirrored tree UI.
 
     Each MATCH node is enriched with ``stage``, ``stage_rank``, ``short_label``,
-    a deterministic left-to-right ``position``, and optional hourly
-    ``odds_series`` / ``current_home_prob`` when ``odds_history.parquet`` exists.
-    Non-interactive ``STAGE_HEADER`` nodes label occupied columns.
+    and optional hourly ``odds_series`` / ``current_home_prob`` when
+    ``odds_history.parquet`` exists.
     """
     return get_store(settings).bracket_elements()
 

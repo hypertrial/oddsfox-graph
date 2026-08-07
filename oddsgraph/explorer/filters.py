@@ -6,7 +6,6 @@ from typing import Any
 
 from oddsgraph.explorer.presentation import (
     is_edge,
-    is_stage_header,
     merge_class_sets,
     split_classes,
 )
@@ -31,9 +30,6 @@ def apply_filters(
 
     An empty ``visible_types`` list hides all nodes (and therefore all edges).
     ``None`` is treated the same as an empty list.
-
-    Preserves non-hidden interaction classes (``path-active``, ``path-muted``)
-    across filter passes.
     """
     visible = set(visible_types or [])
     method = (inference_method or "").strip()
@@ -46,11 +42,6 @@ def apply_filters(
         confidence = float(data.get("confidence") or 0.0)
         el_method = str(data.get("inference_method") or "")
         hide = False
-
-        if is_stage_header(el):
-            # Column labels stay visible regardless of MATCH-only type filters.
-            filtered.append({**el, "classes": merge_class_sets(semantic, preserved)})
-            continue
 
         if confidence < min_confidence:
             hide = True
@@ -88,20 +79,4 @@ def apply_filters(
         if source not in visible_node_ids or target not in visible_node_ids:
             preserved.add("hidden")
         result.append({**el, "classes": merge_class_sets(semantic, preserved)})
-    return result
-
-
-def clear_interaction_classes(
-    elements: list[dict[str, Any]],
-    *,
-    keep_hidden: bool = True,
-) -> list[dict[str, Any]]:
-    """Strip path interaction classes; optionally keep ``hidden``."""
-    result: list[dict[str, Any]] = []
-    for el in elements:
-        semantic, preserved = split_classes(el.get("classes"))
-        keep: set[str] = set()
-        if keep_hidden and "hidden" in preserved:
-            keep.add("hidden")
-        result.append({**el, "classes": merge_class_sets(semantic, keep)})
     return result

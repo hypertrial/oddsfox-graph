@@ -12,7 +12,6 @@ from oddsgraph.schema import CanonicalEdge, CanonicalNode, InferenceReport
 from tests.helpers import make_settings
 
 dash = pytest.importorskip("dash")
-pytest.importorskip("dash_cytoscape")
 
 
 def _write_minimal_build(build_dir: Path) -> None:
@@ -106,7 +105,7 @@ def _write_minimal_build(build_dir: Path) -> None:
 
 def test_build_app_registers_layout_assets_and_callbacks(tmp_path: Path) -> None:
     from oddsgraph.explorer.app import ASSETS_DIR, TIME_PLAY_MS_PER_STEP, build_app
-    from oddsgraph.explorer.presentation import bracket_stylesheet
+    from oddsgraph.explorer.tree_render import build_connector_paths
 
     settings = make_settings(tmp_path)
     _write_minimal_build(settings.build_dir)
@@ -127,31 +126,28 @@ def test_build_app_registers_layout_assets_and_callbacks(tmp_path: Path) -> None
         "time-play-button",
         "time-play-interval",
         "time-play-state",
-        "graph-cyto",
-        "inspector-panel",
+        "bracket-canvas",
         "reset-button",
-        "hover-card",
         "toggle-controls",
-        "toggle-inspector",
         "confidence-filter",
-        "remove-button",
         "stage-tracker",
         "phase-badge",
         "bracket-summary",
         "controls-panel",
         "phase-key",
         "close-controls",
-        "close-inspector",
     ):
         assert component_id in rendered
 
     assert "controls-open" in rendered
     assert "Filters & legend" in rendered
-    assert "Hide match" in rendered
+    assert "graph-cyto" not in rendered
+    assert "inspector-panel" not in rendered
+    assert "toggle-inspector" not in rendered
+    assert "Hide match" not in rendered
+    assert "hover-card" not in rendered
     assert "action-status" in rendered
-    assert "Teal tint = match resolved" in rendered
     assert "lock to 100% / 0%" in rendered
-    assert "shows Champion" not in rendered
     assert (ASSETS_DIR / "oddsfox-favicon.png").exists()
     assert (ASSETS_DIR / "inter-latin-variable.woff2").exists()
     assert (ASSETS_DIR / "jetbrains-mono-latin-variable.woff2").exists()
@@ -189,17 +185,16 @@ def test_build_app_registers_layout_assets_and_callbacks(tmp_path: Path) -> None
         "type-filter",
         "skip-view-reload",
         "expand-button",
+        "remove-button",
+        "graph-cyto",
     ):
         assert removed_id not in rendered
 
     # Utility drawer defaults closed (no is-open on controls panel class).
     assert "explorer-controls is-open" not in rendered
 
-    styles = bracket_stylesheet()
-    assert any(rule["selector"] == "edge" for rule in styles)
-    edge = next(rule for rule in styles if rule["selector"] == "edge")
-    assert edge["style"]["curve-style"] == "taxi"
-    assert any(rule["selector"] == "node[?resolved]" for rule in styles)
-    assert not any(rule["selector"] == "node[current_home_prob]" for rule in styles)
+    paths = build_connector_paths(4, "ltr")
+    assert len(paths) == 2
+    assert paths[0].startswith("M 0")
 
-    assert len(app.callback_map) >= 7
+    assert len(app.callback_map) >= 5

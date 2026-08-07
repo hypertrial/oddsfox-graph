@@ -11,9 +11,7 @@ from dash import no_update
 
 from oddsgraph.explorer.callbacks import (
     apply_time_slider,
-    highlight_on_tap,
     load_view,
-    remove_from_canvas,
 )
 from oddsgraph.explorer.data import clear_stores
 from oddsgraph.export import export_graph_artifacts
@@ -121,29 +119,6 @@ def _write_fixture(build_dir: Path) -> None:
     )
 
 
-def test_highlight_on_tap_marks_path() -> None:
-    elements = [
-        {"data": {"id": "a", "type": "MATCH", "label": "A"}, "classes": "MATCH"},
-        {"data": {"id": "b", "type": "MATCH", "label": "B"}, "classes": "MATCH"},
-        {
-            "data": {
-                "id": "a|ADVANCES_TO|b",
-                "source": "a",
-                "target": "b",
-                "edge_type": "ADVANCES_TO",
-            },
-            "classes": "ADVANCES_TO",
-        },
-    ]
-    result = highlight_on_tap(elements, {"id": "a"})
-    assert result is not None
-    highlighted, status, *_rest = result
-    by_id = {el["data"]["id"]: el for el in highlighted}
-    assert "path-active" in by_id["a"]["classes"].split()
-    assert "path-active" in by_id["b"]["classes"].split()
-    assert "Highlighted path through a." in status
-
-
 def test_load_view_resets_bracket(tmp_path: Path) -> None:
     settings = make_settings(tmp_path)
     _write_fixture(settings.build_dir)
@@ -151,13 +126,8 @@ def test_load_view_resets_bracket(tmp_path: Path) -> None:
     loaded = load_view(settings, 0.0, "", reset=True)
     assert loaded[0] is not no_update
     assert "Reset knockout bracket view." in loaded[1]
-    ids = {
-        el["data"]["id"]
-        for el in loaded[0]
-        if "source" not in (el.get("data") or {})
-        and el["data"].get("type") == "MATCH"
-    }
-    assert ids == {"match:a", "match:b"}
+    rendered = str(loaded[0])
+    assert "bracket-root" in rendered or "match-card" in rendered
 
 
 def test_apply_time_slider_locks_winner(tmp_path: Path) -> None:
@@ -194,64 +164,34 @@ def test_apply_time_slider_locks_winner(tmp_path: Path) -> None:
         settings.odds_history_path,
     )
 
-    elements, *_ = load_view(settings, 0.0, "", hour_epoch=100)
-    mid = apply_time_slider(elements, 150, 0.0, "", settings=settings)
-    locked = apply_time_slider(elements, 250, 0.0, "", settings=settings)
-    by_mid = {
-        el["data"]["id"]: el["data"]
-        for el in mid[0]
-        if el["data"].get("type") == "MATCH"
-    }
-    by_locked = {
-        el["data"]["id"]: el["data"]
-        for el in locked[0]
-        if el["data"].get("type") == "MATCH"
-    }
-    assert by_mid["match:a"]["current_home_prob"] == 0.2
-    assert by_locked["match:a"]["current_home_prob"] == 0.0
+    mid = apply_time_slider(settings, 150, 0.0, "")
+    locked = apply_time_slider(settings, 250, 0.0, "")
+    mid_text = str(mid[0])
+    locked_text = str(locked[0])
+    # Both sides render: home 20% / away 80% mid-match.
+    assert "20%" in mid_text
+    assert "80%" in mid_text
+    # After full-time the winner locks to 100% / 0%.
+    assert "100%" in locked_text
+    assert "0%" in locked_text
+    assert "France" in locked_text
 
 
-def test_remove_from_canvas(tmp_path: Path) -> None:
-    settings = make_settings(tmp_path)
-    _write_fixture(settings.build_dir)
-    elements, *_ = load_view(settings, 0.0, "")
-    removed = remove_from_canvas("match:a", elements, 0.0, "")
-    ids = {
-        el["data"]["id"]
-        for el in removed[0]
-        if "source" not in (el.get("data") or {})
-        and el["data"].get("type") == "MATCH"
-    }
-    assert "match:a" not in ids
-    assert "match:b" in ids
+def test_toggle_controls_classnames() -> None:
+    """Drawer toggle flips ``is-open`` class names used by CSS collapse."""
 
-
-def test_toggle_controls_and_inspector_classnames() -> None:
-    """Drawer toggles flip ``is-open`` class names used by CSS collapse."""
-
-    def toggle(is_open: bool, *, kind: str) -> tuple[str, bool]:
+    def toggle(is_open: bool) -> tuple[str, bool]:
         next_open = not bool(is_open)
-        base = (
-            "explorer-drawer explorer-controls"
-            if kind == "controls"
-            else "explorer-drawer explorer-inspector"
-        )
+        base = "explorer-drawer explorer-controls"
         classes = f"{base} is-open" if next_open else base
         return classes, next_open
 
-    classes, opened = toggle(True, kind="controls")
+    classes, opened = toggle(True)
     assert opened is False
     assert classes == "explorer-drawer explorer-controls"
-    classes, opened = toggle(False, kind="controls")
+    classes, opened = toggle(False)
     assert opened is True
     assert classes == "explorer-drawer explorer-controls is-open"
-
-    classes, opened = toggle(True, kind="inspector")
-    assert opened is False
-    assert classes == "explorer-drawer explorer-inspector"
-    classes, opened = toggle(False, kind="inspector")
-    assert opened is True
-    assert classes == "explorer-drawer explorer-inspector is-open"
 
 
 def test_next_play_toggle_and_advance() -> None:

@@ -63,16 +63,6 @@ def _is_edge(el: dict[str, Any]) -> bool:
     return "source" in data and "target" in data
 
 
-def _is_stage_header(el: dict[str, Any]) -> bool:
-    if _is_edge(el):
-        return False
-    classes = str(el.get("classes") or "").split()
-    if "stage-header" in classes:
-        return True
-    data = el.get("data") or {}
-    return str(data.get("type") or "") == "STAGE_HEADER"
-
-
 def home_prob_at_hour(
     data: dict[str, Any],
     hour_epoch: int | None,
@@ -473,7 +463,7 @@ def format_prob_label(prob: float | None) -> str:
     return f"{round(prob * 100):d}%"
 
 
-# Visual team-name budget inside Cytoscape cards (probability column is fixed).
+# Visual team-name budget for short_label probability column.
 _CARD_TEAM_NAME_WIDTH = 14
 _FIGURE_SPACE = "\u2007"
 _NBSP = "\u00a0"
@@ -515,8 +505,8 @@ def card_short_label(
 
     Resolved Final / Third Place (and other knockout) winners keep numeric
     ``100%`` / ``0%`` on the card. Champion / 3rd meaning is carried by
-    ``is_champion`` / ``is_third_place_winner`` (inspector copy and thicker
-    teal border). ``winner`` / ``stage`` remain for call-site compatibility.
+    ``is_champion`` / ``is_third_place_winner``. ``winner`` / ``stage`` remain
+    for call-site compatibility.
     """
     del winner, stage
     home_mark = format_prob_label(home_prob)
@@ -556,8 +546,6 @@ def apply_bracket_projection(
             target = data.get("target")
             if source and target:
                 predecessors.setdefault(str(target), []).append(str(source))
-            continue
-        if _is_stage_header(el):
             continue
         data = el.get("data") or {}
         eid = data.get("id")

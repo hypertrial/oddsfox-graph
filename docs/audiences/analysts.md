@@ -52,10 +52,10 @@ dataset.
 
 ## Knockout bracket explorer
 
-The explorer is a left-to-right knockout bracket (32 `MATCH` cards, stage
-column headers, `ADVANCES_TO` edges, path highlight on click) with projected
-future matchups and advance probabilities when `build/odds_history.parquet`
-and `build/stage_odds_history.parquet` are present.
+The explorer is a mirrored knockout tree (32 `MATCH` cards converging on a
+centered Final / Third Place column, with a stacked-rounds fallback on narrow
+viewports) with projected future matchups and advance probabilities when
+`build/odds_history.parquet` and `build/stage_odds_history.parquet` are present.
 
 Compiled market outcomes still bridge into the exported graph via `REFERS_TO`
 (and related logical edges) when the proposition compiler covers the market

@@ -6,19 +6,14 @@ from pathlib import Path
 from typing import Any
 
 from dash import Dash, dcc, html
-import dash_cytoscape as cyto
 
 from oddsgraph.config import Settings
+from oddsgraph.explorer.canvas_actions import load_view
 from oddsgraph.explorer.data import (
-    bracket_elements,
     graph_counts,
     odds_time_bounds,
-    stage_odds_by_team,
 )
 from oddsgraph.explorer.presentation import (
-    apply_time_slice,
-    bracket_layout,
-    bracket_stylesheet,
     bracket_summary_text,
     phase_at_hour,
     time_slider_marks,
@@ -50,7 +45,6 @@ def build_app(settings: Settings) -> Dash:
     """Build the Dash explorer app bound to ``settings`` build artifacts."""
     from oddsgraph.explorer.callbacks import register_callbacks
 
-    initial = bracket_elements(settings)
     counts = graph_counts(settings)
     min_hour, max_hour = odds_time_bounds(settings)
     if min_hour is None or max_hour is None:
@@ -63,10 +57,11 @@ def build_app(settings: Settings) -> Dash:
         slider_value = min_hour
         marks = time_slider_marks(min_hour, max_hour)
 
-    initial_elements = apply_time_slice(
-        initial.to_elements(),
-        None if slider_disabled else slider_value,
-        stage_odds=stage_odds_by_team(settings),
+    initial_children, _status = load_view(
+        settings,
+        0.0,
+        "",
+        hour_epoch=None if slider_disabled else slider_value,
     )
     initial_phase = phase_at_hour(None if slider_disabled else slider_value)
     counts_full = _counts_summary(counts)
@@ -128,17 +123,6 @@ def build_app(settings: Settings) -> Dash:
                                     "aria-controls": "controls-panel",
                                 },
                             ),
-                            html.Button(
-                                "Inspector",
-                                id="toggle-inspector",
-                                n_clicks=0,
-                                className="btn btn-ghost",
-                                type="button",
-                                **{
-                                    "aria-expanded": "false",
-                                    "aria-controls": "inspector-rail",
-                                },
-                            ),
                         ],
                     ),
                 ],
@@ -190,8 +174,6 @@ def build_app(settings: Settings) -> Dash:
                                         step=0.05,
                                         value=0,
                                         marks={0: "0", 0.5: "0.5", 1: "1"},
-                                        # Dash 4 defaults allow_direct_input=True, which
-                                        # renders white number fields beside the track.
                                         allow_direct_input=False,
                                         tooltip=False,
                                     ),
@@ -240,31 +222,37 @@ def build_app(settings: Settings) -> Dash:
                                 children=[
                                     html.H3("Legend", className="drawer-section-title"),
                                     html.Ul(
-                                        className="legend-list",
+                                        className="drawer-legend-pills",
                                         children=[
                                             html.Li(
-                                                [
-                                                    html.Span(className="legend-swatch is-projected"),
-                                                    "Projected matchup",
-                                                ]
+                                                className="legend-pill is-correct",
+                                                children=[
+                                                    html.Span(
+                                                        className="legend-dot",
+                                                        **{"aria-hidden": "true"},
+                                                    ),
+                                                    "Resolved",
+                                                ],
                                             ),
                                             html.Li(
-                                                [
-                                                    html.Span(className="legend-swatch is-resolved"),
-                                                    "Resolved match",
-                                                ]
+                                                className="legend-pill is-pending",
+                                                children=[
+                                                    html.Span(
+                                                        className="legend-dot",
+                                                        **{"aria-hidden": "true"},
+                                                    ),
+                                                    "Pending",
+                                                ],
                                             ),
                                             html.Li(
-                                                [
-                                                    html.Span(className="legend-swatch is-path"),
-                                                    "Selected path",
-                                                ]
-                                            ),
-                                            html.Li(
-                                                [
-                                                    html.Span(className="legend-swatch is-unavailable"),
-                                                    "Odds unavailable (—)",
-                                                ]
+                                                className="legend-pill is-diverged",
+                                                children=[
+                                                    html.Span(
+                                                        className="legend-dot",
+                                                        **{"aria-hidden": "true"},
+                                                    ),
+                                                    "Diverged",
+                                                ],
                                             ),
                                         ],
                                     ),
@@ -288,8 +276,7 @@ def build_app(settings: Settings) -> Dash:
                                                 "(simultaneous fixtures share a step). "
                                                 "Each card shows projected participants and the probability "
                                                 "each advances from that round (normalized from stage markets). "
-                                                "Teal tint = match resolved; dashed borders mark projected "
-                                                "future matchups. Resolved games lock to 100% / 0%, including "
+                                                "Resolved games lock to 100% / 0%, including "
                                                 "Final and Third Place once those results lock at full time.",
                                                 className="panel-hint",
                                             ),
@@ -318,29 +305,13 @@ def build_app(settings: Settings) -> Dash:
                                 id="bracket-summary",
                                 className="visually-hidden",
                                 children=bracket_summary_text(
-                                    initial_elements,
+                                    None,
                                     None if slider_disabled else slider_value,
                                 ),
                             ),
-                            cyto.Cytoscape(
-                                id="graph-cyto",
-                                elements=initial_elements,
-                                stylesheet=bracket_stylesheet(),
-                                layout=bracket_layout(),
-                                style={"width": "100%", "height": "100%"},
-                                minZoom=0.2,
-                                maxZoom=2.5,
-                                zoom=1,
-                                boxSelectionEnabled=True,
-                                responsive=True,
-                                userZoomingEnabled=True,
-                                userPanningEnabled=True,
-                            ),
                             html.Div(
-                                id="hover-card",
-                                className="hover-card",
-                                style={"display": "none"},
-                                children=[],
+                                id="bracket-canvas",
+                                children=initial_children,
                             ),
                             html.Div(
                                 className="playback-dock",
@@ -389,7 +360,7 @@ def build_app(settings: Settings) -> Dash:
                                                 n_clicks=0,
                                                 className="btn btn-secondary",
                                                 type="button",
-                                                title="Restore the full knockout bracket camera and matches",
+                                                title="Restore the full knockout bracket",
                                             ),
                                         ],
                                     ),
@@ -409,8 +380,6 @@ def build_app(settings: Settings) -> Dash:
                                                 value=slider_value,
                                                 marks=marks,
                                                 disabled=slider_disabled,
-                                                # Hide Dash 4's default white epoch
-                                                # number inputs; time is shown above.
                                                 allow_direct_input=False,
                                                 tooltip=False,
                                             ),
@@ -435,56 +404,9 @@ def build_app(settings: Settings) -> Dash:
                             ),
                         ],
                     ),
-                    html.Aside(
-                        id="inspector-rail",
-                        className="explorer-drawer explorer-inspector",
-                        children=[
-                            html.Div(
-                                className="drawer-header",
-                                children=[
-                                    html.H2("Inspector", className="drawer-title"),
-                                    html.Button(
-                                        "Close",
-                                        id="close-inspector",
-                                        n_clicks=0,
-                                        className="btn btn-ghost btn-icon",
-                                        type="button",
-                                    ),
-                                ],
-                            ),
-                            html.Div(
-                                id="inspector-panel",
-                                children=html.P(
-                                    "Click a match to inspect features and "
-                                    "highlight its path to the Final.",
-                                    className="panel-hint",
-                                ),
-                            ),
-                            html.Div(
-                                className="action-row",
-                                children=[
-                                    html.Button(
-                                        "Hide match",
-                                        id="remove-button",
-                                        n_clicks=0,
-                                        disabled=True,
-                                        type="button",
-                                        title="Hide this match from the canvas. Reset view restores it.",
-                                    ),
-                                ],
-                            ),
-                            html.P(
-                                "Hidden matches return when you reset the view.",
-                                className="panel-hint",
-                            ),
-                        ],
-                    ),
                 ],
             ),
-            dcc.Store(id="selected-node-id", data=None),
-            dcc.Store(id="selected-edge-id", data=None),
             dcc.Store(id="controls-open", data=False),
-            dcc.Store(id="inspector-open", data=False),
             dcc.Store(id="time-play-state", data=False),
             dcc.Store(id="phase-key", data=initial_phase.key),
             dcc.Interval(

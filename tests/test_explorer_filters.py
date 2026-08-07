@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from oddsgraph.explorer.filters import apply_filters, clear_interaction_classes
+from oddsgraph.explorer.filters import apply_filters
 
 
 def _node(node_id: str, node_type: str, confidence: float = 1.0, method: str = "deterministic") -> dict:
@@ -69,73 +69,3 @@ def test_apply_filters_confidence_and_inference_method() -> None:
     by_id = {el["data"]["id"]: el for el in filtered}
     assert "hidden" in by_id["team:a"]["classes"].split()
     assert "hidden" in by_id["team:b"]["classes"].split()
-
-
-def test_filters_preserve_path_classes() -> None:
-    elements = [
-        {
-            "data": {
-                "id": "match:1",
-                "type": "MATCH",
-                "label": "A vs. B",
-                "confidence": 1.0,
-                "inference_method": "deterministic",
-            },
-            "classes": "MATCH path-active",
-        },
-        {
-            "data": {
-                "id": "match:2",
-                "type": "MATCH",
-                "label": "C vs. D",
-                "confidence": 1.0,
-                "inference_method": "deterministic",
-            },
-            "classes": "MATCH path-muted",
-        },
-        _edge("match:1", "match:2", "ADVANCES_TO"),
-    ]
-    elements[2]["classes"] = "ADVANCES_TO path-active"
-    filtered = apply_filters(elements, ["MATCH"], min_confidence=0.0, inference_method="")
-    by_id = {el["data"]["id"]: el for el in filtered}
-    assert "path-active" in by_id["match:1"]["classes"].split()
-    assert "path-muted" in by_id["match:2"]["classes"].split()
-    assert "path-active" in by_id["match:1|ADVANCES_TO|match:2"]["classes"].split()
-    assert "hidden" not in by_id["match:1"]["classes"].split()
-
-
-def test_apply_filters_keeps_stage_headers_visible() -> None:
-    from oddsgraph.explorer.presentation import bracket_stage_headers
-
-    elements = [
-        _node("match:1", "MATCH"),
-        *bracket_stage_headers(columns={0}),
-    ]
-    filtered = apply_filters(elements, ["MATCH"], min_confidence=0.0, inference_method="")
-    by_id = {el["data"]["id"]: el for el in filtered}
-    assert "hidden" not in by_id["match:1"]["classes"].split()
-    assert "hidden" not in by_id["stage-header:0"]["classes"].split()
-
-    filtered_empty = apply_filters(
-        elements, [], min_confidence=0.0, inference_method=""
-    )
-    by_id = {el["data"]["id"]: el for el in filtered_empty}
-    assert "hidden" in by_id["match:1"]["classes"].split()
-    assert "hidden" not in by_id["stage-header:0"]["classes"].split()
-
-
-def test_clear_interaction_classes_keeps_hidden() -> None:
-    elements = [
-        {
-            "data": {"id": "match:1", "type": "MATCH"},
-            "classes": "MATCH path-active hidden",
-        },
-        {
-            "data": {"id": "match:2", "type": "MATCH"},
-            "classes": "MATCH path-muted",
-        },
-    ]
-    cleared = clear_interaction_classes(elements, keep_hidden=True)
-    by_id = {el["data"]["id"]: el for el in cleared}
-    assert by_id["match:1"]["classes"].split() == ["MATCH", "hidden"]
-    assert by_id["match:2"]["classes"].split() == ["MATCH"]

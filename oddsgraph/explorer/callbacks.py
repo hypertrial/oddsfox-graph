@@ -6,7 +6,7 @@ import bisect
 from collections.abc import Sequence
 from typing import Any
 
-from dash import Dash, Input, Output, State, callback_context, html, no_update
+from dash import Dash, Input, Output, State, callback_context, no_update
 from dash.exceptions import PreventUpdate
 
 from oddsgraph.bracket import schedule_playback_milestones
@@ -16,12 +16,8 @@ from oddsgraph.explorer.canvas_actions import (
     _canvas_callback_outputs,
     apply_time_slider,
     filter_canvas,
-    highlight_on_tap,
     load_view,
-    remove_from_canvas,
 )
-from oddsgraph.explorer.data import get_edge, get_node
-from oddsgraph.explorer.inspector import _hover_card_children, _inspector_sheet
 from oddsgraph.explorer.presentation import (
     bracket_summary_text,
     phase_at_hour,
@@ -35,13 +31,11 @@ from oddsgraph.explorer.shell import (
 # Re-export public canvas helpers so existing test imports keep working.
 __all__ = [
     "apply_time_slider",
-    "highlight_on_tap",
     "load_view",
     "next_play_advance",
     "next_play_toggle",
     "phase_view_update",
     "register_callbacks",
-    "remove_from_canvas",
 ]
 
 
@@ -107,9 +101,6 @@ def phase_view_update(
     """Build time/phase UI updates; skip tracker rebuild when phase is unchanged.
 
     Returns ``(time_children, phase_badge, tracker_or_no_update, phase_key, summary)``.
-
-    Summary is phase + selected time only (no canvas match counts). Counts would
-    race the scrub callback, which also writes ``graph-cyto.elements``.
     """
     phase = phase_at_hour(hour_epoch)
     time_children = playback_time_children(hour_epoch)
@@ -132,15 +123,11 @@ def register_callbacks(app: Dash, settings: Settings) -> None:
         Output("controls-panel", "className"),
         Output("controls-open", "data"),
         Output("toggle-controls", "aria-expanded"),
-        Output("inspector-rail", "className", allow_duplicate=True),
-        Output("inspector-open", "data", allow_duplicate=True),
-        Output("toggle-inspector", "aria-expanded", allow_duplicate=True),
         Output("explorer-root", "className"),
         Input("toggle-controls", "n_clicks"),
         Input("close-controls", "n_clicks"),
         Input("drawer-scrim", "n_clicks"),
         State("controls-open", "data"),
-        State("inspector-open", "data"),
         prevent_initial_call=True,
     )
     def toggle_controls(
@@ -148,96 +135,22 @@ def register_callbacks(app: Dash, settings: Settings) -> None:
         close_clicks: int | None,
         scrim_clicks: int | None,
         is_open: bool | None,
-        inspector_open: bool | None,
-    ) -> tuple[str, bool, str, Any, Any, Any, str]:
+    ) -> tuple[str, bool, str, str]:
         del toggle_clicks, close_clicks, scrim_clicks
         if not callback_context.triggered:
             raise PreventUpdate
         triggered = callback_context.triggered[0]["prop_id"]
-        if triggered.startswith("drawer-scrim"):
-            return (
-                "explorer-drawer explorer-controls",
-                False,
-                "false",
-                "explorer-drawer explorer-inspector",
-                False,
-                "false",
-                "explorer-root",
-            )
-        if triggered.startswith("close-controls"):
+        if triggered.startswith("drawer-scrim") or triggered.startswith("close-controls"):
             next_open = False
         else:
             next_open = not bool(is_open)
-        root = (
-            "explorer-root has-drawer-open"
-            if (next_open or inspector_open)
-            else "explorer-root"
-        )
+        root = "explorer-root has-drawer-open" if next_open else "explorer-root"
         return (
             _drawer_classes("explorer-drawer explorer-controls", next_open),
             next_open,
             "true" if next_open else "false",
-            no_update,
-            no_update,
-            no_update,
             root,
         )
-
-    @app.callback(
-        Output("inspector-rail", "className"),
-        Output("inspector-open", "data"),
-        Output("toggle-inspector", "aria-expanded"),
-        Output("explorer-root", "className", allow_duplicate=True),
-        Input("toggle-inspector", "n_clicks"),
-        Input("close-inspector", "n_clicks"),
-        State("inspector-open", "data"),
-        State("controls-open", "data"),
-        prevent_initial_call=True,
-    )
-    def toggle_inspector(
-        toggle_clicks: int | None,
-        close_clicks: int | None,
-        is_open: bool | None,
-        controls_open: bool | None,
-    ) -> tuple[str, bool, str, str]:
-        del toggle_clicks, close_clicks
-        if not callback_context.triggered:
-            raise PreventUpdate
-        triggered = callback_context.triggered[0]["prop_id"]
-        if triggered.startswith("close-inspector"):
-            next_open = False
-        else:
-            next_open = not bool(is_open)
-        root = (
-            "explorer-root has-drawer-open"
-            if (next_open or controls_open)
-            else "explorer-root"
-        )
-        return (
-            _drawer_classes("explorer-drawer explorer-inspector", next_open),
-            next_open,
-            "true" if next_open else "false",
-            root,
-        )
-
-    @app.callback(
-        Output("hover-card", "children"),
-        Output("hover-card", "style"),
-        Input("graph-cyto", "mouseoverNodeData"),
-        Input("graph-cyto", "mouseoutNodeData"),
-        prevent_initial_call=True,
-    )
-    def update_hover(
-        mouseover: dict[str, Any] | None,
-        mouseout: dict[str, Any] | None,
-    ) -> tuple[Any, dict[str, str]]:
-        del mouseout
-        if not callback_context.triggered:
-            raise PreventUpdate
-        triggered = callback_context.triggered[0]["prop_id"]
-        if triggered.startswith("graph-cyto.mouseoutNodeData"):
-            return [], {"display": "none"}
-        return _hover_card_children(mouseover)
 
     @app.callback(
         Output("time-slider-label", "children"),
@@ -383,167 +296,40 @@ def register_callbacks(app: Dash, settings: Settings) -> None:
         *_canvas_callback_outputs(allow_duplicate=True),
         Input("confidence-filter", "value"),
         Input("inference-filter", "value"),
-        Input("graph-cyto", "tapNodeData"),
-        State("graph-cyto", "elements"),
+        State("time-slider", "value"),
         prevent_initial_call=True,
     )
-    def highlight_and_filter(
+    def filter_canvas_cb(
         min_confidence: float | None,
         inference_method: str | None,
-        tap_node: dict[str, Any] | None,
-        elements: list[dict[str, Any]] | None,
+        hour_epoch: int | None,
     ) -> CanvasMutation:
         if not callback_context.triggered:
             raise PreventUpdate
-        triggered = callback_context.triggered[0]["prop_id"]
-        conf = float(min_confidence or 0.0)
-        method = inference_method or ""
-
-        if triggered.startswith("graph-cyto.tapNodeData"):
-            result = highlight_on_tap(elements, tap_node)
-            if result is None:
-                raise PreventUpdate
-            return result
-
-        if triggered.startswith("confidence-filter") or triggered.startswith(
-            "inference-filter"
-        ):
-            return filter_canvas(elements, conf, method)
-
-        raise PreventUpdate
+        return filter_canvas(
+            settings,
+            float(min_confidence or 0.0),
+            inference_method or "",
+            hour_epoch=hour_epoch,
+        )
 
     @app.callback(
         *_canvas_callback_outputs(allow_duplicate=True),
         Input("time-slider", "value"),
-        State("graph-cyto", "elements"),
         State("confidence-filter", "value"),
         State("inference-filter", "value"),
         prevent_initial_call=True,
     )
     def scrub_time(
         hour_epoch: int | None,
-        elements: list[dict[str, Any]] | None,
         min_confidence: float | None,
         inference_method: str | None,
     ) -> CanvasMutation:
         if not callback_context.triggered:
             raise PreventUpdate
         return apply_time_slider(
-            elements,
+            settings,
             hour_epoch,
             float(min_confidence or 0.0),
             inference_method or "",
-            settings=settings,
         )
-
-    @app.callback(
-        *_canvas_callback_outputs(allow_duplicate=True),
-        Input("remove-button", "n_clicks"),
-        State("graph-cyto", "elements"),
-        State("selected-node-id", "data"),
-        State("confidence-filter", "value"),
-        State("inference-filter", "value"),
-        prevent_initial_call=True,
-    )
-    def remove_selected(
-        remove_clicks: int | None,
-        elements: list[dict[str, Any]] | None,
-        selected_node_id: str | None,
-        min_confidence: float | None,
-        inference_method: str | None,
-    ) -> CanvasMutation:
-        del remove_clicks
-        if not callback_context.triggered:
-            raise PreventUpdate
-        return remove_from_canvas(
-            selected_node_id,
-            elements,
-            float(min_confidence or 0.0),
-            inference_method or "",
-        )
-
-    @app.callback(
-        Output("inspector-panel", "children"),
-        Output("selected-node-id", "data"),
-        Output("selected-edge-id", "data"),
-        Output("remove-button", "disabled"),
-        Output("inspector-rail", "className", allow_duplicate=True),
-        Output("inspector-open", "data", allow_duplicate=True),
-        Output("toggle-inspector", "aria-expanded", allow_duplicate=True),
-        Output("explorer-root", "className", allow_duplicate=True),
-        Input("graph-cyto", "tapNodeData"),
-        Input("graph-cyto", "tapEdgeData"),
-        State("controls-open", "data"),
-        prevent_initial_call=True,
-    )
-    def inspect_selection(
-        node_data: dict[str, Any] | None,
-        edge_data: dict[str, Any] | None,
-        controls_open: bool | None,
-    ) -> tuple[Any, Any, Any, bool, str, bool, str, str]:
-        del controls_open
-        if not callback_context.triggered:
-            raise PreventUpdate
-        triggered = callback_context.triggered[0]["prop_id"]
-        open_classes = "explorer-drawer explorer-inspector is-open"
-        root = "explorer-root has-drawer-open"
-
-        if triggered.startswith("graph-cyto.tapNodeData") and node_data:
-            node_id = node_data.get("id")
-            row = get_node(settings, node_id) if node_id else None
-            stage = node_data.get("stage")
-            if row is None:
-                return (
-                    html.P(f"Node not found: {node_id}", className="panel-hint"),
-                    node_id,
-                    None,
-                    False,
-                    open_classes,
-                    True,
-                    "true",
-                    root,
-                )
-            return (
-                _inspector_sheet("Node", row, stage=stage, presentation=node_data),
-                node_id,
-                None,
-                False,
-                open_classes,
-                True,
-                "true",
-                root,
-            )
-
-        if triggered.startswith("graph-cyto.tapEdgeData") and edge_data:
-            source = edge_data.get("source")
-            target = edge_data.get("target")
-            edge_type = edge_data.get("edge_type") or edge_data.get("label")
-            edge_id = edge_data.get("id")
-            row = (
-                get_edge(settings, source, target, edge_type)
-                if source and target and edge_type
-                else None
-            )
-            if row is None:
-                return (
-                    html.P(f"Edge not found: {edge_id}", className="panel-hint"),
-                    None,
-                    edge_id,
-                    True,
-                    open_classes,
-                    True,
-                    "true",
-                    root,
-                )
-            return (
-                _inspector_sheet("Edge", row, presentation=edge_data),
-                None,
-                edge_id,
-                True,
-                open_classes,
-                True,
-                "true",
-                root,
-            )
-
-        raise PreventUpdate
