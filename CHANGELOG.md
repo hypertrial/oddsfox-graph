@@ -17,6 +17,13 @@ flags and output schema as pre-1.0 and subject to change.
 
 ### Added
 
+- Shared hourly parquet scan for `odds-history` (one pass writes match + stage
+  series) plus `scripts/benchmark_scrub.py` and
+  `scripts/benchmark_odds_history.py`.
+- Infer persists `__topology.json` fragments for deterministically covered
+  events; build reuses them instead of reclassifying when present.
+- Explorer viewport layout Store gates desktop vs mobile tree HTML after width
+  is measured (≥1400px mirrored, else stacked).
 - Explorer dark sports-data shell: branded header, persistent phase tracker,
   bottom playback dock, and on-demand Filters & legend drawer.
 - Schedule-derived tournament phase model with active, intermission, Final
@@ -38,6 +45,11 @@ flags and output schema as pre-1.0 and subject to change.
 
 ### Changed
 
+- Stage-reach / advance hour lookups use binary search (no look-ahead) on
+  sorted series; explorer scrub caches the last projected frame for odds-motion
+  deltas instead of reprojecting the previous hour.
+- Explorer pure helpers `short_match_label` / `stage_rank` live in
+  `explorer/bracket_view.py`; MATCH merge policy lives in `match_merge.py`.
 - Explorer bracket connectors include filled arrowheads pointing toward the
   Final so tournament progression reads clearly left→center and right→center.
 - Explorer playback skips Group Stage entirely: the slider and Play steps run

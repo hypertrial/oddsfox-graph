@@ -2,21 +2,22 @@
 
 from __future__ import annotations
 
-import re
 from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import date
 
 from rapidfuzz import fuzz, process
 
 from oddsgraph import ids
 from oddsgraph.config import Settings
+from oddsgraph.match_merge import (
+    match_bind_allowed,
+    match_id_upgrade_target,
+    preferred_inference_method,
+)
 from oddsgraph.ontology import NodeType
 from oddsgraph.schema import CanonicalNode, GraphFragment, Node
 
 DEFAULT_COMPETITION_SLUG = "world-cup-2026"
-_DATEFUL_MATCH_RE = re.compile(r"^(match:.+)-(\d{4}-\d{2}-\d{2})$")
-_NEAR_DATE_MAX_DAY_DELTA = 1
 
 
 @dataclass
@@ -178,111 +179,6 @@ def _materialize_evidence(
     return sorted(indexes.evidence_sets.get(canonical_id, set()))
 
 
-def _more_specific_match_id(candidate: str, current: str) -> bool:
-    """True when candidate extends current (e.g. label-only → dateful MATCH id)."""
-    if not candidate.startswith("match:") or not current.startswith("match:"):
-        return False
-    return candidate != current and candidate.startswith(current + "-")
-
-
-def _parse_dateful_match_id(match_id: str) -> tuple[str, date] | None:
-    """Split ``match:<teams>-YYYY-MM-DD`` into ``(match:<teams>, date)``."""
-    matched = _DATEFUL_MATCH_RE.match(match_id)
-    if matched is None:
-        return None
-    try:
-        return matched.group(1), date.fromisoformat(matched.group(2))
-    except ValueError:
-        return None
-
-
-def _near_date_same_fixture(
-    existing_id: str,
-    candidate_id: str,
-    *,
-    max_day_delta: int = _NEAR_DATE_MAX_DAY_DELTA,
-) -> bool:
-    """True when two dateful MATCH ids are the same team pair ± one calendar day.
-
-    Polymarket event-slug dates and FIFA ``kickoff_at_utc`` dates often disagree
-    by one day for the same fixture; those must coalesce. Month-apart rematches
-    stay distinct.
-    """
-    existing = _parse_dateful_match_id(existing_id)
-    candidate = _parse_dateful_match_id(candidate_id)
-    if existing is None or candidate is None:
-        return False
-    prefix_a, date_a = existing
-    prefix_b, date_b = candidate
-    if prefix_a != prefix_b:
-        return False
-    return abs((date_a - date_b).days) <= max_day_delta
-
-
-def _preferred_inference_method(existing: str, incoming: str) -> str:
-    """Prefer official_bracket provenance when merging topology + schedule."""
-    if incoming == "official_bracket" or existing == "official_bracket":
-        return "official_bracket"
-    return existing or incoming or "unknown"
-
-
-def _match_id_upgrade_target(
-    existing: CanonicalNode,
-    node: Node,
-    inference_method: str,
-) -> str | None:
-    """Return a more specific / near-date MATCH id to upgrade to, if any."""
-    if node.type != NodeType.MATCH or not node.local_id.startswith("match:"):
-        return None
-    candidate_id = node.local_id
-    existing_id = existing.canonical_id
-    if candidate_id == existing_id:
-        return None
-    if _more_specific_match_id(candidate_id, existing_id):
-        return candidate_id
-    if not _near_date_same_fixture(existing_id, candidate_id):
-        return None
-    # Prefer the official-bracket kickoff date when that fragment is binding.
-    if inference_method == "official_bracket":
-        return candidate_id
-    if existing.inference_method == "official_bracket":
-        return None
-    existing_parsed = _parse_dateful_match_id(existing_id)
-    candidate_parsed = _parse_dateful_match_id(candidate_id)
-    if (
-        existing_parsed is not None
-        and candidate_parsed is not None
-        and candidate_parsed[1] >= existing_parsed[1]
-    ):
-        return candidate_id
-    return None
-
-
-def _match_bind_allowed(existing: CanonicalNode, node: Node) -> bool:
-    """Allow MATCH merges for identical IDs, label-only↔dateful, or ±1-day dates.
-
-    Distinct fixtures (same display label, dates farther than one day apart)
-    must remain separate even when exact_slug/label would otherwise collide.
-    """
-    if node.type != NodeType.MATCH:
-        return True
-    existing_id = existing.canonical_id
-    candidate_id = (
-        node.local_id if node.local_id.startswith("match:") else existing_id
-    )
-    if not existing_id.startswith("match:") or not candidate_id.startswith("match:"):
-        return True
-    if existing_id == candidate_id:
-        return True
-    if _more_specific_match_id(candidate_id, existing_id):
-        return True
-    if _more_specific_match_id(existing_id, candidate_id):
-        return True
-    if _near_date_same_fixture(existing_id, candidate_id):
-        return True
-    return False
-
-
 def _remap_fuzzy_canonical_id(
     fuzzy: _FuzzyIndex, node_type: NodeType, old_id: str, new_id: str
 ) -> None:
@@ -340,7 +236,7 @@ def _merge_canonical(
             # Evidence lists are finalized once at the end of resolve_fragments.
             "aliases": merged_aliases,
             "resolution_method": method,
-            "inference_method": _preferred_inference_method(
+            "inference_method": preferred_inference_method(
                 existing.inference_method, inference_method
             ),
         }
@@ -398,9 +294,9 @@ def _bind_existing(
     Returns False when a MATCH dateful-id conflict blocks the bind so the
     caller can fall through to registering a new canonical node.
     """
-    if not _match_bind_allowed(existing, node):
+    if not match_bind_allowed(existing, node):
         return False
-    upgrade_to = _match_id_upgrade_target(existing, node, inference_method)
+    upgrade_to = match_id_upgrade_target(existing, node, inference_method)
     if upgrade_to is not None:
         existing = _upgrade_match_canonical_id(state, existing, upgrade_to, indexes)
     merged = _merge_canonical(

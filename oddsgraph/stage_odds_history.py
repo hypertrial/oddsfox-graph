@@ -6,23 +6,15 @@ import logging
 from pathlib import Path
 from typing import Any
 
-import duckdb
 import pyarrow as pa
 
 from oddsgraph import ids
 from oddsgraph.config import Settings
 from oddsgraph.export import write_parquet
+from oddsgraph.hourly_scan import STAGE_ODDS_EVENT_TITLES, split_history_source_rows
 from oddsgraph.odds_history import _to_epoch
-from oddsgraph.propositions import _REACHES_STAGE_TITLES, _WORLD_CUP_WINNER_TITLE
-from oddsgraph.reduce import quote_path
 
 logger = logging.getLogger(__name__)
-
-# Champion is modeled as wins_competition (World Cup Winner markets).
-STAGE_ODDS_EVENT_TITLES: dict[str, str] = {
-    **_REACHES_STAGE_TITLES,
-    _WORLD_CUP_WINNER_TITLE.casefold(): "Champion",
-}
 
 STAGE_ODDS_HISTORY_SCHEMA = pa.schema(
     [
@@ -71,30 +63,8 @@ def _reach_prob_for_row(row: dict[str, Any]) -> float | None:
 
 
 def _query_stage_rows(input_glob: str) -> list[dict[str, Any]]:
-    titles = sorted(STAGE_ODDS_EVENT_TITLES)
-    title_list = ", ".join(f"'{t.replace(chr(39), chr(39) + chr(39))}'" for t in titles)
-    query = f"""
-        SELECT
-            market_id,
-            event_title,
-            group_item_title,
-            primary_outcome_label,
-            close_odds,
-            odds_hour_epoch
-        FROM read_parquet('{quote_path(input_glob)}')
-        WHERE odds_hour_epoch IS NOT NULL
-          AND close_odds IS NOT NULL
-          AND lower(trim(event_title)) IN ({title_list})
-        ORDER BY market_id, odds_hour_epoch
-    """
-    con = duckdb.connect()
-    try:
-        table = con.execute(query).arrow()
-    finally:
-        con.close()
-    if not isinstance(table, pa.Table):
-        table = table.read_all()
-    return table.to_pylist()
+    _advance_rows, stage_rows = split_history_source_rows(input_glob)
+    return stage_rows
 
 
 def build_stage_odds_history_rows(
@@ -131,19 +101,20 @@ def build_stage_odds_history_rows(
 
 
 def build_stage_odds_history(settings: Settings) -> Path:
-    """Write ``stage_odds_history.parquet`` for stage-reach / champion probs."""
-    settings.ensure_dirs()
-    raw_rows = _query_stage_rows(settings.resolve_input_glob())
-    rows = build_stage_odds_history_rows(raw_rows)
-    output_path = settings.stage_odds_history_path
-    write_parquet(output_path, rows, STAGE_ODDS_HISTORY_SCHEMA)
-    teams = {r["team"] for r in rows}
-    stages = {r["stage_label"] for r in rows}
-    logger.info(
-        "Wrote %d stage-odds rows (%d teams, %d stages) to %s",
-        len(rows),
-        len(teams),
-        len(stages),
-        output_path,
-    )
-    return output_path
+    """Write ``stage_odds_history.parquet`` for stage-reach / champion probs.
+
+    Prefer ``build_odds_histories`` when writing both artifacts so the source
+    mart is scanned once.
+    """
+    from oddsgraph.odds_history import build_odds_histories
+
+    _match_path, stage_path = build_odds_histories(settings)
+    return stage_path
+
+
+__all__ = [
+    "STAGE_ODDS_EVENT_TITLES",
+    "STAGE_ODDS_HISTORY_SCHEMA",
+    "build_stage_odds_history",
+    "build_stage_odds_history_rows",
+]

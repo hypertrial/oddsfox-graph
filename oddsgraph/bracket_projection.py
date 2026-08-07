@@ -63,6 +63,41 @@ def _is_edge(el: dict[str, Any]) -> bool:
     return "source" in data and "target" in data
 
 
+def latest_series_point(
+    series: list[dict[str, Any]] | None,
+    hour_epoch: int | None,
+    *,
+    hour_key: str,
+) -> dict[str, Any] | None:
+    """Return the latest point with ``hour_key <= hour_epoch`` (no look-ahead).
+
+    When ``hour_epoch`` is ``None``, returns the first point. Assumes ``series``
+    is sorted ascending by ``hour_key`` (builders and explorer loaders do this).
+    """
+    if not series:
+        return None
+    if hour_epoch is None:
+        return series[0]
+    hour = int(hour_epoch)
+    # Binary search without materializing a parallel hours list.
+    lo = 0
+    hi = len(series)
+    while lo < hi:
+        mid = (lo + hi) // 2
+        try:
+            mid_hour = int(series[mid].get(hour_key) or 0)
+        except (TypeError, ValueError):
+            mid_hour = 0
+        if mid_hour <= hour:
+            lo = mid + 1
+        else:
+            hi = mid
+    index = lo - 1
+    if index < 0:
+        return None
+    return series[index]
+
+
 def home_prob_at_hour(
     data: dict[str, Any],
     hour_epoch: int | None,
@@ -89,14 +124,9 @@ def home_prob_at_hour(
     ):
         return 1.0 if str(winner) == str(home) else 0.0
 
-    if hour_epoch is None:
-        point = series[0]
-    else:
-        hour = int(hour_epoch)
-        eligible = [p for p in series if int(p.get("h") or 0) <= hour]
-        if not eligible:
-            return None
-        point = eligible[-1]
+    point = latest_series_point(series, hour_epoch, hour_key="h")
+    if point is None:
+        return None
     try:
         return float(point["home"])
     except (KeyError, TypeError, ValueError):
@@ -108,16 +138,9 @@ def latest_reach_prob(
     hour_epoch: int | None,
 ) -> float | None:
     """Return the latest reach probability at or before ``hour_epoch``."""
-    if not series:
+    point = latest_series_point(series, hour_epoch, hour_key="h")
+    if point is None:
         return None
-    if hour_epoch is None:
-        point = series[0]
-    else:
-        hour = int(hour_epoch)
-        eligible = [p for p in series if int(p.get("h") or 0) <= hour]
-        if not eligible:
-            return None
-        point = eligible[-1]
     try:
         return float(point["p"])
     except (KeyError, TypeError, ValueError):

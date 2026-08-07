@@ -36,6 +36,17 @@ def test_normalize_and_conditional_ratio() -> None:
     assert reach_prob_for_rank("Brazil", "Round of 16", 100, stage_odds) == 0.8
 
 
+def test_latest_reach_prob_uses_latest_at_or_before_hour() -> None:
+    from oddsgraph.bracket_projection import latest_reach_prob, latest_series_point
+
+    series = _series((10, 0.1), (20, 0.2), (30, 0.3), (40, 0.4))
+    assert latest_reach_prob(series, 25) == 0.2
+    assert latest_reach_prob(series, 30) == 0.3
+    assert latest_reach_prob(series, 5) is None
+    assert latest_reach_prob(series, None) == 0.1
+    assert latest_series_point(series, 35, hour_key="h") == {"h": 30, "p": 0.3}
+
+
 def test_card_short_label_locks_resolved_probs_to_100() -> None:
     champion = card_short_label(
         "Spain", "Argentina", 1.0, 0.0, winner="Spain", stage="Final"

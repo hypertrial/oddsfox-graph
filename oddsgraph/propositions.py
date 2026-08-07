@@ -19,14 +19,17 @@ from oddsgraph.topology import (
 )
 
 _DRAW_TITLE_RE = re.compile(r"^Draw\s*\(", re.IGNORECASE)
-_REACHES_STAGE_TITLES: dict[str, str] = {
+REACHES_STAGE_TITLES: dict[str, str] = {
     "world cup: nation to reach final": "Final",
     "world cup: nation to reach quarterfinals": "Quarterfinals",
     "world cup: nation to reach semifinals": "Semifinals",
     "world cup: nation to reach round of 16": "Round of 16",
     "world cup: team to advance to knockout stages": "Round of 32",
 }
-_WORLD_CUP_WINNER_TITLE = "World Cup Winner"
+WORLD_CUP_WINNER_TITLE = "World Cup Winner"
+# Back-compat aliases for older private names.
+_REACHES_STAGE_TITLES = REACHES_STAGE_TITLES
+_WORLD_CUP_WINNER_TITLE = WORLD_CUP_WINNER_TITLE
 
 # NodeType -> (local_id, label)
 TargetMap = dict[NodeType, tuple[str, str]]

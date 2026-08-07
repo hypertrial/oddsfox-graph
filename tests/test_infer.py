@@ -465,6 +465,33 @@ def test_load_all_fragments_ignores_stale_verified_without_manifest(
     assert "99" not in loaded.verified_event_ids
 
 
+def test_load_all_fragments_reads_topology_artifacts(tmp_path: Path) -> None:
+    from oddsgraph.infer import _topology_fragment_path, load_all_fragments
+
+    settings = _settings(tmp_path)
+    settings.resume = True
+    topology = GraphFragment(
+        nodes=[
+            Node(
+                local_id="team:brazil",
+                type=NodeType.TEAM,
+                label="Brazil",
+                aliases=[],
+                confidence=1.0,
+                evidence_market_ids=["m"],
+            )
+        ],
+        edges=[],
+    )
+    _topology_fragment_path(settings, "evt-1").write_text(
+        topology.model_dump_json(), encoding="utf-8"
+    )
+    loaded = load_all_fragments(settings)
+    assert "evt-1" in loaded.topology_fragments
+    assert loaded.topology_fragments["evt-1"].nodes[0].label == "Brazil"
+    assert "evt-1" not in loaded.fragments
+
+
 def test_verify_failure_deletes_stale_verified_artifacts(tmp_path: Path) -> None:
     from oddsgraph.infer import (
         _save_verify_manifest,

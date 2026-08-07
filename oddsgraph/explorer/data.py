@@ -14,10 +14,7 @@ from oddsgraph.bracket import tournament_playback_bounds, tournament_time_bounds
 from oddsgraph.bracket_projection import home_prob_at_hour, split_match_teams
 from oddsgraph.config import Settings
 from oddsgraph.explorer import KNOCKOUT_STAGE_LABELS
-from oddsgraph.explorer.presentation import (
-    short_match_label,
-    stage_rank,
-)
+from oddsgraph.explorer.bracket_view import short_match_label, stage_rank
 from oddsgraph.export import EDGE_SCHEMA, NODE_SCHEMA, table_with_schema
 from oddsgraph.reduce import quote_path
 

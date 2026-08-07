@@ -40,6 +40,9 @@ official bracket or topology supplies the more specific form. Merging an
 `official_bracket` fragment also stamps `inference_method=official_bracket` on
 the canonical MATCH so explorer filters stay consistent with progression edges.
 
+MATCH merge policy lives in `oddsgraph/match_merge.py` and is applied by
+`oddsgraph/resolution.py`.
+
 ## Confidence filtering
 
 `--minimum-confidence` rejects edges below the threshold during `build`. It does

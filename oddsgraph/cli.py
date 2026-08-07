@@ -13,8 +13,7 @@ from oddsgraph.config import Settings
 from oddsgraph.infer import infer_event_fragments, load_markets_for_infer
 from oddsgraph.ontology import EdgeType
 from oddsgraph.pipeline import run_build_and_export, validate_exported_artifacts
-from oddsgraph.odds_history import build_odds_history
-from oddsgraph.stage_odds_history import build_stage_odds_history
+from oddsgraph.odds_history import build_odds_histories
 from oddsgraph.reduce import reduce_semantic_markets
 from oddsgraph import cli_options as opts
 
@@ -163,8 +162,7 @@ def reduce(ctx: typer.Context) -> None:
 def odds_history(ctx: typer.Context) -> None:
     """Build hourly match and stage probability histories for the explorer."""
     settings = _base_settings(ctx)
-    match_path = build_odds_history(settings)
-    stage_path = build_stage_odds_history(settings)
+    match_path, stage_path = build_odds_histories(settings)
     typer.echo(f"Wrote odds history to {match_path}")
     typer.echo(f"Wrote stage odds history to {stage_path}")
 
@@ -422,8 +420,7 @@ def run(
     infer_event_fragments(settings, markets)
     # Reuse the same market list so --event-id/--limit-events stay consistent.
     run_build_and_export(settings, markets=markets)
-    build_odds_history(settings)
-    build_stage_odds_history(settings)
+    build_odds_histories(settings)
     errors = validate_exported_artifacts(settings)
     if errors:
         _echo_validation_errors(errors)

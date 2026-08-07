@@ -127,6 +127,7 @@ Schema from `InferenceReport`:
 | --- | --- |
 | `semantic_markets.parquet` | Reduced market records |
 | `fragments/<event_id>.json` | Per-event residual graph fragments |
+| `fragments/<event_id>__topology.json` | Deterministic topology from infer; build reuses these instead of reclassifying covered events |
 | `fragments/<event_id>__verified.json` | Opt-in verified/corrected topology; on build these **replace** template topology for that event |
 | `fragments/<event_id>__verify_manifest.json` | Fingerprint of the template candidate used for resume invalidation |
 
@@ -134,7 +135,10 @@ Fragment filenames use a single path-safe `event_id` segment matching
 `[A-Za-z0-9._-]+` **without** embedded `__` and without surrounding whitespace.
 IDs with path separators, spaces, `..`, or `__` are rejected so writes cannot
 escape `build/fragments/` or collide with reserved suffixes such as
-`__verified.json` / `__partN.json`.
+`__verified.json` / `__topology.json` / `__partN.json`.
+
+`oddsgraph odds-history` / `run` scan the hourly source mart once and write both
+`odds_history.parquet` and `stage_odds_history.parquet`.
 
 ## See also
 

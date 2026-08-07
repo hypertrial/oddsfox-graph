@@ -415,6 +415,12 @@ def build_app(settings: Settings) -> Dash:
             dcc.Store(id="time-play-state", data=False),
             dcc.Store(id="previous-hour", data=None if slider_disabled else slider_value),
             dcc.Store(id="phase-key", data=initial_phase.key),
+            dcc.Store(id="viewport-layout", data="both"),
+            dcc.Interval(
+                id="viewport-layout-probe",
+                interval=2_000,
+                n_intervals=0,
+            ),
             dcc.Interval(
                 id="time-play-interval",
                 interval=TIME_PLAY_MS_PER_STEP,

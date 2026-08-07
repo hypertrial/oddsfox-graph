@@ -27,6 +27,10 @@ from oddsgraph.explorer.shell import (
     phase_badge_children,
     playback_time_children,
 )
+from oddsgraph.explorer.tree_render import (
+    BracketLayout,
+    DESKTOP_LAYOUT_MIN_WIDTH_PX,
+)
 
 # Re-export public canvas helpers so existing test imports keep working.
 __all__ = [
@@ -37,6 +41,12 @@ __all__ = [
     "phase_view_update",
     "register_callbacks",
 ]
+
+
+def _normalize_layout(layout: str | None) -> BracketLayout:
+    if layout in {"desktop", "mobile", "both"}:
+        return layout  # type: ignore[return-value]
+    return "both"
 
 
 def next_play_toggle(
@@ -273,6 +283,7 @@ def register_callbacks(app: Dash, settings: Settings) -> None:
         State("confidence-filter", "value"),
         State("inference-filter", "value"),
         State("time-slider", "value"),
+        State("viewport-layout", "data"),
         prevent_initial_call=True,
     )
     def reset_view(
@@ -280,6 +291,7 @@ def register_callbacks(app: Dash, settings: Settings) -> None:
         min_confidence: float | None,
         inference_method: str | None,
         hour_epoch: int | None,
+        layout: str | None,
     ) -> CanvasMutation:
         del reset_clicks
         if not callback_context.triggered:
@@ -290,6 +302,7 @@ def register_callbacks(app: Dash, settings: Settings) -> None:
             inference_method or "",
             hour_epoch=hour_epoch,
             reset=True,
+            layout=_normalize_layout(layout),
         )
 
     @app.callback(
@@ -297,9 +310,64 @@ def register_callbacks(app: Dash, settings: Settings) -> None:
         Input("confidence-filter", "value"),
         Input("inference-filter", "value"),
         State("time-slider", "value"),
+        State("viewport-layout", "data"),
         prevent_initial_call=True,
     )
     def filter_canvas_cb(
+        min_confidence: float | None,
+        inference_method: str | None,
+        hour_epoch: int | None,
+        layout: str | None,
+    ) -> CanvasMutation:
+        if not callback_context.triggered:
+            raise PreventUpdate
+        return filter_canvas(
+            settings,
+            float(min_confidence or 0.0),
+            inference_method or "",
+            hour_epoch=hour_epoch,
+            layout=_normalize_layout(layout),
+        )
+
+    @app.callback(
+        *_canvas_callback_outputs(allow_duplicate=True),
+        Output("previous-hour", "data"),
+        Input("time-slider", "value"),
+        State("confidence-filter", "value"),
+        State("inference-filter", "value"),
+        State("previous-hour", "data"),
+        State("viewport-layout", "data"),
+        prevent_initial_call=True,
+    )
+    def scrub_time(
+        hour_epoch: int | None,
+        min_confidence: float | None,
+        inference_method: str | None,
+        previous_hour: int | None,
+        layout: str | None,
+    ) -> tuple[Any, Any, Any]:
+        if not callback_context.triggered:
+            raise PreventUpdate
+        children, status = apply_time_slider(
+            settings,
+            hour_epoch,
+            float(min_confidence or 0.0),
+            inference_method or "",
+            previous_hour_epoch=previous_hour,
+            layout=_normalize_layout(layout),
+        )
+        return children, status, hour_epoch
+
+    @app.callback(
+        *_canvas_callback_outputs(allow_duplicate=True),
+        Input("viewport-layout", "data"),
+        State("confidence-filter", "value"),
+        State("inference-filter", "value"),
+        State("time-slider", "value"),
+        prevent_initial_call=True,
+    )
+    def relayout_canvas(
+        layout: str | None,
         min_confidence: float | None,
         inference_method: str | None,
         hour_epoch: int | None,
@@ -311,30 +379,21 @@ def register_callbacks(app: Dash, settings: Settings) -> None:
             float(min_confidence or 0.0),
             inference_method or "",
             hour_epoch=hour_epoch,
+            layout=_normalize_layout(layout),
         )
 
-    @app.callback(
-        *_canvas_callback_outputs(allow_duplicate=True),
-        Output("previous-hour", "data"),
-        Input("time-slider", "value"),
-        State("confidence-filter", "value"),
-        State("inference-filter", "value"),
-        State("previous-hour", "data"),
-        prevent_initial_call=True,
+    app.clientside_callback(
+        f"""
+        function(_n, current) {{
+            const width = window.innerWidth || 0;
+            const next = width >= {DESKTOP_LAYOUT_MIN_WIDTH_PX} ? "desktop" : "mobile";
+            if (next === current) {{
+                return window.dash_clientside.no_update;
+            }}
+            return next;
+        }}
+        """,
+        Output("viewport-layout", "data"),
+        Input("viewport-layout-probe", "n_intervals"),
+        State("viewport-layout", "data"),
     )
-    def scrub_time(
-        hour_epoch: int | None,
-        min_confidence: float | None,
-        inference_method: str | None,
-        previous_hour: int | None,
-    ) -> tuple[Any, Any, Any]:
-        if not callback_context.triggered:
-            raise PreventUpdate
-        children, status = apply_time_slider(
-            settings,
-            hour_epoch,
-            float(min_confidence or 0.0),
-            inference_method or "",
-            previous_hour_epoch=previous_hour,
-        )
-        return children, status, hour_epoch

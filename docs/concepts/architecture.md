@@ -94,7 +94,8 @@ flowchart LR
 4. **odds-history** — Build `odds_history.parquet` and
    `stage_odds_history.parquet` for explorer time scrubbing and projection
    (also available as a standalone `oddsgraph odds-history` command; included
-   in `oddsgraph run`).
+   in `oddsgraph run`). Both artifacts are written from a single scan of the
+   hourly source mart.
 5. **validate** — Re-check exported artifacts for consistency.
 6. **closure** — Optionally compute transitive `IMPLIES` edges on demand into
    `build/implies_closure.parquet` (not materialized by default).

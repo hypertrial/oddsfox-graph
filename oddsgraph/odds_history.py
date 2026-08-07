@@ -8,7 +8,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-import duckdb
 import pyarrow as pa
 
 from oddsgraph import ids
@@ -16,7 +15,6 @@ from oddsgraph.bracket import KNOCKOUT_STAGE_RANK, _kickoff_date, load_wc2026_sc
 from oddsgraph.config import Settings
 from oddsgraph.export import write_parquet
 from oddsgraph.fragments import match_local_id
-from oddsgraph.reduce import quote_path
 
 logger = logging.getLogger(__name__)
 
@@ -150,31 +148,10 @@ def _resolve_winner(
 
 
 def _query_advance_rows(input_glob: str) -> list[dict[str, Any]]:
-    query = f"""
-        SELECT
-            market_id,
-            event_title,
-            primary_outcome_label,
-            close_odds,
-            odds_hour_epoch,
-            game_start_time,
-            event_finished_at,
-            is_resolved,
-            winning_outcome
-        FROM read_parquet('{quote_path(input_glob)}')
-        WHERE sports_market_type = 'soccer_team_to_advance'
-          AND odds_hour_epoch IS NOT NULL
-          AND close_odds IS NOT NULL
-        ORDER BY market_id, odds_hour_epoch
-    """
-    con = duckdb.connect()
-    try:
-        table = con.execute(query).arrow()
-    finally:
-        con.close()
-    if not isinstance(table, pa.Table):
-        table = table.read_all()
-    return table.to_pylist()
+    from oddsgraph.hourly_scan import split_history_source_rows
+
+    advance_rows, _stage_rows = split_history_source_rows(input_glob)
+    return advance_rows
 
 
 def build_odds_history_rows(
@@ -288,16 +265,42 @@ def build_odds_history_rows(
 
 def build_odds_history(settings: Settings) -> Path:
     """Write ``odds_history.parquet`` for knockout MATCH win probabilities."""
+    match_path, _stage_path = build_odds_histories(settings)
+    return match_path
+
+
+def build_odds_histories(settings: Settings) -> tuple[Path, Path]:
+    """Write match + stage odds histories from a single source parquet scan."""
+    from oddsgraph.hourly_scan import split_history_source_rows
+    from oddsgraph.stage_odds_history import (
+        STAGE_ODDS_HISTORY_SCHEMA,
+        build_stage_odds_history_rows,
+    )
+
     settings.ensure_dirs()
     fixtures = load_knockout_fixtures()
-    advance_rows = _query_advance_rows(settings.resolve_input_glob())
-    rows = build_odds_history_rows(fixtures, advance_rows)
-    output_path = settings.odds_history_path
-    write_parquet(output_path, rows, ODDS_HISTORY_SCHEMA)
+    advance_rows, stage_raw = split_history_source_rows(settings.resolve_input_glob())
+    match_rows = build_odds_history_rows(fixtures, advance_rows)
+    stage_rows = build_stage_odds_history_rows(stage_raw)
+
+    match_path = settings.odds_history_path
+    stage_path = settings.stage_odds_history_path
+    write_parquet(match_path, match_rows, ODDS_HISTORY_SCHEMA)
+    write_parquet(stage_path, stage_rows, STAGE_ODDS_HISTORY_SCHEMA)
+
     logger.info(
         "Wrote %d odds-history rows for %d knockout fixtures to %s",
-        len(rows),
+        len(match_rows),
         len(fixtures),
-        output_path,
+        match_path,
     )
-    return output_path
+    teams = {r["team"] for r in stage_rows}
+    stages = {r["stage_label"] for r in stage_rows}
+    logger.info(
+        "Wrote %d stage-odds rows (%d teams, %d stages) to %s",
+        len(stage_rows),
+        len(teams),
+        len(stages),
+        stage_path,
+    )
+    return match_path, stage_path

@@ -178,6 +178,8 @@ def test_benchmark_and_finetune_help() -> None:
     for script in [
         "scripts/benchmark_infer.py",
         "scripts/benchmark_build.py",
+        "scripts/benchmark_scrub.py",
+        "scripts/benchmark_odds_history.py",
         "scripts/finetune_lora.py",
         "scripts/export_finetune_dataset.py",
         "scripts/eval_finetuned_model.py",

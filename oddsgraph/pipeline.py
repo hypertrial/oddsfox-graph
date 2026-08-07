@@ -66,16 +66,23 @@ def build_pipeline_from_markets(
     inferred_fragments: dict[str, GraphFragment] | None = None,
     *,
     verified_event_ids: set[str] | None = None,
+    topology_fragments: dict[str, GraphFragment] | None = None,
 ) -> BuildPipelineResult:
     allowed_event_ids = {m.event_id for m in markets}
     verified_ids = {
         eid for eid in (verified_event_ids or set()) if eid in allowed_event_ids
+    }
+    preloaded_topology = {
+        eid: fragment
+        for eid, fragment in (topology_fragments or {}).items()
+        if eid in allowed_event_ids and eid not in verified_ids
     }
     deterministic = build_deterministic_fragments_by_event(
         markets,
         include_topology=settings.deterministic_topology,
         competition_label=settings.competition_label,
         skip_topology_event_ids=verified_ids,
+        topology_fragments=preloaded_topology,
     )
     inferred = {
         eid: fragment
@@ -178,6 +185,7 @@ def run_build_and_export(
         markets,
         loaded.fragments,
         verified_event_ids=loaded.verified_event_ids,
+        topology_fragments=loaded.topology_fragments,
     )
 
     export_graph_artifacts(

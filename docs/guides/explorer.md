@@ -34,7 +34,9 @@ Both are produced by `oddsgraph odds-history` and by `oddsgraph run`.
 ## Default view
 
 The **knockout bracket** is a mirrored two-halves tree on a dark sports-data
-canvas (desktop ≥1400px). Narrower viewports use stacked rounds:
+canvas (desktop ≥1400px). Narrower viewports use stacked rounds. After the
+viewport width is measured, the explorer builds only the active layout rather
+than both HTML trees on every scrub:
 
 - Knockout `MATCH` cards connected by `ADVANCES_TO` edges (32 on a full
   official build)

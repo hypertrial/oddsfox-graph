@@ -17,6 +17,10 @@ from oddsgraph.explorer.tree import (
 
 ConnectorDirection = Literal["ltr", "rtl"]
 GradeStatus = Literal["correct", "incorrect", "pending", "path-diverged"]
+BracketLayout = Literal["both", "desktop", "mobile"]
+
+# CSS media query breakpoint for mirrored vs stacked trees.
+DESKTOP_LAYOUT_MIN_WIDTH_PX = 1400
 
 
 def match_grade_status(data: dict[str, Any]) -> GradeStatus:
@@ -673,8 +677,13 @@ def render_bracket_tree(
     tree: BracketTree,
     *,
     include_legend: bool = True,
+    layout: BracketLayout = "both",
 ) -> html.Div:
-    """Top-level bracket: mirrored tree + stacked fallback (CSS media query)."""
+    """Top-level bracket: mirrored tree and/or stacked fallback.
+
+    ``layout`` gates which HTML tree is built. ``both`` preserves the CSS
+    media-query dual tree (used before the viewport Store is measured).
+    """
     children: list[Any] = []
     if include_legend:
         children.append(
@@ -693,18 +702,20 @@ def render_bracket_tree(
                 ],
             )
         )
-    children.append(
-        html.Div(
-            className="bracket-desktop",
-            children=[render_mirrored_tree(tree)],
+    if layout in {"both", "desktop"}:
+        children.append(
+            html.Div(
+                className="bracket-desktop",
+                children=[render_mirrored_tree(tree)],
+            )
         )
-    )
-    children.append(
-        html.Div(
-            className="bracket-mobile",
-            children=[render_stacked_rounds(tree)],
+    if layout in {"both", "mobile"}:
+        children.append(
+            html.Div(
+                className="bracket-mobile",
+                children=[render_stacked_rounds(tree)],
+            )
         )
-    )
     return html.Div(
         className="bracket-root",
         **{"aria-label": "World Cup 2026 bracket"},
@@ -716,13 +727,16 @@ def elements_to_bracket_children(
     elements: list[dict[str, Any]],
     *,
     include_legend: bool = True,
+    layout: BracketLayout = "both",
 ) -> html.Div:
     """Build knockout tree HTML children from bracket element dicts."""
     tree = build_knockout_tree(elements)
-    return render_bracket_tree(tree, include_legend=include_legend)
+    return render_bracket_tree(tree, include_legend=include_legend, layout=layout)
 
 
 __all__ = [
+    "BracketLayout",
+    "DESKTOP_LAYOUT_MIN_WIDTH_PX",
     "build_connector_arrow_paths",
     "build_connector_paths",
     "elements_to_bracket_children",

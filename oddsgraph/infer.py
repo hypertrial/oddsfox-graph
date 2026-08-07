@@ -7,7 +7,7 @@ import json
 import logging
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -24,7 +24,7 @@ from oddsgraph.prompts import (
 from oddsgraph.reduce import list_semantic_market_event_ids, load_semantic_markets, select_event_ids
 from oddsgraph.reporting import merge_per_event_status
 from oddsgraph.schema import GraphFragment, SemanticMarket, merge_fragments
-from oddsgraph.topology import classify_events, covered_event_ids
+from oddsgraph.topology import classify_events
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +33,7 @@ logger = logging.getLogger(__name__)
 class FragmentLoadResult:
     fragments: dict[str, GraphFragment]
     verified_event_ids: set[str]
+    topology_fragments: dict[str, GraphFragment] = field(default_factory=dict)
 
 
 @dataclass
@@ -73,6 +74,12 @@ def _chunk_manifest_path(settings: Settings, event_id: str) -> Path:
 def _verified_fragment_path(settings: Settings, event_id: str) -> Path:
     return event_artifact_path(
         settings.fragments_dir, event_id, "__verified.json"
+    )
+
+
+def _topology_fragment_path(settings: Settings, event_id: str) -> Path:
+    return event_artifact_path(
+        settings.fragments_dir, event_id, "__topology.json"
     )
 
 
@@ -404,10 +411,19 @@ def infer_event_fragments(
 
     covered: set[str] = set()
     if settings.deterministic_topology:
-        covered = covered_event_ids(
+        classified = classify_events(
             [m for m in markets if m.event_id in set(event_ids)],
             competition_label=settings.competition_label,
         )
+        for event_id, result in classified.items():
+            if not result.fully_covered:
+                continue
+            covered.add(event_id)
+            # Persist topology so build can reuse infer's classification.
+            _save_fragment(
+                _topology_fragment_path(settings, event_id),
+                result.fragment,
+            )
 
     results: dict[str, GraphFragment] = {}
     status: dict[str, str] = {}
@@ -579,6 +595,7 @@ def _verified_manifest_usable(manifest_path: Path) -> bool:
 def load_all_fragments(settings: Settings) -> FragmentLoadResult:
     fragments: dict[str, GraphFragment] = {}
     verified_event_ids: set[str] = set()
+    topology_fragments: dict[str, GraphFragment] = {}
     for path in sorted(settings.fragments_dir.glob("*.json")):
         if path.name.startswith("_"):
             continue
@@ -587,6 +604,17 @@ def load_all_fragments(settings: Settings) -> FragmentLoadResult:
         ):
             continue
         if path.name.endswith("__verify_manifest.json"):
+            continue
+        if path.name.endswith("__topology.json"):
+            if not settings.resume:
+                continue
+            event_id = path.name[: -len("__topology.json")]
+            try:
+                sanitize_event_id_for_path(event_id)
+            except ValueError:
+                logger.warning("Skipping unsafe topology fragment name %s", path.name)
+                continue
+            topology_fragments[event_id] = _load_fragment(path)
             continue
         if path.name.endswith("__verified.json"):
             # Prefer verified topology fragments when present and usable.
@@ -619,4 +647,5 @@ def load_all_fragments(settings: Settings) -> FragmentLoadResult:
     return FragmentLoadResult(
         fragments=fragments,
         verified_event_ids=verified_event_ids,
+        topology_fragments=topology_fragments,
     )
