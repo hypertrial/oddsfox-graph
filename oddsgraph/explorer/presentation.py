@@ -640,12 +640,11 @@ def bracket_stylesheet() -> list[dict[str, Any]]:
             },
         },
         {
-            # Subtle away-favored (rose) → home-favored (mint). Numbers carry the signal.
-            "selector": "node[current_home_prob]",
+            # Mint fill = match resolved at the selected tournament hour.
+            "selector": "node[?resolved]",
             "style": {
-                "background-color": (
-                    "mapData(current_home_prob, 0, 1, #fff1f2, #ecfdf5)"
-                ),
+                "background-color": "#ecfdf5",
+                "border-color": "#0f766e",
             },
         },
         {

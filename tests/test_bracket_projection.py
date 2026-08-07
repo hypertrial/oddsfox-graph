@@ -91,9 +91,16 @@ def test_apply_projection_flags_champion_and_third_place_winner() -> None:
     out = apply_bracket_projection(elements, final_end, {})
     by_id = {el["data"]["id"]: el["data"] for el in out}
     assert by_id["final"]["is_champion"] is True
+    assert by_id["final"]["resolved"] is True
     assert "Champion" in by_id["final"]["short_label"]
     assert by_id["third"]["is_third_place_winner"] is True
+    assert by_id["third"]["resolved"] is True
     assert "3rd" in by_id["third"]["short_label"]
+
+    before = apply_bracket_projection(elements, third_end - 1, {})
+    before_by_id = {el["data"]["id"]: el["data"] for el in before}
+    assert before_by_id["final"]["resolved"] is False
+    assert before_by_id["third"]["resolved"] is False
 
 
 def test_project_match_picks_branch_winners_and_normalizes() -> None:

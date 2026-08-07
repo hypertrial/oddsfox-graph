@@ -258,13 +258,13 @@ def test_bracket_stylesheet_and_layout_contract() -> None:
     )
     assert header_style["events"] == "no"
     assert header_style["label"] == "data(label)"
-    assert "node[current_home_prob]" in selectors
-    odds_style = next(
-        rule["style"]
-        for rule in styles
-        if rule["selector"] == "node[current_home_prob]"
+    assert "node[?resolved]" in selectors
+    assert "node[current_home_prob]" not in selectors
+    resolved_style = next(
+        rule["style"] for rule in styles if rule["selector"] == "node[?resolved]"
     )
-    assert "mapData(current_home_prob" in odds_style["background-color"]
+    assert resolved_style["background-color"] == "#ecfdf5"
+    assert resolved_style["border-color"] == "#0f766e"
 
 
 def test_home_prob_at_hour_and_winner_lock() -> None:
@@ -316,8 +316,10 @@ def test_apply_time_slice_stamps_current_home_prob() -> None:
     ]
     stamped = apply_time_slice(elements, 100)
     assert stamped[0]["data"]["current_home_prob"] == 0.3
+    assert stamped[0]["data"]["resolved"] is False
     assert "30%" in stamped[0]["data"]["short_label"]
     locked = apply_time_slice(elements, 300)
     assert locked[0]["data"]["current_home_prob"] == 0.0
+    assert locked[0]["data"]["resolved"] is True
     assert "2026" not in format_hour_label(None)
     assert "UTC" in format_hour_label(1_783_200_000)

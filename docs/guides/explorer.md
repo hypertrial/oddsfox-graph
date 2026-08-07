@@ -59,8 +59,9 @@ At the selected hour:
 4. Third Place projects the most likely semifinal loser from each branch; it
    uses direct matchup odds when available, otherwise shows an explicit
    unavailable probability (`—`) rather than inventing 50/50 odds.
-5. Dashed borders mark projected (not yet locked) matchups. Soft mint/rose
-   tints remain a secondary cue; the numeric percentages are the primary signal.
+5. Dashed borders mark projected (not yet locked) matchups. Mint/green fill
+   marks matches resolved at the selected hour; numeric percentages remain the
+   primary odds signal for unfinished games.
 6. When a match is locked, the winner is marked on the card (`W`). The Final
    shows **Champion** and Third Place shows **3rd** (Spain / England in the
    curated schedule), with stronger card borders once those results lock.

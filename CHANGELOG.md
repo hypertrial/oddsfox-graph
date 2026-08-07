@@ -23,7 +23,8 @@ flags and output schema as pre-1.0 and subject to change.
   shows numeric advance probabilities on every card, and renders local SVG
   country flags on both sides of each match node.
 - Modernized explorer shell: denser spacing, contextual inspector (opens on
-  selection), softer probability tints, dashed borders for projected cards.
+  selection), mint/green fill for resolved matches, dashed borders for
+  projected cards.
 - Explorer Play control advances tournament time one hour at a time at a rate
   of one day every two seconds.
 - Explorer Final / Third Place cards mark schedule winners as **Champion** /
@@ -32,6 +33,9 @@ flags and output schema as pre-1.0 and subject to change.
 
 ### Changed
 
+- Explorer match-card tint encodes resolution, not favorite: mint/green fill
+  means the match is resolved at the selected tournament hour; unfinished
+  cards stay white and rely on numeric percentages.
 - Explorer time slider spans official tournament kickoffs (first → last
   fixture), not the full early Champion-market odds-history window.
 

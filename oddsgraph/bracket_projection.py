@@ -609,6 +609,7 @@ def apply_bracket_projection(
             )
             data["short_label"] = "TBD"
         data["projected"] = projected.projected
+        data["resolved"] = _match_resolved(data, hour_epoch)
         data["projection_method"] = projected.projection_method
         data["probability_available"] = projected.probability_available
         stage = str(data.get("stage") or "")

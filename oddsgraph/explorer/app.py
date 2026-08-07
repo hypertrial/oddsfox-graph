@@ -189,7 +189,7 @@ def build_app(settings: Settings) -> Dash:
                                         "Each card shows projected participants and the "
                                         "probability each advances from that round "
                                         "(normalized from stage markets). Green tint = "
-                                        "top team favored; dashed borders mark projected "
+                                        "match resolved; dashed borders mark projected "
                                         "future matchups. Resolved games lock to the winner; "
                                         "Final shows Champion and Third Place shows 3rd.",
                                         className="panel-hint",

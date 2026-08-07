@@ -153,6 +153,7 @@ def test_build_app_registers_layout_assets_and_callbacks(tmp_path: Path) -> None
     assert any(rule["selector"] == "edge" for rule in styles)
     edge = next(rule for rule in styles if rule["selector"] == "edge")
     assert edge["style"]["curve-style"] == "taxi"
-    assert any(rule["selector"] == "node[current_home_prob]" for rule in styles)
+    assert any(rule["selector"] == "node[?resolved]" for rule in styles)
+    assert not any(rule["selector"] == "node[current_home_prob]" for rule in styles)
 
     assert len(app.callback_map) >= 7
