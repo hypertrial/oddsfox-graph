@@ -67,7 +67,7 @@ default source of truth.
 | `competition_label` | `World Cup 2026` | COMPETITION label/slug base |
 | `fuzzy_threshold` | `92` | Entity resolution fuzzy match cutoff |
 | `minimum_confidence` | `0.0` | Edge confidence floor on build |
-| `resume` | `true` | Reuse completed fragments |
+| `resume` | `true` | Reuse completed fragments / verified topology when manifests match |
 | `limit_events` | `None` | Optional event cap |
 | `event_ids` | `[]` | Optional explicit event ID list |
 

@@ -283,6 +283,16 @@ def test_home_prob_at_hour_and_winner_lock() -> None:
     assert home_prob_at_hour(data, 250) == 1.0
 
 
+def test_home_prob_at_hour_no_lookahead_before_first_point() -> None:
+    data = {
+        "home_team": "Spain",
+        "away_team": "Argentina",
+        "odds_series": [{"h": 200, "home": 0.7, "away": 0.3}],
+    }
+    assert home_prob_at_hour(data, 100) is None
+    assert home_prob_at_hour(data, 200) == 0.7
+
+
 def test_apply_time_slice_stamps_current_home_prob() -> None:
     elements = [
         {

@@ -34,8 +34,9 @@ The **knockout bracket** is a classic left-to-right tournament:
 - Orthogonal taxi edges without repeated `ADVANCES_TO` labels
 - Click a match to highlight its path through the DAG and inspect features
 - Hourly **Knockout time** slider colors each match by team-to-advance
-  probability (green = home favored, red = away). After a match ends, the
-  winner locks to probability 1
+  probability (green = home favored, red = away). After a finished/resolved
+  match, the winner locks to probability 1; live series keep market odds
+  (no lock from the last observed hour alone)
 
 ### Progressive controls
 

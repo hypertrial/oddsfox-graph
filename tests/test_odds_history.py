@@ -141,6 +141,39 @@ def test_build_odds_history_rows_prefers_winning_outcome() -> None:
     assert rows[0]["winner_team"] == "France"
 
 
+def test_build_odds_history_rows_does_not_lock_unfinished_markets() -> None:
+    fixtures = [
+        KnockoutFixture(
+            fifa_match_id=104,
+            stage_key="final",
+            home_team="Spain",
+            away_team="Argentina",
+            kickoff_at_utc="2026-07-19T19:00:00",
+            match_canonical_id="match:spain-vs-argentina-2026-07-19",
+        )
+    ]
+    rows = build_odds_history_rows(
+        fixtures,
+        [
+            _advance_row(
+                market_id="m-live",
+                event_title="Spain vs. Argentina - More Markets",
+                primary_outcome_label="Spain",
+                close_odds=0.55,
+                odds_hour_epoch=1_784_800_000,
+                game_start_time="2026-07-19T19:00:00",
+                event_finished_at=None,
+                winning_outcome=None,
+                is_resolved=None,
+            )
+        ],
+    )
+    assert len(rows) == 1
+    assert rows[0]["home_prob"] == 0.55
+    assert rows[0]["match_end_epoch"] is None
+    assert rows[0]["winner_team"] is None
+
+
 def test_build_odds_history_writes_parquet(tmp_path: Path) -> None:
     data_dir = tmp_path / "data"
     data_dir.mkdir()

@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from oddsgraph.explorer.presentation import (
-    PRESERVED_CLASSES,
+    is_edge,
     is_stage_header,
     merge_class_sets,
     split_classes,
@@ -15,11 +15,6 @@ from oddsgraph.explorer.presentation import (
 def element_id(el: dict[str, Any]) -> str | None:
     data = el.get("data") or {}
     return data.get("id")
-
-
-def is_edge(el: dict[str, Any]) -> bool:
-    data = el.get("data") or {}
-    return "source" in data and "target" in data
 
 
 def is_node(el: dict[str, Any]) -> bool:
@@ -108,9 +103,5 @@ def clear_interaction_classes(
         keep: set[str] = set()
         if keep_hidden and "hidden" in preserved:
             keep.add("hidden")
-        # Drop everything else in PRESERVED_CLASSES.
-        for token in list(preserved):
-            if token not in PRESERVED_CLASSES:
-                keep.add(token)
         result.append({**el, "classes": merge_class_sets(semantic, keep)})
     return result

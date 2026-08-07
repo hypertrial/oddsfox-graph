@@ -12,7 +12,7 @@ import duckdb
 import pyarrow as pa
 
 from oddsgraph import ids
-from oddsgraph.bracket import KNOCKOUT_STAGE_RANK, load_wc2026_schedule
+from oddsgraph.bracket import KNOCKOUT_STAGE_RANK, _kickoff_date, load_wc2026_schedule
 from oddsgraph.config import Settings
 from oddsgraph.export import write_parquet
 from oddsgraph.fragments import match_local_id
@@ -51,12 +51,6 @@ class KnockoutFixture:
     @property
     def team_key(self) -> frozenset[str]:
         return frozenset({self.home_team, self.away_team})
-
-
-def _kickoff_date(kickoff_at_utc: str | None) -> str | None:
-    if not kickoff_at_utc:
-        return None
-    return kickoff_at_utc[:10]
 
 
 def _to_epoch(value: Any) -> int | None:
@@ -164,7 +158,6 @@ def _query_advance_rows(input_glob: str) -> list[dict[str, Any]]:
             close_odds,
             odds_hour_epoch,
             game_start_time,
-            end_time,
             event_finished_at,
             is_resolved,
             winning_outcome
@@ -239,17 +232,26 @@ def build_odds_history_rows(
             or kickoff_epoch
             or series[0][0]
         )
-        end_epoch = (
-            _to_epoch(meta.get("event_finished_at"))
-            or series[-1][0]
+        finished_epoch = _to_epoch(meta.get("event_finished_at"))
+        # Only lock when the market is finished or resolved — never treat the
+        # last observed hour of a live series as match end.
+        has_result = bool(
+            finished_epoch is not None
+            or meta.get("winning_outcome")
+            or meta.get("is_resolved")
         )
-        winner = _resolve_winner(
-            home_team=fixture.home_team,
-            away_team=fixture.away_team,
-            winning_outcome=meta.get("winning_outcome"),
-            last_home_prob=series[-1][1],
-            last_away_prob=series[-1][2],
-        )
+        if has_result:
+            end_epoch = finished_epoch or series[-1][0]
+            winner = _resolve_winner(
+                home_team=fixture.home_team,
+                away_team=fixture.away_team,
+                winning_outcome=meta.get("winning_outcome"),
+                last_home_prob=series[-1][1],
+                last_away_prob=series[-1][2],
+            )
+        else:
+            end_epoch = None
+            winner = None
 
         for hour, home_prob, away_prob in series:
             out.append(

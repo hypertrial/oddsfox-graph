@@ -81,8 +81,8 @@ markets.
 | `home_prob` | float | Probability home advances / wins |
 | `away_prob` | float | Probability away advances / wins |
 | `match_start_epoch` | int64 | Kickoff / game start epoch |
-| `match_end_epoch` | int64 | Match finished epoch (or last observed hour) |
-| `winner_team` | string \| null | Locked winner when known |
+| `match_end_epoch` | int64 \| null | Match finished epoch when known; null for live series |
+| `winner_team` | string \| null | Locked winner when finished/resolved; null while live |
 
 ## `ontology.json`
 

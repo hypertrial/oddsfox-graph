@@ -15,6 +15,19 @@ flags and output schema as pre-1.0 and subject to change.
 
 ## [Unreleased]
 
+### Fixed
+
+- Odds-history no longer treats the last observed hour of a live
+  `soccer_team_to_advance` series as match end / winner lock.
+- Explorer time scrub returns no probability before the first odds point
+  (no look-ahead to future opening odds).
+- Entity resolution coalesces Polymarket slug dates with FIFA kickoff dates
+  within ±1 day for the same MATCH team pair, and stamps merged MATCH nodes
+  `inference_method=official_bracket` when the schedule fragment binds.
+- `load_all_fragments` honors `--no-resume` and skips `__verified.json`.
+- Residual `--resume` re-infers when market membership changes (chunk
+  manifest), not only when chunk budget settings change.
+
 ### Added
 
 - `oddsgraph odds-history` builds `build/odds_history.parquet`: hourly knockout

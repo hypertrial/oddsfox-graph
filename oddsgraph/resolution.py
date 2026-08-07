@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from dataclasses import dataclass, field
+from datetime import date
 
 from rapidfuzz import fuzz, process
 
@@ -13,6 +15,8 @@ from oddsgraph.ontology import NodeType
 from oddsgraph.schema import CanonicalNode, GraphFragment, Node
 
 DEFAULT_COMPETITION_SLUG = "world-cup-2026"
+_DATEFUL_MATCH_RE = re.compile(r"^(match:.+)-(\d{4}-\d{2}-\d{2})$")
+_NEAR_DATE_MAX_DAY_DELTA = 1
 
 
 @dataclass
@@ -181,11 +185,84 @@ def _more_specific_match_id(candidate: str, current: str) -> bool:
     return candidate != current and candidate.startswith(current + "-")
 
 
-def _match_bind_allowed(existing: CanonicalNode, node: Node) -> bool:
-    """Allow MATCH merges only for identical IDs or label-only↔dateful upgrades.
+def _parse_dateful_match_id(match_id: str) -> tuple[str, date] | None:
+    """Split ``match:<teams>-YYYY-MM-DD`` into ``(match:<teams>, date)``."""
+    matched = _DATEFUL_MATCH_RE.match(match_id)
+    if matched is None:
+        return None
+    try:
+        return matched.group(1), date.fromisoformat(matched.group(2))
+    except ValueError:
+        return None
 
-    Two different dateful MATCH ids (same display label, different dates) must
-    remain distinct fixtures even when exact_slug/label would otherwise collide.
+
+def _near_date_same_fixture(
+    existing_id: str,
+    candidate_id: str,
+    *,
+    max_day_delta: int = _NEAR_DATE_MAX_DAY_DELTA,
+) -> bool:
+    """True when two dateful MATCH ids are the same team pair ± one calendar day.
+
+    Polymarket event-slug dates and FIFA ``kickoff_at_utc`` dates often disagree
+    by one day for the same fixture; those must coalesce. Month-apart rematches
+    stay distinct.
+    """
+    existing = _parse_dateful_match_id(existing_id)
+    candidate = _parse_dateful_match_id(candidate_id)
+    if existing is None or candidate is None:
+        return False
+    prefix_a, date_a = existing
+    prefix_b, date_b = candidate
+    if prefix_a != prefix_b:
+        return False
+    return abs((date_a - date_b).days) <= max_day_delta
+
+
+def _preferred_inference_method(existing: str, incoming: str) -> str:
+    """Prefer official_bracket provenance when merging topology + schedule."""
+    if incoming == "official_bracket" or existing == "official_bracket":
+        return "official_bracket"
+    return existing or incoming or "unknown"
+
+
+def _match_id_upgrade_target(
+    existing: CanonicalNode,
+    node: Node,
+    inference_method: str,
+) -> str | None:
+    """Return a more specific / near-date MATCH id to upgrade to, if any."""
+    if node.type != NodeType.MATCH or not node.local_id.startswith("match:"):
+        return None
+    candidate_id = node.local_id
+    existing_id = existing.canonical_id
+    if candidate_id == existing_id:
+        return None
+    if _more_specific_match_id(candidate_id, existing_id):
+        return candidate_id
+    if not _near_date_same_fixture(existing_id, candidate_id):
+        return None
+    # Prefer the official-bracket kickoff date when that fragment is binding.
+    if inference_method == "official_bracket":
+        return candidate_id
+    if existing.inference_method == "official_bracket":
+        return None
+    existing_parsed = _parse_dateful_match_id(existing_id)
+    candidate_parsed = _parse_dateful_match_id(candidate_id)
+    if (
+        existing_parsed is not None
+        and candidate_parsed is not None
+        and candidate_parsed[1] >= existing_parsed[1]
+    ):
+        return candidate_id
+    return None
+
+
+def _match_bind_allowed(existing: CanonicalNode, node: Node) -> bool:
+    """Allow MATCH merges for identical IDs, label-only↔dateful, or ±1-day dates.
+
+    Distinct fixtures (same display label, dates farther than one day apart)
+    must remain separate even when exact_slug/label would otherwise collide.
     """
     if node.type != NodeType.MATCH:
         return True
@@ -200,6 +277,8 @@ def _match_bind_allowed(existing: CanonicalNode, node: Node) -> bool:
     if _more_specific_match_id(candidate_id, existing_id):
         return True
     if _more_specific_match_id(existing_id, candidate_id):
+        return True
+    if _near_date_same_fixture(existing_id, candidate_id):
         return True
     return False
 
@@ -247,6 +326,8 @@ def _merge_canonical(
     node: Node,
     method: str,
     indexes: _ResolutionIndexes,
+    *,
+    inference_method: str = "unknown",
 ) -> CanonicalNode:
     evidence = indexes.evidence_sets.setdefault(existing.canonical_id, set())
     evidence.update(existing.evidence_market_ids)
@@ -259,6 +340,9 @@ def _merge_canonical(
             # Evidence lists are finalized once at the end of resolve_fragments.
             "aliases": merged_aliases,
             "resolution_method": method,
+            "inference_method": _preferred_inference_method(
+                existing.inference_method, inference_method
+            ),
         }
     )
     label_slug = ids.slugify(merged.label)
@@ -306,6 +390,8 @@ def _bind_existing(
     method: str,
     tier: str,
     indexes: _ResolutionIndexes,
+    *,
+    inference_method: str = "unknown",
 ) -> bool:
     """Bind ``node`` onto ``existing`` when the merge is allowed.
 
@@ -314,17 +400,18 @@ def _bind_existing(
     """
     if not _match_bind_allowed(existing, node):
         return False
-    # Official bracket arrives after topology; promote label-only MATCH ids to dateful.
-    if (
-        node.type == NodeType.MATCH
-        and node.local_id.startswith("match:")
-        and _more_specific_match_id(node.local_id, existing.canonical_id)
-    ):
-        existing = _upgrade_match_canonical_id(
-            state, existing, node.local_id, indexes
-        )
-    _merge_canonical(state, existing, node, method, indexes)
-    state.local_to_canonical[node.local_id] = existing.canonical_id
+    upgrade_to = _match_id_upgrade_target(existing, node, inference_method)
+    if upgrade_to is not None:
+        existing = _upgrade_match_canonical_id(state, existing, upgrade_to, indexes)
+    merged = _merge_canonical(
+        state,
+        existing,
+        node,
+        method,
+        indexes,
+        inference_method=inference_method,
+    )
+    state.local_to_canonical[node.local_id] = merged.canonical_id
     _register_tier(state, tier)
     return True
 
@@ -346,6 +433,7 @@ def _try_exact_id(
             "exact_id",
             "exact_id",
             indexes,
+            inference_method=method,
         )
     _register_canonical(
         state, polymarket_id, node, "exact_id", method, indexes
@@ -358,31 +446,53 @@ def _try_exact_slug(
     state: ResolutionState,
     node: Node,
     indexes: _ResolutionIndexes,
+    *,
+    inference_method: str,
 ) -> bool:
     slug_key = (node.type, ids.slugify(node.label))
     existing = indexes.by_slug.get(slug_key)
     if existing is None:
         return False
-    return _bind_existing(state, existing, node, "exact_slug", "exact_slug", indexes)
+    return _bind_existing(
+        state,
+        existing,
+        node,
+        "exact_slug",
+        "exact_slug",
+        indexes,
+        inference_method=inference_method,
+    )
 
 
 def _try_exact_label(
     state: ResolutionState,
     node: Node,
     indexes: _ResolutionIndexes,
+    *,
+    inference_method: str,
 ) -> bool:
     # slugify == normalize_label; reuse the cached slug from exact_slug lookups.
     label_key = (node.type, ids.normalize_label(node.label))
     existing = indexes.by_label.get(label_key)
     if existing is None:
         return False
-    return _bind_existing(state, existing, node, "exact_label", "exact_label", indexes)
+    return _bind_existing(
+        state,
+        existing,
+        node,
+        "exact_label",
+        "exact_label",
+        indexes,
+        inference_method=inference_method,
+    )
 
 
 def _try_alias(
     state: ResolutionState,
     node: Node,
     indexes: _ResolutionIndexes,
+    *,
+    inference_method: str,
 ) -> bool:
     for alias in [node.label] + list(node.aliases):
         alias_key = (node.type, ids.normalize_label(alias))
@@ -391,7 +501,15 @@ def _try_alias(
             node.type != NodeType.TEAM
             or _team_alias_compatible(alias, node.label, existing.label)
         ):
-            if _bind_existing(state, existing, node, "alias", "alias", indexes):
+            if _bind_existing(
+                state,
+                existing,
+                node,
+                "alias",
+                "alias",
+                indexes,
+                inference_method=inference_method,
+            ):
                 return True
             continue
         if node.type != NodeType.TEAM:
@@ -403,7 +521,15 @@ def _try_alias(
             existing = indexes.by_alias.get(code_key)
             if existing is None:
                 continue
-            if _bind_existing(state, existing, node, "alias", "alias", indexes):
+            if _bind_existing(
+                state,
+                existing,
+                node,
+                "alias",
+                "alias",
+                indexes,
+                inference_method=inference_method,
+            ):
                 return True
     return False
 
@@ -413,6 +539,8 @@ def _try_fuzzy(
     node: Node,
     settings: Settings,
     indexes: _ResolutionIndexes,
+    *,
+    inference_method: str,
 ) -> bool:
     best_canonical_id, _ = indexes.fuzzy_index.best_match(
         node.type,
@@ -428,6 +556,7 @@ def _try_fuzzy(
         "fuzzy",
         "fuzzy",
         indexes,
+        inference_method=inference_method,
     )
 
 
@@ -447,6 +576,7 @@ def _register_new(
             "new_entity",
             "new_entity",
             indexes,
+            inference_method=method,
         )
         # If bind is rejected (incompatible MATCH pair), leave the existing
         # occupant and skip registering a conflicting alias for this local id.
@@ -490,13 +620,13 @@ def resolve_fragments(
     for node, method in all_nodes:
         if _try_exact_id(state, node, method, indexes):
             continue
-        if _try_exact_slug(state, node, indexes):
+        if _try_exact_slug(state, node, indexes, inference_method=method):
             continue
-        if _try_exact_label(state, node, indexes):
+        if _try_exact_label(state, node, indexes, inference_method=method):
             continue
-        if _try_alias(state, node, indexes):
+        if _try_alias(state, node, indexes, inference_method=method):
             continue
-        if _try_fuzzy(state, node, settings, indexes):
+        if _try_fuzzy(state, node, settings, indexes, inference_method=method):
             continue
         _register_new(state, node, method, competition_slug, indexes)
 

@@ -30,10 +30,15 @@ Tier counts appear in `inference_report.json` under `resolution_tiers`.
 
 ### MATCH identity
 
-Dateful MATCH ids (`match:<teams>-<YYYY-MM-DD>`) are distinct fixtures. Two
-MATCH nodes that share a display label but carry different dates do **not**
-merge. Label-only MATCH ids may still upgrade to a dateful id when the
-official bracket or topology supplies the more specific form.
+Dateful MATCH ids (`match:<teams>-<YYYY-MM-DD>`) identify fixtures. Two MATCH
+nodes that share a display label but carry dates more than one day apart do
+**not** merge (true rematches stay distinct). The same team-pair with dates
+within ±1 calendar day — the common Polymarket slug vs FIFA kickoff skew —
+coalesces into one node, preferring the official-bracket kickoff id when that
+fragment binds. Label-only MATCH ids may still upgrade to a dateful id when the
+official bracket or topology supplies the more specific form. Merging an
+`official_bracket` fragment also stamps `inference_method=official_bracket` on
+the canonical MATCH so explorer filters stay consistent with progression edges.
 
 ## Confidence filtering
 

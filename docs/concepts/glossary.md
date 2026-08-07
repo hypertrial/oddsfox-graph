@@ -48,8 +48,9 @@ manifest records chunk settings so `--resume` can invalidate stale
 ## Resume
 
 Default `infer` behavior that reuses completed event fragments and matching
-chunk parts. Changing chunk settings clears stale part files via the chunk
-manifest. See [CLI](../reference/cli.md).
+chunk parts. Changing chunk settings or market membership clears stale part
+files (and completed event fragments) via the chunk manifest. See
+[CLI](../reference/cli.md).
 
 ## Few-shot exemplar
 

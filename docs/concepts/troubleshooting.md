@@ -57,13 +57,15 @@ events that fell through to the LLM path, and confirm team names resolve via
 ### `--resume` isn't reusing a fragment I expected it to
 
 Resume reuses completed event fragments and matching chunk parts, but chunk
-settings changes (token budgets, `max-markets-per-chunk`) invalidate stale
-`__part*.json` files via a per-event chunk manifest — that's by design, not a
-bug. For the deterministic-verification tier specifically, a verified
+settings changes (token budgets, `max-markets-per-chunk`) or market-membership
+changes invalidate stale `__part*.json` files and completed `<event>.json`
+fragments via a per-event chunk manifest — that's by design, not a bug. For
+the deterministic-verification tier specifically, a verified
 fragment (`__verified.json`) is only reused while its
 `__verify_manifest.json` fingerprint still matches the current template
 output. A failed verification deletes that event's verified artifacts so a
-later `build` cannot load a stale `__verified.json`.
+later `build` cannot load a stale `__verified.json`. `--no-resume` also skips
+loading `__verified.json` on build.
 
 ### Model not found at `models/qwen3-4b-q4_k_m.gguf`
 

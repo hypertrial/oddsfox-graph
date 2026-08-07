@@ -101,7 +101,9 @@ def home_prob_at_hour(
     else:
         hour = int(hour_epoch)
         eligible = [p for p in series if int(p.get("h") or 0) <= hour]
-        point = eligible[-1] if eligible else series[0]
+        if not eligible:
+            return None
+        point = eligible[-1]
     try:
         return float(point["home"])
     except (KeyError, TypeError, ValueError):
@@ -115,7 +117,7 @@ def apply_time_slice(
     """Stamp ``current_home_prob`` onto MATCH nodes from their odds series."""
     updated: list[dict[str, Any]] = []
     for el in elements:
-        if is_stage_header(el) or _is_edge(el):
+        if is_stage_header(el) or is_edge(el):
             updated.append(el)
             continue
         data = dict(el.get("data") or {})
@@ -162,7 +164,7 @@ def stage_column(stage_label: str) -> int:
 
 def is_stage_header(el: dict[str, Any]) -> bool:
     """Return True for non-interactive bracket column header nodes."""
-    if _is_edge(el):
+    if is_edge(el):
         return False
     classes = str(el.get("classes") or "").split()
     if STAGE_HEADER_CLASS in classes:
@@ -260,7 +262,7 @@ def apply_path_highlight(
 
     nodes_by_id: dict[str, dict[str, Any]] = {}
     for el in elements:
-        if _is_edge(el):
+        if is_edge(el):
             continue
         data = el.get("data") or {}
         eid = data.get("id")
@@ -272,7 +274,7 @@ def apply_path_highlight(
     predecessors: dict[str, list[str]] = {}
     successors: dict[str, list[str]] = {}
     for el in elements:
-        if not _is_edge(el):
+        if not is_edge(el):
             continue
         data = el.get("data") or {}
         if data.get("edge_type") != "ADVANCES_TO":
@@ -315,7 +317,7 @@ def apply_path_highlight(
 
     active_edges: set[str] = set()
     for el in elements:
-        if not _is_edge(el):
+        if not is_edge(el):
             continue
         data = el.get("data") or {}
         eid = data.get("id")
@@ -340,7 +342,7 @@ def apply_path_highlight(
             # Column headers stay fully visible during path focus.
             result.append({**el, "classes": merge_class_sets(semantic, preserved)})
             continue
-        if _is_edge(el):
+        if is_edge(el):
             if eid in active_edges:
                 preserved.add("path-active")
             else:
@@ -364,7 +366,7 @@ def _clear_path_classes(elements: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return result
 
 
-def _is_edge(el: dict[str, Any]) -> bool:
+def is_edge(el: dict[str, Any]) -> bool:
     data = el.get("data") or {}
     return "source" in data and "target" in data
 

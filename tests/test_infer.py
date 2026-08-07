@@ -146,6 +146,40 @@ def test_infer_clears_stale_part_fragments_when_manifest_mismatches(
     assert not list(settings.fragments_dir.glob("e1__part3.json"))
 
 
+def test_infer_resume_reinfers_when_market_membership_changes(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    settings.resume = True
+    first = infer_event_fragments(
+        settings, [_prop_market("m1", "e1")], llm=_LabelLLM(settings, ["FIRST"])
+    )
+    assert first["e1"].nodes[0].label == "FIRST"
+    assert _fragment_path(settings, "e1").exists()
+
+    second = infer_event_fragments(
+        settings,
+        [_prop_market("m1", "e1"), _prop_market("m2", "e1")],
+        llm=_LabelLLM(settings, ["SECOND"]),
+    )
+    assert second["e1"].nodes[0].label == "SECOND"
+
+
+def test_infer_resume_keeps_completed_fragment_when_markets_unchanged(
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path)
+    settings.resume = True
+    markets = [_prop_market("m1", "e1")]
+    first = infer_event_fragments(
+        settings, markets, llm=_LabelLLM(settings, ["FIRST"])
+    )
+    assert first["e1"].nodes[0].label == "FIRST"
+
+    llm = _LabelLLM(settings, ["SHOULD_NOT_RUN"])
+    second = infer_event_fragments(settings, markets, llm=llm)
+    assert second["e1"].nodes[0].label == "FIRST"
+    assert llm._i == 0
+
+
 def test_verify_deterministic_disabled_by_default(tmp_path: Path) -> None:
     settings = _settings(tmp_path)
     settings.deterministic_topology = True

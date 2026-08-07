@@ -425,12 +425,6 @@ def infer_event_fragments(
                 status[event_id] = "deterministic"
             continue
 
-        fragment_path = _fragment_path(settings, event_id)
-        if settings.resume and fragment_path.exists():
-            results[event_id] = _load_fragment(fragment_path)
-            status[event_id] = "skipped"
-            continue
-
         event_markets = by_event[event_id]
         chunks = chunk_markets_for_prompt(
             event_markets,
@@ -444,7 +438,17 @@ def infer_event_fragments(
         )
         event_chunks[event_id] = chunks
 
-        if settings.resume and not _chunk_manifest_matches(settings, event_id, chunks):
+        fragment_path = _fragment_path(settings, event_id)
+        if settings.resume and fragment_path.exists():
+            # Reuse a completed event fragment only while the chunk/market
+            # manifest still matches (same contract as stale __part*.json).
+            if _chunk_manifest_matches(settings, event_id, chunks):
+                results[event_id] = _load_fragment(fragment_path)
+                status[event_id] = "skipped"
+                continue
+            fragment_path.unlink(missing_ok=True)
+            _clear_part_fragments(settings, event_id)
+        elif settings.resume and not _chunk_manifest_matches(settings, event_id, chunks):
             _clear_part_fragments(settings, event_id)
 
         few_shot: list[dict] = []
@@ -581,6 +585,9 @@ def load_all_fragments(settings: Settings) -> FragmentLoadResult:
             continue
         if path.name.endswith("__verified.json"):
             # Prefer verified topology fragments when present and usable.
+            # Honor --no-resume so build does not keep stale verified topology.
+            if not settings.resume:
+                continue
             event_id = path.name[: -len("__verified.json")]
             try:
                 sanitize_event_id_for_path(event_id)

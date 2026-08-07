@@ -54,9 +54,10 @@ sidecar `__verify_manifest.json` that fingerprints the template candidate. With
 matches the current template; otherwise verification runs again. If verification
 fails, stale `__verified.json` / manifest files for that event are deleted so
 `build` cannot prefer them. On `build`, verified topology is loaded only when
-the manifest status is `deterministic_verified` or `deterministic_corrected`,
-and it **replaces** template topology for that event (EVENT/MARKET/OUTCOME base
-nodes remain deterministic).
+`--resume` is on and the manifest status is `deterministic_verified` or
+`deterministic_corrected`, and it **replaces** template topology for that event
+(EVENT/MARKET/OUTCOME base nodes remain deterministic). `--no-resume` skips
+loading `__verified.json` entirely.
 
 ## See also
 

@@ -234,6 +234,82 @@ def test_distinct_dateful_match_ids_do_not_collapse() -> None:
     )
 
 
+def test_near_date_match_ids_coalesce_to_official_bracket_kickoff() -> None:
+    """Slug date vs FIFA kickoff (±1 day) must resolve to one MATCH."""
+    slug_dated = GraphFragment(
+        nodes=[
+            Node(
+                local_id="match:egypt-vs-iran-2026-06-26",
+                type=NodeType.MATCH,
+                label="Egypt vs. IR Iran",
+                confidence=0.9,
+                evidence_market_ids=["m-slug"],
+            )
+        ],
+        edges=[],
+    )
+    kickoff_dated = GraphFragment(
+        nodes=[
+            Node(
+                local_id="match:egypt-vs-iran-2026-06-27",
+                type=NodeType.MATCH,
+                label="Egypt vs. IR Iran",
+                confidence=1.0,
+                evidence_market_ids=["m-fifa"],
+                aliases=["fifa-match:42"],
+            )
+        ],
+        edges=[],
+    )
+    state = resolve_fragments(
+        [slug_dated, kickoff_dated],
+        Settings(),
+        inference_methods=["deterministic", "official_bracket"],
+    )
+    assert "match:egypt-vs-iran-2026-06-27" in state.canonical_nodes
+    assert "match:egypt-vs-iran-2026-06-26" not in state.canonical_nodes
+    assert state.local_to_canonical["match:egypt-vs-iran-2026-06-26"] == (
+        "match:egypt-vs-iran-2026-06-27"
+    )
+    node = state.canonical_nodes["match:egypt-vs-iran-2026-06-27"]
+    assert node.inference_method == "official_bracket"
+    assert sorted(node.evidence_market_ids) == ["m-fifa", "m-slug"]
+
+
+def test_official_bracket_merge_sets_match_inference_method() -> None:
+    label_only = GraphFragment(
+        nodes=[
+            Node(
+                local_id="match:brazil-vs-morocco",
+                type=NodeType.MATCH,
+                label="Brazil vs. Morocco",
+                confidence=0.9,
+                evidence_market_ids=["m1"],
+            )
+        ],
+        edges=[],
+    )
+    dateful = GraphFragment(
+        nodes=[
+            Node(
+                local_id="match:brazil-vs-morocco-2026-06-14",
+                type=NodeType.MATCH,
+                label="Brazil vs. Morocco",
+                confidence=1.0,
+                evidence_market_ids=["m2"],
+            )
+        ],
+        edges=[],
+    )
+    state = resolve_fragments(
+        [label_only, dateful],
+        Settings(),
+        inference_methods=["deterministic", "official_bracket"],
+    )
+    node = state.canonical_nodes["match:brazil-vs-morocco-2026-06-14"]
+    assert node.inference_method == "official_bracket"
+
+
 def test_match_dateful_id_upgrades_when_label_only_arrives_first() -> None:
     """Bracket is appended after topology; dateful MATCH ids must still win."""
     dateful, label_only = _brazil_morocco_match_fragments()
