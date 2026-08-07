@@ -13,11 +13,6 @@ from oddsgraph.bracket import (
     schedule_playback_milestones,
     schedule_stage_windows,
 )
-from oddsgraph.explorer.bracket_view import (
-    STAGE_LABEL_TO_RANK,
-    short_match_label,
-    stage_rank,
-)
 
 # Fixed tracker steps for knockout playback (Group Stage is not scrubbable).
 TRACKER_STEPS: tuple[tuple[str, str, str], ...] = (

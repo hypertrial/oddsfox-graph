@@ -1,8 +1,9 @@
 """Shared hourly parquet scan for knockout odds-history builders.
 
 One DuckDB pass over the source mart yields both advance-market and
-stage-reach rows, streamed in Arrow batches to avoid full ``to_pylist``
-materialization of the filtered table.
+stage-reach rows. The filtered result is converted to an Arrow table, then
+emitted as record batches so callers can iterate without an intermediate
+full ``to_pylist`` of the DuckDB result.
 """
 
 from __future__ import annotations
@@ -38,6 +39,21 @@ _HISTORY_SCAN_COLUMNS = (
     "sports_market_type",
 )
 
+# Typed NULL placeholders when a source parquet omits optional columns.
+_NULL_SELECT: dict[str, str] = {
+    "market_id": "CAST(NULL AS VARCHAR) AS market_id",
+    "event_title": "CAST(NULL AS VARCHAR) AS event_title",
+    "group_item_title": "CAST(NULL AS VARCHAR) AS group_item_title",
+    "primary_outcome_label": "CAST(NULL AS VARCHAR) AS primary_outcome_label",
+    "close_odds": "CAST(NULL AS DOUBLE) AS close_odds",
+    "odds_hour_epoch": "CAST(NULL AS BIGINT) AS odds_hour_epoch",
+    "game_start_time": "CAST(NULL AS VARCHAR) AS game_start_time",
+    "event_finished_at": "CAST(NULL AS VARCHAR) AS event_finished_at",
+    "is_resolved": "CAST(NULL AS BOOLEAN) AS is_resolved",
+    "winning_outcome": "CAST(NULL AS VARCHAR) AS winning_outcome",
+    "sports_market_type": "CAST(NULL AS VARCHAR) AS sports_market_type",
+}
+
 
 def _stage_title_sql_list() -> str:
     titles = sorted(STAGE_ODDS_EVENT_TITLES)
@@ -57,7 +73,7 @@ def _select_list(available: set[str]) -> str:
         if name in available:
             parts.append(name)
         else:
-            parts.append(f"CAST(NULL AS VARCHAR) AS {name}")
+            parts.append(_NULL_SELECT[name])
     return ", ".join(parts)
 
 
@@ -91,17 +107,19 @@ def iter_history_source_batches(
             WHERE {_where_clause(available)}
             ORDER BY market_id, odds_hour_epoch
         """
-        result = con.execute(query).arrow()
-        if isinstance(result, pa.Table):
-            table = result
-        elif hasattr(result, "read_all"):
-            table = result.read_all()
+        relation = con.sql(query)
+        # Prefer Arrow table materialization: DuckDBPyRelation.__getattr__ can
+        # treat method names as column lookups depending on the projection.
+        to_arrow_table = getattr(relation, "to_arrow_table", None)
+        if callable(to_arrow_table):
+            table = to_arrow_table()
         else:
-            table = pa.Table.from_batches(list(result))
+            table = relation.arrow()
+        if not isinstance(table, pa.Table):
+            table = pa.Table.from_batches(list(table))
         if table.num_rows == 0:
             return
-        for batch in table.to_batches(max_chunksize=max(1, int(batch_size))):
-            yield batch
+        yield from table.to_batches(max_chunksize=max(1, int(batch_size)))
     finally:
         con.close()
 

@@ -201,4 +201,4 @@ def test_render_match_card_in_tree_smoke() -> None:
     assert "stacked-knockout" not in desktop_only
     mobile_only = str(elements_to_bracket_children(elements, layout="mobile"))
     assert "stacked-knockout" in mobile_only
-    assert "knockout-tree" not in mobile_only or "stacked" in mobile_only
+    assert "knockout-tree" not in mobile_only

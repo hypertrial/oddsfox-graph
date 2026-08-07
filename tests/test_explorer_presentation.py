@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 from oddsgraph.bracket_projection import home_prob_at_hour
+from oddsgraph.explorer.bracket_view import short_match_label, stage_rank
 from oddsgraph.explorer.presentation import (
     apply_time_slice,
     fifa_match_id,
     format_hour_label,
-    short_match_label,
-    stage_rank,
     stamp_odds_motion,
 )
 

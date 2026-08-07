@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from pathlib import Path
 from typing import Any
 
@@ -10,11 +9,8 @@ import pyarrow as pa
 
 from oddsgraph import ids
 from oddsgraph.config import Settings
-from oddsgraph.export import write_parquet
-from oddsgraph.hourly_scan import STAGE_ODDS_EVENT_TITLES, split_history_source_rows
+from oddsgraph.hourly_scan import STAGE_ODDS_EVENT_TITLES
 from oddsgraph.odds_history import _to_epoch
-
-logger = logging.getLogger(__name__)
 
 STAGE_ODDS_HISTORY_SCHEMA = pa.schema(
     [
@@ -60,11 +56,6 @@ def _reach_prob_for_row(row: dict[str, Any]) -> float | None:
         return 1.0 - prob
     # Team-named outcomes (World Cup Winner style): odds already for that team.
     return prob
-
-
-def _query_stage_rows(input_glob: str) -> list[dict[str, Any]]:
-    _advance_rows, stage_rows = split_history_source_rows(input_glob)
-    return stage_rows
 
 
 def build_stage_odds_history_rows(

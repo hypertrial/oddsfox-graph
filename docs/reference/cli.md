@@ -57,7 +57,8 @@ Resolve entities, compile propositions, apply logical rules, and export artifact
 
 ## `oddsgraph odds-history`
 
-Build hourly probability histories for the explorer:
+Build hourly probability histories for the explorer from a **single** scan of
+the hourly-odds parquet:
 
 - `build/odds_history.parquet` from Polymarket `soccer_team_to_advance`
   markets (direct knockout matchups)
@@ -65,6 +66,7 @@ Build hourly probability histories for the explorer:
   plus World Cup Winner markets
 
 No command-specific flags. Reads the same hourly-odds parquet as `reduce`.
+`oddsgraph run` uses the same single-pass builder.
 
 ## `oddsgraph validate`
 

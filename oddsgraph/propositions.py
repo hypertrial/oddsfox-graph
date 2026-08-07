@@ -27,9 +27,6 @@ REACHES_STAGE_TITLES: dict[str, str] = {
     "world cup: team to advance to knockout stages": "Round of 32",
 }
 WORLD_CUP_WINNER_TITLE = "World Cup Winner"
-# Back-compat aliases for older private names.
-_REACHES_STAGE_TITLES = REACHES_STAGE_TITLES
-_WORLD_CUP_WINNER_TITLE = WORLD_CUP_WINNER_TITLE
 
 # NodeType -> (local_id, label)
 TargetMap = dict[NodeType, tuple[str, str]]
@@ -494,7 +491,7 @@ def _build_world_cup_winner_propositions(
     competition_label: str,
 ) -> EventPropositionResult | None:
     title = (markets[0].event_title or "").strip()
-    if title.casefold() != _WORLD_CUP_WINNER_TITLE.casefold():
+    if title.casefold() != WORLD_CUP_WINNER_TITLE.casefold():
         return None
 
     competition_local = ids.competition_id(competition_label)
@@ -536,7 +533,7 @@ def _build_world_cup_winner_propositions(
 def _parse_reaches_stage_title(title: str | None) -> str | None:
     if not title:
         return None
-    return _REACHES_STAGE_TITLES.get(title.strip().casefold())
+    return REACHES_STAGE_TITLES.get(title.strip().casefold())
 
 
 def _build_reaches_stage_propositions(

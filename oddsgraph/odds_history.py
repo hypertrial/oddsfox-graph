@@ -147,13 +147,6 @@ def _resolve_winner(
     return None
 
 
-def _query_advance_rows(input_glob: str) -> list[dict[str, Any]]:
-    from oddsgraph.hourly_scan import split_history_source_rows
-
-    advance_rows, _stage_rows = split_history_source_rows(input_glob)
-    return advance_rows
-
-
 def build_odds_history_rows(
     fixtures: list[KnockoutFixture],
     advance_rows: list[dict[str, Any]],

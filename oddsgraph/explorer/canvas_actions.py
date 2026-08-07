@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any
 
 from dash import Output, no_update
 
@@ -17,8 +17,6 @@ from oddsgraph.explorer.tree_render import BracketLayout, elements_to_bracket_ch
 CanvasMutation = tuple[Any, Any]
 
 _BRACKET_TYPES = ["MATCH"]
-
-BracketLayoutChoice = BracketLayout
 
 
 @dataclass
@@ -71,17 +69,15 @@ def _project_elements(
     hour_epoch: int | None,
     *,
     previous_hour_epoch: int | None = None,
-    previous_elements: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     slice_ = bracket_elements(settings)
     base = slice_.to_elements()
     stage_odds = stage_odds_by_team(settings)
     token = _artifact_token(settings)
 
-    cached_previous = previous_elements
+    cached_previous: list[dict[str, Any]] | None = None
     if (
-        cached_previous is None
-        and previous_hour_epoch is not None
+        previous_hour_epoch is not None
         and hour_epoch is not None
         and int(previous_hour_epoch) != int(hour_epoch)
         and _FRAME_CACHE.frame is not None
@@ -127,17 +123,15 @@ def _project_and_render(
     *,
     hour_epoch: int | None = None,
     previous_hour_epoch: int | None = None,
-    layout: BracketLayoutChoice = "both",
+    layout: BracketLayout = "both",
     reuse_previous_frame: bool = True,
 ) -> Any:
-    previous_elements = None
     if not reuse_previous_frame:
         reset_projected_frame_cache()
     elements = _project_elements(
         settings,
         hour_epoch,
         previous_hour_epoch=previous_hour_epoch,
-        previous_elements=previous_elements,
     )
     filtered = apply_filters(elements, _BRACKET_TYPES, min_confidence, inference_method)
     return elements_to_bracket_children(filtered, layout=layout)
@@ -149,7 +143,7 @@ def filter_canvas(
     inference_method: str,
     *,
     hour_epoch: int | None = None,
-    layout: BracketLayoutChoice = "both",
+    layout: BracketLayout = "both",
 ) -> CanvasMutation:
     """Re-apply confidence/inference filters and re-render the tree."""
     return (
@@ -159,7 +153,6 @@ def filter_canvas(
             inference_method,
             hour_epoch=hour_epoch,
             layout=layout,
-            reuse_previous_frame=True,
         ),
         no_update,
     )
@@ -172,7 +165,7 @@ def load_view(
     *,
     hour_epoch: int | None = None,
     reset: bool = False,
-    layout: BracketLayoutChoice = "both",
+    layout: BracketLayout = "both",
 ) -> CanvasMutation:
     """Reload the knockout bracket view."""
     children = _project_and_render(
@@ -183,9 +176,6 @@ def load_view(
         layout=layout,
         reuse_previous_frame=not reset,
     )
-    if reset:
-        # Keep the newly projected frame as the motion baseline.
-        pass
     status = "Reset knockout bracket view." if reset else "Loaded knockout bracket view."
     return (children, status)
 
@@ -197,7 +187,7 @@ def apply_time_slider(
     inference_method: str,
     *,
     previous_hour_epoch: int | None = None,
-    layout: BracketLayoutChoice = "both",
+    layout: BracketLayout = "both",
 ) -> CanvasMutation:
     """Update projected teams and advance probabilities for the selected hour."""
     return (
