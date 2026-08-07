@@ -41,6 +41,8 @@ flags and output schema as pre-1.0 and subject to change.
 
 ### Fixed
 
+- Explorer match-card flag SVGs use node-relative sizes so they scale with
+  zoom instead of shrinking when zooming in.
 - Explorer projection maps feeder branches onto schedule home/away slots
   (not alphabetical feeder labels) and ranks Third Place candidates by
   `P(reach Final)`.

@@ -516,10 +516,12 @@ def bracket_stylesheet() -> list[dict[str, Any]]:
                 "background-fit": "none none",
                 "background-clip": "none none",
                 "background-repeat": "no-repeat no-repeat",
-                "background-width": "22px 22px",
-                "background-height": "16px 16px",
-                "background-position-x": "10px 178px",
-                "background-position-y": "14px 34px",
+                # Percentages scale with the node so flags do not shrink when zooming
+                # in (px lengths are zoom-invariant / screen space in Cytoscape).
+                "background-width": "10.476% 10.476%",
+                "background-height": "25% 25%",
+                "background-position-x": "4.762% 84.762%",
+                "background-position-y": "21.875% 53.125%",
                 "text-margin-x": 0,
                 "text-margin-y": 0,
                 "overlay-padding": 4,
@@ -630,7 +632,10 @@ def bracket_stylesheet() -> list[dict[str, Any]]:
                 "width": 220,
                 "height": 68,
                 "font-size": "12px",
-                "background-position-x": "10px 188px",
+                "background-width": "10% 10%",
+                "background-height": "23.529% 23.529%",
+                "background-position-x": "4.545% 85.455%",
+                "background-position-y": "20.588% 50%",
             },
         },
         {

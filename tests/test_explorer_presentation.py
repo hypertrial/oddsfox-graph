@@ -253,6 +253,10 @@ def test_bracket_stylesheet_and_layout_contract() -> None:
     assert node_style["label"] == "data(short_label)"
     assert node_style["background-image"] == "data(flag_images)"
     assert node_style["width"] >= 200
+    assert "%" in str(node_style["background-width"])
+    assert "%" in str(node_style["background-height"])
+    assert "px" not in str(node_style["background-width"])
+    assert "px" not in str(node_style["background-position-x"])
     header_style = next(
         rule["style"] for rule in styles if rule["selector"] == ".stage-header"
     )
