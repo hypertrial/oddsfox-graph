@@ -570,6 +570,11 @@ def test_odds_time_bounds_prefer_tournament_schedule(tmp_path: Path) -> None:
         settings.odds_history_path,
     )
 
-    expected = tournament_time_bounds()
+    from oddsgraph.bracket import tournament_playback_bounds
+
+    expected = tournament_playback_bounds()
     assert odds_time_bounds(settings) == expected
     assert expected[0] is not None and early < expected[0]
+    kickoff_end = tournament_time_bounds()[1]
+    assert expected[1] is not None and kickoff_end is not None
+    assert expected[1] >= kickoff_end

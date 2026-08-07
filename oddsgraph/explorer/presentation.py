@@ -3,9 +3,16 @@
 from __future__ import annotations
 
 import re
-from typing import Any
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from typing import Any, Literal
 
-from oddsgraph.bracket import KNOCKOUT_STAGE_RANK, STAGE_KEY_TO_LABEL
+from oddsgraph.bracket import (
+    KNOCKOUT_STAGE_RANK,
+    STAGE_KEY_TO_LABEL,
+    StageWindow,
+    schedule_stage_windows,
+)
 
 # Reverse map: stage label -> rank (Final and Third Place both rank 5).
 STAGE_LABEL_TO_RANK: dict[str, int] = {
@@ -31,23 +38,59 @@ BRACKET_COLUMN_HEADERS: tuple[tuple[int, str], ...] = (
     (4, "Final / 3rd"),
 )
 
+# Fixed tracker steps (Third Place + Final collapse into Final weekend).
+TRACKER_STEPS: tuple[tuple[str, str, str], ...] = (
+    ("groups", "Groups", "Group Stage"),
+    ("r32", "Round of 32", "R32"),
+    ("r16", "Round of 16", "R16"),
+    ("qf", "Quarterfinals", "QF"),
+    ("sf", "Semifinals", "SF"),
+    ("final_weekend", "Final weekend", "Final"),
+)
+
 STAGE_HEADER_CLASS = "stage-header"
 STAGE_HEADER_TYPE = "STAGE_HEADER"
 
-COLUMN_X_SPACING = 300
-ROW_Y_SPACING = 86
-BRACKET_ORIGIN_X = 100
-# Match cards sit below column headers.
-BRACKET_ORIGIN_Y = 80
-BRACKET_HEADER_Y = 16
-# Offset Third Place below Final in the terminal column.
-THIRD_PLACE_Y_OFFSET = 180
+# Larger cards than the prior 210×64 layout; keep headers aligned to card width.
+MATCH_CARD_WIDTH = 248
+MATCH_CARD_HEIGHT = 72
+COLUMN_X_SPACING = 336
+ROW_Y_SPACING = 96
+BRACKET_ORIGIN_X = 120
+BRACKET_ORIGIN_Y = 88
+BRACKET_HEADER_Y = 18
+THIRD_PLACE_Y_OFFSET = 200
+BRACKET_LAYOUT_PADDING = 48
 
 _FIFA_ALIAS_RE = re.compile(r"^fifa-match-(\d+)$")
 _VS_SPLIT_RE = re.compile(r"\s+vs\.?\s+", re.IGNORECASE)
 
 # Interaction / visibility classes preserved independently of type classes.
 PRESERVED_CLASSES = frozenset({"hidden", "path-active", "path-muted"})
+
+TimelineState = Literal["past", "active", "up-next", "future"]
+PhaseState = Literal["active", "intermission", "complete"]
+
+
+@dataclass(frozen=True)
+class TournamentPhase:
+    """Immutable view-model for the selected tournament hour."""
+
+    key: str
+    label: str
+    detail: str
+    state: PhaseState
+    active_stage_labels: tuple[str, ...]
+    next_stage: str | None
+    tracker_step: str
+
+    @property
+    def accessible_summary(self) -> str:
+        if self.state == "complete":
+            return self.label
+        if self.detail:
+            return f"{self.label}. {self.detail}"
+        return self.label
 
 
 def short_match_label(label: str) -> str:
@@ -120,22 +163,368 @@ def apply_time_slice(
     from oddsgraph.bracket_projection import apply_bracket_projection
     from oddsgraph.flags import flag_url_for_team
 
-    return apply_bracket_projection(
+    projected = apply_bracket_projection(
         elements,
         hour_epoch,
         stage_odds or {},
         flag_url_for_team=flag_url_for_team,
     )
+    return stamp_timeline_states(projected, hour_epoch)
 
 
 def format_hour_label(hour_epoch: int | None) -> str:
-    """Human-readable UTC label for the time slider."""
+    """Full UTC label for tooltips, titles, and debugging."""
     if hour_epoch is None:
         return "No odds history"
-    from datetime import datetime, timezone
-
     dt = datetime.fromtimestamp(int(hour_epoch), tz=timezone.utc)
-    return dt.strftime("%Y-%m-%d %H:%M UTC")
+    return f"{dt.strftime('%A, %B')} {dt.day}, {dt.year} at {dt.strftime('%H:%M')} UTC"
+
+
+def format_hour_label_compact(hour_epoch: int | None) -> str:
+    """Primary compact UTC label for the playback dock."""
+    if hour_epoch is None:
+        return "No odds history"
+    dt = datetime.fromtimestamp(int(hour_epoch), tz=timezone.utc)
+    return f"{dt.strftime('%b')} {dt.day} · {dt.strftime('%H:%M')} UTC"
+
+
+def format_hour_iso(hour_epoch: int | None) -> str:
+    """Machine-readable ISO-8601 UTC timestamp for ``<time datetime>``."""
+    if hour_epoch is None:
+        return ""
+    dt = datetime.fromtimestamp(int(hour_epoch), tz=timezone.utc)
+    return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _window_contains(window: StageWindow, hour_epoch: int) -> bool:
+    return int(window.start_epoch) <= int(hour_epoch) < int(window.end_epoch)
+
+
+def _tracker_step_for_stage_key(stage_key: str) -> str:
+    if stage_key == "group_stage":
+        return "groups"
+    if stage_key == "round_of_32":
+        return "r32"
+    if stage_key == "round_of_16":
+        return "r16"
+    if stage_key == "quarterfinal":
+        return "qf"
+    if stage_key == "semifinal":
+        return "sf"
+    if stage_key in {"third_place", "final"}:
+        return "final_weekend"
+    return "groups"
+
+
+def _stage_label_for_key(stage_key: str) -> str:
+    return STAGE_KEY_TO_LABEL.get(stage_key, stage_key)
+
+
+def phase_at_hour(hour_epoch: int | None) -> TournamentPhase:
+    """Return the tournament phase view-model for ``hour_epoch``."""
+    windows = schedule_stage_windows()
+    if hour_epoch is None or not windows:
+        return TournamentPhase(
+            key="unavailable",
+            label="Schedule unavailable",
+            detail="Load official schedule artifacts to scrub tournament time.",
+            state="intermission",
+            active_stage_labels=(),
+            next_stage=None,
+            tracker_step="groups",
+        )
+
+    hour = int(hour_epoch)
+    first = windows[0]
+    last = windows[-1]
+
+    if hour < int(first.start_epoch):
+        return TournamentPhase(
+            key=f"before:{first.stage_key}",
+            label=_stage_label_for_key(first.stage_key),
+            detail=f"{_stage_label_for_key(first.stage_key)} next",
+            state="intermission",
+            active_stage_labels=(),
+            next_stage=_stage_label_for_key(first.stage_key),
+            tracker_step=_tracker_step_for_stage_key(first.stage_key),
+        )
+
+    if hour >= int(last.end_epoch):
+        return TournamentPhase(
+            key="complete",
+            label="Tournament complete",
+            detail="Champion locked. Scrub backward to replay earlier rounds.",
+            state="complete",
+            active_stage_labels=("Final",),
+            next_stage=None,
+            tracker_step="final_weekend",
+        )
+
+    active = [w for w in windows if _window_contains(w, hour)]
+    if active:
+        # Prefer the latest concurrent window (Final over earlier leftovers).
+        current = active[-1]
+        labels = tuple(w.label for w in active)
+        if current.stage_key == "group_stage":
+            detail = "Knockout bracket is projected"
+            label = "Group Stage"
+        elif current.stage_key == "third_place":
+            detail = "Third-place playoff"
+            label = "Final weekend"
+        elif current.stage_key == "final":
+            detail = "Final"
+            label = "Final weekend"
+        else:
+            detail = current.label
+            label = current.label
+        return TournamentPhase(
+            key=f"active:{current.stage_key}:{current.start_epoch}",
+            label=label,
+            detail=detail,
+            state="active",
+            active_stage_labels=labels,
+            next_stage=None,
+            tracker_step=_tracker_step_for_stage_key(current.stage_key),
+        )
+
+    # Between stages: next upcoming window.
+    upcoming = next((w for w in windows if int(w.start_epoch) > hour), None)
+    previous = next(
+        (w for w in reversed(windows) if int(w.end_epoch) <= hour),
+        None,
+    )
+    if upcoming is None:
+        return TournamentPhase(
+            key="complete",
+            label="Tournament complete",
+            detail="Champion locked. Scrub backward to replay earlier rounds.",
+            state="complete",
+            active_stage_labels=("Final",),
+            next_stage=None,
+            tracker_step="final_weekend",
+        )
+    next_label = upcoming.label
+    if upcoming.stage_key == "third_place":
+        label = "Final weekend"
+        detail = "Third-place playoff next"
+    elif upcoming.stage_key == "final":
+        label = "Final weekend"
+        detail = "Final next"
+    else:
+        label = f"{next_label} next"
+        detail = (
+            f"After {previous.label}" if previous is not None else f"{next_label} upcoming"
+        )
+    return TournamentPhase(
+        key=f"gap:{upcoming.stage_key}:{upcoming.start_epoch}",
+        label=label,
+        detail=detail,
+        state="intermission",
+        active_stage_labels=(),
+        next_stage=next_label,
+        tracker_step=_tracker_step_for_stage_key(upcoming.stage_key),
+    )
+
+
+def tracker_step_states(
+    phase: TournamentPhase,
+) -> list[dict[str, str]]:
+    """Return tracker step metadata for the shell (completed/active/up-next/future)."""
+    step_ids = [step_id for step_id, _label, _abbr in TRACKER_STEPS]
+    try:
+        active_index = step_ids.index(phase.tracker_step)
+    except ValueError:
+        active_index = 0
+
+    rows: list[dict[str, str]] = []
+    for index, (step_id, label, abbr) in enumerate(TRACKER_STEPS):
+        if phase.state == "complete":
+            state = "completed" if index <= active_index else "future"
+        elif phase.state == "intermission":
+            if index < active_index:
+                state = "completed"
+            elif index == active_index:
+                state = "up-next"
+            else:
+                state = "future"
+        else:
+            if index < active_index:
+                state = "completed"
+            elif index == active_index:
+                state = "active"
+            else:
+                state = "future"
+        rows.append(
+            {
+                "id": step_id,
+                "label": label,
+                "abbr": abbr,
+                "state": state,
+            }
+        )
+    return rows
+
+
+def timeline_state_for_stage(
+    stage_label: str,
+    phase: TournamentPhase,
+) -> TimelineState:
+    """Map a knockout stage label onto past/active/up-next/future."""
+    if not stage_label:
+        return "future"
+    if phase.state == "complete":
+        return "past"
+    if stage_label in phase.active_stage_labels:
+        return "active"
+    if phase.next_stage == stage_label or (
+        phase.tracker_step == "final_weekend"
+        and stage_label in {"Final", "Third Place"}
+        and phase.state == "intermission"
+    ):
+        return "up-next"
+
+    # Column order for knockout stages.
+    order = {
+        "Round of 32": 0,
+        "Round of 16": 1,
+        "Quarterfinals": 2,
+        "Semifinals": 3,
+        "Third Place": 4,
+        "Final": 5,
+    }
+    active_ranks = [
+        order[label] for label in phase.active_stage_labels if label in order
+    ]
+    stage_rank_value = order.get(stage_label)
+    if stage_rank_value is None:
+        return "future"
+    if active_ranks and stage_rank_value < min(active_ranks):
+        return "past"
+    if phase.next_stage and order.get(phase.next_stage, 99) > stage_rank_value:
+        # Stages before the upcoming next stage are past during intermission.
+        if phase.state == "intermission" and stage_rank_value < order.get(
+            phase.next_stage, 99
+        ):
+            return "past"
+    if phase.state == "intermission" and phase.next_stage:
+        next_rank = order.get(phase.next_stage)
+        if next_rank is not None and stage_rank_value < next_rank:
+            return "past"
+    if phase.state == "active" and active_ranks and stage_rank_value < min(active_ranks):
+        return "past"
+    # Group Stage has no knockout column; keep projected knockout cards readable.
+    if "Group Stage" in phase.active_stage_labels:
+        return "up-next"
+    if phase.state == "active" and active_ranks and stage_rank_value > max(active_ranks):
+        return "future"
+    return "future"
+
+
+def stamp_timeline_states(
+    elements: list[dict[str, Any]],
+    hour_epoch: int | None,
+) -> list[dict[str, Any]]:
+    """Stamp ``timeline_state`` onto MATCH and stage-header nodes."""
+    phase = phase_at_hour(hour_epoch)
+    updated: list[dict[str, Any]] = []
+    for el in elements:
+        if is_edge(el):
+            updated.append(el)
+            continue
+        data = dict(el.get("data") or {})
+        if is_stage_header(el):
+            label = str(data.get("label") or "")
+            # Final / 3rd header follows Final weekend active/up-next/past.
+            if label == "Final / 3rd":
+                if (
+                    "Final" in phase.active_stage_labels
+                    or "Third Place" in phase.active_stage_labels
+                    or phase.state == "complete"
+                ):
+                    if phase.state == "complete":
+                        data["timeline_state"] = "past"
+                    else:
+                        data["timeline_state"] = "active"
+                elif phase.tracker_step == "final_weekend":
+                    data["timeline_state"] = "up-next"
+                else:
+                    # Infer from Final column order.
+                    data["timeline_state"] = timeline_state_for_stage("Final", phase)
+            else:
+                data["timeline_state"] = timeline_state_for_stage(label, phase)
+            updated.append({**el, "data": data})
+            continue
+        stage = str(data.get("stage") or "")
+        if str(data.get("type") or "") == "MATCH" or stage:
+            data["timeline_state"] = timeline_state_for_stage(stage, phase)
+            updated.append({**el, "data": data})
+            continue
+        updated.append(el)
+    return updated
+
+
+def time_slider_marks(min_hour: int, max_hour: int) -> dict[int, dict[str, str]]:
+    """Build compact stage-start marks for the playback slider."""
+    marks: dict[int, dict[str, str]] = {}
+    windows = schedule_stage_windows()
+    for window in windows:
+        hour = window.start_hour
+        if hour < int(min_hour) or hour > int(max_hour):
+            continue
+        abbr = {
+            "group_stage": "Groups",
+            "round_of_32": "R32",
+            "round_of_16": "R16",
+            "quarterfinal": "QF",
+            "semifinal": "SF",
+            "third_place": "3rd",
+            "final": "Final",
+        }.get(window.stage_key, window.label)
+        marks[hour] = {
+            "label": abbr,
+            "style": {"fontSize": "10px", "color": "#94a3b8", "whiteSpace": "nowrap"},
+        }
+    if int(min_hour) not in marks:
+        marks[int(min_hour)] = {
+            "label": format_hour_label_compact(min_hour).replace(" UTC", ""),
+            "style": {"fontSize": "10px", "color": "#94a3b8", "whiteSpace": "nowrap"},
+        }
+    if int(max_hour) not in marks:
+        marks[int(max_hour)] = {
+            "label": "End",
+            "style": {"fontSize": "10px", "color": "#94a3b8", "whiteSpace": "nowrap"},
+        }
+    return marks
+
+
+def bracket_summary_text(
+    elements: list[dict[str, Any]] | None,
+    hour_epoch: int | None,
+) -> str:
+    """Concise screen-reader summary of the bracket at ``hour_epoch``.
+
+    When ``elements`` is omitted (typical for live scrub updates), return
+    phase + time only. Match counts are optional because they race the canvas
+    scrub callback when derived from a stale ``graph-cyto.elements`` State.
+    """
+    phase = phase_at_hour(hour_epoch)
+    time_text = format_hour_label_compact(hour_epoch)
+    base = f"{phase.accessible_summary}. Selected time {time_text}."
+    if not elements:
+        return base
+    projected = 0
+    resolved = 0
+    for el in elements:
+        if is_edge(el) or is_stage_header(el):
+            continue
+        data = el.get("data") or {}
+        if str(data.get("type") or "") != "MATCH":
+            continue
+        if data.get("resolved"):
+            resolved += 1
+        elif data.get("projected"):
+            projected += 1
+    return f"{base} {resolved} resolved matches, {projected} projected."
 
 
 def fifa_match_id(aliases: list[str] | None) -> int | None:
@@ -484,12 +873,18 @@ def bracket_layout() -> dict[str, Any]:
         "name": "preset",
         "animate": False,
         "fit": True,
-        "padding": 30,
+        "padding": BRACKET_LAYOUT_PADDING,
     }
 
 
 def bracket_stylesheet() -> list[dict[str, Any]]:
     """Cytoscape stylesheet tuned for LR match-card bracket view."""
+    # Flag slots: left-aligned on each row, sized ~22×14 inside 248×72.
+    flag_w = f"{(22 / MATCH_CARD_WIDTH) * 100:.3f}%"
+    flag_h = f"{(14 / MATCH_CARD_HEIGHT) * 100:.3f}%"
+    flag_x = f"{(10 / MATCH_CARD_WIDTH) * 100:.3f}%"
+    flag_y_home = f"{(14 / MATCH_CARD_HEIGHT) * 100:.3f}%"
+    flag_y_away = f"{(40 / MATCH_CARD_HEIGHT) * 100:.3f}%"
     styles: list[dict[str, Any]] = [
         {
             "selector": "node",
@@ -498,17 +893,18 @@ def bracket_stylesheet() -> list[dict[str, Any]]:
                 "text-valign": "center",
                 "text-halign": "center",
                 "text-wrap": "wrap",
-                "text-max-width": 150,
+                "text-max-width": 168,
                 "font-size": "11px",
+                "font-family": "JetBrains Mono, ui-monospace, monospace",
                 "font-weight": 600,
-                "color": "#0f172a",
-                "background-color": "#ffffff",
+                "color": "#e2e8f0",
+                "background-color": "#172338",
                 "border-width": 1.5,
-                "border-color": "#cbd5e1",
+                "border-color": "#334155",
                 "shape": "round-rectangle",
-                "width": 210,
-                "height": 64,
-                "padding": "8px",
+                "width": MATCH_CARD_WIDTH,
+                "height": MATCH_CARD_HEIGHT,
+                "padding": "10px",
                 "min-zoomed-font-size": 8,
                 "transition-property": "opacity, border-width, background-color",
                 "transition-duration": "150ms",
@@ -516,20 +912,18 @@ def bracket_stylesheet() -> list[dict[str, Any]]:
                 "background-fit": "none none",
                 "background-clip": "none none",
                 "background-repeat": "no-repeat no-repeat",
-                # Percentages scale with the node so flags do not shrink when zooming
-                # in (px lengths are zoom-invariant / screen space in Cytoscape).
-                "background-width": "10.476% 10.476%",
-                "background-height": "25% 25%",
-                "background-position-x": "4.762% 84.762%",
-                "background-position-y": "21.875% 53.125%",
-                "text-margin-x": 0,
+                "background-width": f"{flag_w} {flag_w}",
+                "background-height": f"{flag_h} {flag_h}",
+                "background-position-x": f"{flag_x} {flag_x}",
+                "background-position-y": f"{flag_y_home} {flag_y_away}",
+                "text-margin-x": 8,
                 "text-margin-y": 0,
                 "overlay-padding": 4,
-                "shadow-blur": 8,
-                "shadow-color": "#0f172a",
-                "shadow-opacity": 0.08,
+                "shadow-blur": 10,
+                "shadow-color": "#020617",
+                "shadow-opacity": 0.35,
                 "shadow-offset-x": 0,
-                "shadow-offset-y": 2,
+                "shadow-offset-y": 3,
             },
         },
         {
@@ -538,22 +932,22 @@ def bracket_stylesheet() -> list[dict[str, Any]]:
                 "label": "",
                 "curve-style": "taxi",
                 "taxi-direction": "horizontal",
-                "taxi-turn": 28,
-                "target-arrow-shape": "triangle",
-                "arrow-scale": 0.75,
-                "width": 2,
-                "line-color": "#94a3b8",
-                "target-arrow-color": "#94a3b8",
-                "opacity": 0.85,
+                "taxi-turn": 32,
+                "target-arrow-shape": "none",
+                "arrow-scale": 0.6,
+                "width": 1.75,
+                "line-color": "#475569",
+                "target-arrow-color": "#475569",
+                "opacity": 0.7,
             },
         },
         {
             "selector": ":selected",
             "style": {
                 "border-width": 3,
-                "border-color": "#0f766e",
-                "line-color": "#0f766e",
-                "target-arrow-color": "#0f766e",
+                "border-color": "#22d3ee",
+                "line-color": "#22d3ee",
+                "target-arrow-color": "#22d3ee",
                 "z-index": 999,
             },
         },
@@ -563,25 +957,25 @@ def bracket_stylesheet() -> list[dict[str, Any]]:
         },
         {
             "selector": ".path-muted",
-            "style": {"opacity": 0.18},
+            "style": {"opacity": 0.2},
         },
         {
             "selector": ".path-active",
             "style": {
                 "opacity": 1,
                 "border-width": 2.75,
-                "border-color": "#0f766e",
-                "line-color": "#0f766e",
-                "target-arrow-color": "#0f766e",
-                "width": 2.75,
+                "border-color": "#22d3ee",
+                "line-color": "#22d3ee",
+                "target-arrow-color": "#22d3ee",
+                "width": 2.5,
                 "z-index": 900,
             },
         },
         {
             "selector": "node.path-active",
             "style": {
-                "background-color": "#f0fdfa",
-                "border-color": "#0f766e",
+                "background-color": "#0f2a3a",
+                "border-color": "#22d3ee",
             },
         },
         {
@@ -589,25 +983,27 @@ def bracket_stylesheet() -> list[dict[str, Any]]:
             "style": {
                 "label": "data(label)",
                 "shape": "round-rectangle",
-                "background-color": "#f8fafc",
+                "background-color": "#111c2e",
                 "background-opacity": 1,
-                "border-width": 0,
-                "width": 190,
-                "height": 30,
+                "border-width": 1,
+                "border-color": "#1e293b",
+                "width": MATCH_CARD_WIDTH,
+                "height": 32,
                 "font-size": "12px",
+                "font-family": "Inter, system-ui, sans-serif",
                 "font-weight": 700,
-                "color": "#475569",
+                "color": "#94a3b8",
                 "text-valign": "center",
                 "text-halign": "center",
                 "text-wrap": "wrap",
-                "text-max-width": 180,
+                "text-max-width": MATCH_CARD_WIDTH - 16,
+                "text-margin-x": 0,
                 "padding": "0px",
                 "events": "no",
                 "background-image": "none",
                 "shadow-opacity": 0,
             },
         },
-        # Stage accent borders.
         {
             "selector": 'node[stage = "Round of 32"]',
             "style": {"border-color": "#38bdf8"},
@@ -627,15 +1023,11 @@ def bracket_stylesheet() -> list[dict[str, Any]]:
         {
             "selector": 'node[stage = "Final"]',
             "style": {
-                "border-color": "#0f766e",
-                "border-width": 2.5,
-                "width": 220,
-                "height": 68,
-                "font-size": "12px",
-                "background-width": "10% 10%",
-                "background-height": "23.529% 23.529%",
-                "background-position-x": "4.545% 85.455%",
-                "background-position-y": "20.588% 50%",
+                "border-color": "#14b8a6",
+                "border-width": 2.25,
+                "width": MATCH_CARD_WIDTH + 8,
+                "height": MATCH_CARD_HEIGHT + 4,
+                "font-size": "11px",
             },
         },
         {
@@ -645,11 +1037,10 @@ def bracket_stylesheet() -> list[dict[str, Any]]:
             },
         },
         {
-            # Mint fill = match resolved at the selected tournament hour.
             "selector": "node[?resolved]",
             "style": {
-                "background-color": "#ecfdf5",
-                "border-color": "#0f766e",
+                "background-color": "#0f2f28",
+                "border-color": "#14b8a6",
             },
         },
         {
@@ -661,19 +1052,66 @@ def bracket_stylesheet() -> list[dict[str, Any]]:
         {
             "selector": "node[?is_champion]",
             "style": {
-                "border-color": "#ca8a04",
+                "border-color": "#eab308",
                 "border-width": 3,
-                "background-color": "#fffbeb",
+                "background-color": "#2a2412",
                 "font-weight": 700,
             },
         },
         {
             "selector": "node[?is_third_place_winner]",
             "style": {
-                "border-color": "#475569",
+                "border-color": "#94a3b8",
                 "border-width": 2.5,
-                "background-color": "#f8fafc",
+                "background-color": "#1a2333",
                 "font-weight": 700,
+            },
+        },
+        {
+            "selector": 'node[timeline_state = "past"]',
+            "style": {
+                "opacity": 0.72,
+            },
+        },
+        {
+            "selector": 'node[timeline_state = "active"]',
+            "style": {
+                "opacity": 1,
+                "border-width": 2.5,
+            },
+        },
+        {
+            "selector": f'node.{STAGE_HEADER_CLASS}[timeline_state = "active"]',
+            "style": {
+                "color": "#22d3ee",
+                "border-color": "#22d3ee",
+                "background-color": "#0f2a3a",
+            },
+        },
+        {
+            "selector": f'node.{STAGE_HEADER_CLASS}[timeline_state = "up-next"]',
+            "style": {
+                "color": "#e2e8f0",
+                "border-style": "dashed",
+                "border-color": "#64748b",
+            },
+        },
+        {
+            "selector": 'node[timeline_state = "future"]',
+            "style": {
+                "opacity": 0.55,
+            },
+        },
+        {
+            "selector": f'node.{STAGE_HEADER_CLASS}[timeline_state = "future"]',
+            "style": {
+                "opacity": 0.55,
+            },
+        },
+        {
+            "selector": f'node.{STAGE_HEADER_CLASS}[timeline_state = "past"]',
+            "style": {
+                "opacity": 0.65,
             },
         },
     ]

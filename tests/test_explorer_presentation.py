@@ -267,8 +267,94 @@ def test_bracket_stylesheet_and_layout_contract() -> None:
     resolved_style = next(
         rule["style"] for rule in styles if rule["selector"] == "node[?resolved]"
     )
-    assert resolved_style["background-color"] == "#ecfdf5"
-    assert resolved_style["border-color"] == "#0f766e"
+    assert resolved_style["background-color"] == "#0f2f28"
+    assert resolved_style["border-color"] == "#14b8a6"
+    assert edge_style["target-arrow-shape"] == "none"
+    assert header_style["width"] == node_style["width"]
+    assert "node[timeline_state = \"active\"]" in selectors
+    assert layout["padding"] >= 40
+
+
+def test_format_hour_labels_compact_and_full() -> None:
+    from oddsgraph.explorer.presentation import (
+        format_hour_iso,
+        format_hour_label_compact,
+    )
+
+    epoch = 1_783_200_000
+    compact = format_hour_label_compact(epoch)
+    full = format_hour_label(epoch)
+    assert "·" in compact
+    assert compact.endswith("UTC")
+    assert "2026" not in compact or "Jun" in compact
+    assert "UTC" in full
+    assert "at" in full
+    assert format_hour_iso(epoch).endswith("Z")
+    assert format_hour_label(None) == "No odds history"
+    assert format_hour_label_compact(None) == "No odds history"
+
+
+def test_phase_at_hour_covers_groups_gaps_and_final_weekend() -> None:
+    from oddsgraph.bracket import schedule_stage_windows
+    from oddsgraph.explorer.presentation import phase_at_hour, tracker_step_states
+
+    windows = {w.stage_key: w for w in schedule_stage_windows()}
+    groups = phase_at_hour(windows["group_stage"].start_epoch)
+    assert groups.state == "active"
+    assert groups.tracker_step == "groups"
+    assert "projected" in groups.detail.lower()
+
+    r32 = phase_at_hour(windows["round_of_32"].start_epoch)
+    assert r32.label == "Round of 32"
+    assert r32.state == "active"
+
+    before_qf = phase_at_hour(windows["quarterfinal"].start_epoch - 3600)
+    assert before_qf.state == "intermission"
+    assert before_qf.next_stage == "Quarterfinals"
+    assert before_qf.tracker_step == "qf"
+
+    third = phase_at_hour(windows["third_place"].start_epoch)
+    assert third.tracker_step == "final_weekend"
+    assert "Third" in third.detail
+
+    final = phase_at_hour(windows["final"].start_epoch)
+    assert final.tracker_step == "final_weekend"
+    assert final.state == "active"
+
+    complete = phase_at_hour(windows["final"].end_epoch)
+    assert complete.state == "complete"
+    steps = tracker_step_states(complete)
+    assert steps[-1]["state"] == "completed"
+
+
+def test_apply_time_slice_stamps_timeline_state() -> None:
+    from oddsgraph.bracket import schedule_stage_windows
+    from oddsgraph.explorer.presentation import bracket_stage_headers
+
+    windows = {w.stage_key: w for w in schedule_stage_windows()}
+    elements = [
+        {
+            "data": {
+                "id": "match:a",
+                "type": "MATCH",
+                "stage": "Round of 32",
+                "label": "Brazil vs. France",
+                "home_team": "Brazil",
+                "away_team": "France",
+                "schedule_home": "Brazil",
+                "schedule_away": "France",
+            },
+            "classes": "MATCH",
+        },
+        *bracket_stage_headers(columns={0, 2}),
+    ]
+    during_groups = apply_time_slice(elements, windows["group_stage"].start_epoch)
+    by_id = {el["data"]["id"]: el["data"] for el in during_groups}
+    assert by_id["match:a"]["timeline_state"] == "up-next"
+    during_r32 = apply_time_slice(elements, windows["round_of_32"].start_epoch)
+    by_id = {el["data"]["id"]: el["data"] for el in during_r32}
+    assert by_id["match:a"]["timeline_state"] == "active"
+    assert by_id["stage-header:0"]["timeline_state"] == "active"
 
 
 def test_home_prob_at_hour_and_winner_lock() -> None:
@@ -327,3 +413,39 @@ def test_apply_time_slice_stamps_current_home_prob() -> None:
     assert locked[0]["data"]["resolved"] is True
     assert "2026" not in format_hour_label(None)
     assert "UTC" in format_hour_label(1_783_200_000)
+
+
+def test_bracket_summary_text_omits_counts_without_elements() -> None:
+    from oddsgraph.bracket import schedule_stage_windows
+    from oddsgraph.explorer.presentation import bracket_summary_text
+
+    windows = {w.stage_key: w for w in schedule_stage_windows()}
+    hour = windows["final"].end_epoch
+    plain = bracket_summary_text(None, hour)
+    assert "Selected time" in plain
+    assert "resolved matches" not in plain
+
+    counted = bracket_summary_text(
+        [
+            {
+                "data": {
+                    "id": "m1",
+                    "type": "MATCH",
+                    "resolved": True,
+                    "projected": False,
+                },
+                "classes": "MATCH",
+            },
+            {
+                "data": {
+                    "id": "m2",
+                    "type": "MATCH",
+                    "resolved": False,
+                    "projected": True,
+                },
+                "classes": "MATCH",
+            },
+        ],
+        hour,
+    )
+    assert "1 resolved matches, 1 projected." in counted

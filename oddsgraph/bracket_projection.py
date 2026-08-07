@@ -464,6 +464,35 @@ def format_prob_label(prob: float | None) -> str:
     return f"{round(prob * 100):d}%"
 
 
+# Visual team-name budget inside Cytoscape cards (probability column is fixed).
+_CARD_TEAM_NAME_WIDTH = 14
+_FIGURE_SPACE = "\u2007"
+_NBSP = "\u00a0"
+
+
+def truncate_team_name(name: str, *, width: int = _CARD_TEAM_NAME_WIDTH) -> str:
+    """Truncate a display team name for the match card without losing identity."""
+    text = str(name or "").strip()
+    if len(text) <= width:
+        return text
+    if width <= 1:
+        return text[:width]
+    return text[: width - 1].rstrip() + "…"
+
+
+def _pad_team_name(name: str, *, width: int = _CARD_TEAM_NAME_WIDTH) -> str:
+    truncated = truncate_team_name(name, width=width)
+    return truncated + (_FIGURE_SPACE * max(0, width - len(truncated)))
+
+
+def _pad_mark(mark: str, *, width: int = 8) -> str:
+    """Right-align a probability / winner mark in a fixed-width column."""
+    text = str(mark)
+    if len(text) >= width:
+        return text
+    return (_FIGURE_SPACE * (width - len(text))) + text
+
+
 def card_short_label(
     home: str,
     away: str,
@@ -473,25 +502,19 @@ def card_short_label(
     winner: str | None = None,
     stage: str | None = None,
 ) -> str:
-    """Build the two-line match card text, marking Final/Third Place winners."""
+    """Build the two-line match card text with a fixed probability column.
+
+    Resolved Final / Third Place (and other knockout) winners keep numeric
+    ``100%`` / ``0%`` on the card. Champion / 3rd meaning is carried by
+    ``is_champion`` / ``is_third_place_winner`` styling and inspector copy.
+    ``winner`` / ``stage`` remain in the signature for call-site compatibility.
+    """
+    del winner, stage
     home_mark = format_prob_label(home_prob)
     away_mark = format_prob_label(away_prob)
-    if winner and stage == "Final":
-        if winner == home:
-            home_mark = "Champion"
-        elif winner == away:
-            away_mark = "Champion"
-    elif winner and stage == "Third Place":
-        if winner == home:
-            home_mark = "3rd"
-        elif winner == away:
-            away_mark = "3rd"
-    elif winner:
-        if winner == home:
-            home_mark = "W"
-        elif winner == away:
-            away_mark = "W"
-    return f"{home}  {home_mark}\n{away}  {away_mark}"
+    home_row = f"{_pad_team_name(home)}{_NBSP}{_pad_mark(home_mark)}"
+    away_row = f"{_pad_team_name(away)}{_NBSP}{_pad_mark(away_mark)}"
+    return f"{home_row}\n{away_row}"
 
 
 _STAGE_PROCESS_ORDER: dict[str, int] = {

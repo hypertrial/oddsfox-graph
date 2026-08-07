@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
@@ -84,11 +85,46 @@ def _kickoff_epoch(kickoff_at_utc: str | None) -> int | None:
     return int(dt.timestamp())
 
 
+# Approximate lock time after kickoff for completed schedule fixtures.
+_SCHEDULE_MATCH_DURATION_SECONDS = 2 * 3600
+
+# Explorer stage tracker / playback window order (Third Place before Final).
+STAGE_WINDOW_ORDER: tuple[str, ...] = (
+    "group_stage",
+    "round_of_32",
+    "round_of_16",
+    "quarterfinal",
+    "semifinal",
+    "third_place",
+    "final",
+)
+
+
+@dataclass(frozen=True)
+class StageWindow:
+    """Inclusive schedule window for one tournament stage."""
+
+    stage_key: str
+    label: str
+    start_epoch: int
+    end_epoch: int
+    match_count: int
+
+    @property
+    def start_hour(self) -> int:
+        return int(self.start_epoch) - (int(self.start_epoch) % 3600)
+
+    @property
+    def end_hour(self) -> int:
+        return int(self.end_epoch) - (int(self.end_epoch) % 3600)
+
+
 def tournament_time_bounds() -> tuple[int | None, int | None]:
     """Hour-aligned UTC bounds from the first to last schedule kickoff.
 
-    The explorer time slider uses this window so scrubbing stays inside the
-    tournament rather than early Champion-market history.
+    Preserved for callers that need the kickoff span. The explorer playback
+    slider uses :func:`tournament_playback_bounds` so the Final full-time
+    (Champion lock) remains reachable.
     """
     schedule = load_wc2026_schedule()
     epochs: list[int] = []
@@ -107,8 +143,51 @@ def tournament_time_bounds() -> tuple[int | None, int | None]:
     return start_hour, end_hour
 
 
-# Approximate lock time after kickoff for completed schedule fixtures.
-_SCHEDULE_MATCH_DURATION_SECONDS = 2 * 3600
+@lru_cache(maxsize=1)
+def schedule_stage_windows() -> tuple[StageWindow, ...]:
+    """Return immutable per-stage windows from first kickoff to last full-time."""
+    schedule = load_wc2026_schedule()
+    by_key: dict[str, list[int]] = defaultdict(list)
+    for raw in schedule.get("fixtures") or []:
+        if not isinstance(raw, dict):
+            continue
+        stage_key = str(raw.get("stage_key") or "")
+        if stage_key not in STAGE_KEY_TO_LABEL:
+            continue
+        epoch = _kickoff_epoch(raw.get("kickoff_at_utc"))
+        if epoch is None:
+            continue
+        by_key[stage_key].append(int(epoch))
+
+    windows: list[StageWindow] = []
+    for stage_key in STAGE_WINDOW_ORDER:
+        kicks = by_key.get(stage_key) or []
+        if not kicks:
+            continue
+        start = min(kicks)
+        end = max(kicks) + _SCHEDULE_MATCH_DURATION_SECONDS
+        windows.append(
+            StageWindow(
+                stage_key=stage_key,
+                label=STAGE_KEY_TO_LABEL[stage_key],
+                start_epoch=start,
+                end_epoch=end,
+                match_count=len(kicks),
+            )
+        )
+    return tuple(windows)
+
+
+def tournament_playback_bounds() -> tuple[int | None, int | None]:
+    """Hour-aligned explorer slider bounds through Final full-time."""
+    windows = schedule_stage_windows()
+    if not windows:
+        return tournament_time_bounds()
+    start = min(w.start_epoch for w in windows)
+    end = max(w.end_epoch for w in windows)
+    start_hour = start - (start % 3600)
+    end_hour = end - (end % 3600)
+    return start_hour, end_hour
 
 
 @lru_cache(maxsize=1)

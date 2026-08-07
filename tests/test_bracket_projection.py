@@ -36,19 +36,27 @@ def test_normalize_and_conditional_ratio() -> None:
     assert reach_prob_for_rank("Brazil", "Round of 16", 100, stage_odds) == 0.8
 
 
-def test_card_short_label_marks_champion_and_third() -> None:
-    assert "Champion" in card_short_label(
+def test_card_short_label_locks_resolved_probs_to_100() -> None:
+    champion = card_short_label(
         "Spain", "Argentina", 1.0, 0.0, winner="Spain", stage="Final"
     )
-    assert card_short_label(
-        "Spain", "Argentina", 1.0, 0.0, winner="Spain", stage="Final"
-    ).startswith("Spain  Champion")
-    assert "3rd" in card_short_label(
+    assert "100%" in champion
+    assert "0%" in champion
+    assert "Champion" not in champion
+    assert champion.split("\n")[0].startswith("Spain")
+    third = card_short_label(
         "France", "England", 0.0, 1.0, winner="England", stage="Third Place"
     )
-    assert card_short_label(
-        "France", "England", 0.0, 1.0, winner="England", stage="Third Place"
-    ).endswith("England  3rd")
+    assert "100%" in third
+    assert "0%" in third
+    assert "3rd" not in third
+    assert third.split("\n")[1].startswith("England")
+    long_name = card_short_label(
+        "Bosnia and Herzegovina", "United States", 0.4, 0.6
+    )
+    assert "…" in long_name or "Bosnia" in long_name
+    assert "40%" in long_name
+    assert "\u2007" in long_name or "\u00a0" in long_name
 
 
 def test_apply_projection_flags_champion_and_third_place_winner() -> None:
@@ -92,10 +100,18 @@ def test_apply_projection_flags_champion_and_third_place_winner() -> None:
     by_id = {el["data"]["id"]: el["data"] for el in out}
     assert by_id["final"]["is_champion"] is True
     assert by_id["final"]["resolved"] is True
-    assert "Champion" in by_id["final"]["short_label"]
+    assert by_id["final"]["current_home_prob"] == 1.0
+    assert by_id["final"]["home_prob_label"] == "100%"
+    assert by_id["final"]["away_prob_label"] == "0%"
+    assert "100%" in by_id["final"]["short_label"]
+    assert "Champion" not in by_id["final"]["short_label"]
     assert by_id["third"]["is_third_place_winner"] is True
     assert by_id["third"]["resolved"] is True
-    assert "3rd" in by_id["third"]["short_label"]
+    assert by_id["third"]["current_home_prob"] == 0.0
+    assert by_id["third"]["home_prob_label"] == "0%"
+    assert by_id["third"]["away_prob_label"] == "100%"
+    assert "100%" in by_id["third"]["short_label"]
+    assert "3rd" not in by_id["third"]["short_label"]
 
     before = apply_bracket_projection(elements, third_end - 1, {})
     before_by_id = {el["data"]["id"]: el["data"] for el in before}

@@ -227,27 +227,31 @@ def test_remove_from_canvas(tmp_path: Path) -> None:
 
 
 def test_toggle_controls_and_inspector_classnames() -> None:
-    """Sidebar toggles flip ``is-open`` class names used by CSS collapse."""
+    """Drawer toggles flip ``is-open`` class names used by CSS collapse."""
 
     def toggle(is_open: bool, *, kind: str) -> tuple[str, bool]:
         next_open = not bool(is_open)
-        base = "explorer-controls" if kind == "controls" else "explorer-inspector"
+        base = (
+            "explorer-drawer explorer-controls"
+            if kind == "controls"
+            else "explorer-drawer explorer-inspector"
+        )
         classes = f"{base} is-open" if next_open else base
         return classes, next_open
 
     classes, opened = toggle(True, kind="controls")
     assert opened is False
-    assert classes == "explorer-controls"
+    assert classes == "explorer-drawer explorer-controls"
     classes, opened = toggle(False, kind="controls")
     assert opened is True
-    assert classes == "explorer-controls is-open"
+    assert classes == "explorer-drawer explorer-controls is-open"
 
     classes, opened = toggle(True, kind="inspector")
     assert opened is False
-    assert classes == "explorer-inspector"
+    assert classes == "explorer-drawer explorer-inspector"
     classes, opened = toggle(False, kind="inspector")
     assert opened is True
-    assert classes == "explorer-inspector is-open"
+    assert classes == "explorer-drawer explorer-inspector is-open"
 
 
 def test_next_play_toggle_and_advance() -> None:
@@ -259,7 +263,7 @@ def test_next_play_toggle_and_advance() -> None:
         min_hour=0,
         max_hour=200,
         slider_disabled=True,
-    ) == (True, "Play", False, None)
+    ) == (True, "Play", False, None, "Play tournament timeline", "false")
 
     assert next_play_toggle(
         playing=True,
@@ -267,7 +271,7 @@ def test_next_play_toggle_and_advance() -> None:
         min_hour=0,
         max_hour=200,
         slider_disabled=False,
-    ) == (True, "Play", False, None)
+    ) == (True, "Play", False, None, "Play tournament timeline", "false")
 
     assert next_play_toggle(
         playing=False,
@@ -275,7 +279,7 @@ def test_next_play_toggle_and_advance() -> None:
         min_hour=0,
         max_hour=200,
         slider_disabled=False,
-    ) == (False, "Pause", True, None)
+    ) == (False, "Pause", True, None, "Pause tournament timeline", "true")
 
     assert next_play_toggle(
         playing=False,
@@ -283,7 +287,7 @@ def test_next_play_toggle_and_advance() -> None:
         min_hour=0,
         max_hour=200,
         slider_disabled=False,
-    ) == (False, "Pause", True, 0)
+    ) == (False, "Pause", True, 0, "Pause tournament timeline", "true")
 
     assert next_play_advance(playing=False, hour_epoch=100, max_hour=10_000) is None
     assert next_play_advance(playing=True, hour_epoch=100, max_hour=10_000) == (
@@ -291,10 +295,32 @@ def test_next_play_toggle_and_advance() -> None:
         False,
         "Pause",
         True,
+        "Pause tournament timeline",
+        "true",
     )
     assert next_play_advance(playing=True, hour_epoch=10_000 - 3600, max_hour=10_000) == (
         10_000,
         True,
         "Play",
         False,
+        "Play tournament timeline",
+        "false",
     )
+
+
+def test_phase_view_update_skips_tracker_when_unchanged() -> None:
+    from dash import no_update
+
+    from oddsgraph.bracket import schedule_stage_windows
+    from oddsgraph.explorer.callbacks import phase_view_update
+
+    windows = {w.stage_key: w for w in schedule_stage_windows()}
+    hour = windows["round_of_32"].start_epoch
+    first = phase_view_update(hour_epoch=hour, previous_phase_key=None)
+    assert first[3].startswith("active:round_of_32")
+    assert first[2] is not no_update
+    assert "resolved matches" not in first[4]
+    second = phase_view_update(hour_epoch=hour + 3600, previous_phase_key=first[3])
+    assert second[2] is no_update
+    assert second[3] == first[3]
+    assert "Selected time" in second[4]

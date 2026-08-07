@@ -22,8 +22,8 @@ and `--build-dir` (also available as a root/global option before the subcommand)
 
 Requires `build/nodes.parquet` and `build/edges.parquet` from a prior
 `oddsgraph build` / `oddsgraph run`. The tournament time slider always spans
-official schedule kickoffs. Future-round projections and advance probabilities
-additionally need:
+official schedule kickoffs through Final full-time. Future-round projections
+and advance probabilities additionally need:
 
 - `build/odds_history.parquet` (direct match advance odds)
 - `build/stage_odds_history.parquet` (team stage-reach / champion odds)
@@ -32,17 +32,21 @@ Both are produced by `oddsgraph odds-history` and by `oddsgraph run`.
 
 ## Default view
 
-The **knockout bracket** is a classic left-to-right tournament:
+The **knockout bracket** is a classic left-to-right tournament on a dark
+sports-data canvas:
 
 - Exactly 32 `MATCH` cards connected by `ADVANCES_TO` edges
 - Round of 32 → Round of 16 → Quarterfinals → Semifinals → Final / Third Place
 - Each card shows **country flags**, team names, and **advance probabilities**
 - Non-interactive column headers label each stage across the canvas
+- A persistent **phase tracker** (Groups → Final weekend) highlights the
+  schedule window for the selected hour, including intermissions
 - Deterministic `preset` layout (not a force-directed hairball)
-- Orthogonal taxi edges without repeated `ADVANCES_TO` labels
+- Orthogonal taxi edges without arrowheads or repeated `ADVANCES_TO` labels
 - Click a match to open the inspector and highlight its path through the DAG
-- Hourly **Tournament time** slider (official start → end) reprojects unresolved
-  future matchups; **Play** advances one hour at a time (one day / 2 seconds)
+- Floating **playback dock**: compact UTC time (`Jun 28 · 19:00 UTC`), phase
+  badge, hourly slider, Play/Pause, Reset view, and live action status
+  (hide/reset feedback stays visible even when the inspector is closed)
 
 ### Projection rules
 
@@ -59,23 +63,29 @@ At the selected hour:
 4. Third Place projects the most likely semifinal loser from each branch; it
    uses direct matchup odds when available, otherwise shows an explicit
    unavailable probability (`—`) rather than inventing 50/50 odds.
-5. Dashed borders mark projected (not yet locked) matchups. Mint/green fill
-   marks matches resolved at the selected hour; numeric percentages remain the
+5. Dashed borders mark projected (not yet locked) matchups. Teal fill marks
+   matches resolved at the selected hour; numeric percentages remain the
    primary odds signal for unfinished games.
-6. When a match is locked, the winner is marked on the card (`W`). The Final
-   shows **Champion** and Third Place shows **3rd** (Spain / England in the
-   curated schedule), with stronger card borders once those results lock.
+6. When a match is locked, cards show **100%** / **0%** for the winner and
+   loser. The Final uses champion card styling and Third Place uses third-place
+   winner styling (Spain / England in the curated schedule) once those results
+   lock at full time.
 
 ### Progressive controls
 
-- Primary: Tournament time slider (start → end of the official schedule), Play
-  (one hour per step; one day every 2 seconds), Reset
-- Advanced (collapsed by default): confidence and inference-method filters
+- Primary: floating playback dock (tournament start → Final full-time), Play
+  (one hour per step; one day every 2 seconds), Reset view
+- **Filters & legend** drawer (closed by default): confidence / inference
+  filters, visual legend, projection help, and data-source metadata
 - Hover a card for a compact preview; the inspector opens on selection and
-  shows identity, provenance, and evidence
+  leads with match status / odds before graph metadata
+- Phase tracker stays visible on laptop and tablet widths; narrow viewports
+  use abbreviated labels with full accessible names
 
-Use the **Controls** / **Inspector** toggles on any viewport width so the
-canvas can reclaim space when a sidebar is collapsed.
+During Group Stage the tracker says the knockout bracket is projected. Between
+knockout rounds it shows the next stage (for example “Quarterfinals next”).
+Third Place and Final share the Final weekend tracker step, with the precise
+subphase in the playback badge.
 
 ## See also
 

@@ -128,10 +128,11 @@ oddsgraph explore         # http://127.0.0.1:8050
 ```
 
 Default view is a left-to-right knockout bracket with flags, numeric advance
-probabilities, and an hourly projection slider (when `odds_history.parquet`
-and `stage_odds_history.parquet` are present). Compiled propositions still
-bridge covered markets into the exported graph via `REFERS_TO` — residual types
-may still lack that bridge; see [Explorer](docs/guides/explorer.md) and
+probabilities, a floating playback dock, and a schedule-aware phase tracker
+(when `odds_history.parquet` and `stage_odds_history.parquet` are present).
+Compiled propositions still bridge covered markets into the exported graph via
+`REFERS_TO` — residual types may still lack that bridge; see
+[Explorer](docs/guides/explorer.md) and
 [Known limitations](docs/concepts/limitations.md).
 
 ## Stack

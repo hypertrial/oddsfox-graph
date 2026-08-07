@@ -31,6 +31,33 @@ def _m(**kwargs) -> SemanticMarket:
     return SemanticMarket(**defaults)
 
 
+def test_tournament_playback_bounds_extend_through_final_full_time() -> None:
+    from oddsgraph.bracket import (
+        schedule_stage_windows,
+        tournament_playback_bounds,
+        tournament_time_bounds,
+    )
+
+    windows = schedule_stage_windows()
+    assert [w.stage_key for w in windows] == [
+        "group_stage",
+        "round_of_32",
+        "round_of_16",
+        "quarterfinal",
+        "semifinal",
+        "third_place",
+        "final",
+    ]
+    kickoff_start, kickoff_end = tournament_time_bounds()
+    play_start, play_end = tournament_playback_bounds()
+    assert play_start == kickoff_start
+    assert play_end is not None and kickoff_end is not None
+    assert play_end > kickoff_end
+    assert play_end == windows[-1].end_hour
+    assert windows[0].match_count == 72
+    assert windows[-1].label == "Final"
+
+
 def test_schedule_has_104_fixtures_with_expected_stage_counts() -> None:
     schedule = load_wc2026_schedule()
     fixtures = schedule["fixtures"]

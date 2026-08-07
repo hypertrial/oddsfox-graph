@@ -17,27 +17,37 @@ flags and output schema as pre-1.0 and subject to change.
 
 ### Added
 
+- Explorer dark sports-data shell: branded header, persistent phase tracker,
+  floating playback dock, and on-demand Filters & legend / Inspector drawers.
+- Schedule-derived tournament phase model with active, intermission, Final
+  weekend, and complete states; compact UTC timestamps (`Jun 28 · 19:00 UTC`)
+  plus full tooltip/ISO forms.
+- Explorer playback bounds extend through Final full-time so Champion lock is
+  reachable on the slider.
 - `stage_odds_history.parquet` from `oddsgraph odds-history` / `run`: hourly
   team stage-reach and World Cup Winner probabilities for explorer projection.
 - Explorer projects unresolved future matchups from feeder-branch leaders,
   shows numeric advance probabilities on every card, and renders local SVG
   country flags on both sides of each match node.
-- Modernized explorer shell: denser spacing, contextual inspector (opens on
-  selection), mint/green fill for resolved matches, dashed borders for
-  projected cards.
 - Explorer Play control advances tournament time one hour at a time at a rate
   of one day every two seconds.
-- Explorer Final / Third Place cards mark schedule winners as **Champion** /
-  **3rd** (Spain and England in the curated WC2026 schedule) with distinct
-  card styling once the match is locked.
+- Explorer Final / Third Place cards lock winners to **100%** / **0%** at full
+  time (Spain and England in the curated WC2026 schedule) with distinct
+  champion / third-place card styling once the match is locked.
 
 ### Changed
 
-- Explorer match-card tint encodes resolution, not favorite: mint/green fill
-  means the match is resolved at the selected tournament hour; unfinished
-  cards stay white and rely on numeric percentages.
-- Explorer time slider spans official tournament kickoffs (first → last
-  fixture), not the full early Champion-market odds-history window.
+- Explorer match cards use a wider dark layout with aligned probability
+  columns, row-aligned flags, and taxi connectors without arrowheads.
+- Explorer Controls moved into a closed-by-default utility drawer; playback
+  lives in the floating dock instead of a persistent left sidebar. Hide/reset
+  action status also lives in the dock so feedback stays visible when the
+  inspector is closed.
+- Explorer match-card tint encodes resolution, not favorite: teal fill means
+  the match is resolved at the selected tournament hour; unfinished cards
+  rely on numeric percentages and dashed borders when projected.
+- Explorer time slider spans official tournament kickoffs through Final
+  full-time, not the full early Champion-market odds-history window.
 
 ### Fixed
 

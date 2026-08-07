@@ -109,11 +109,11 @@ def remove_from_canvas(
     min_confidence: float,
     inference_method: str,
 ) -> CanvasMutation:
-    """Remove the selected node and its incident edges from the canvas."""
+    """Hide the selected node and its incident edges from the canvas."""
     if not selected_node_id:
         return (
             no_update,
-            "Select a node before removing.",
+            "Select a match before hiding.",
             no_update,
             no_update,
             no_update,
@@ -136,7 +136,7 @@ def remove_from_canvas(
     )
     return (
         cleaned,
-        f"Removed {selected_node_id} from canvas.",
+        f"Hidden {selected_node_id} from canvas. Reset view restores it.",
         no_update,
         None,
         None,

@@ -116,7 +116,7 @@ def test_build_app_registers_layout_assets_and_callbacks(tmp_path: Path) -> None
     assert TIME_PLAY_MS_PER_HOUR == round(2000 / 24)
 
     app = build_app(settings)
-    assert app.title == "oddsgraph explorer"
+    assert app.title == "OddsFox Graph explorer"
     layout = app.layout
     assert layout is not None
 
@@ -135,8 +135,26 @@ def test_build_app_registers_layout_assets_and_callbacks(tmp_path: Path) -> None
         "toggle-inspector",
         "confidence-filter",
         "remove-button",
+        "stage-tracker",
+        "phase-badge",
+        "bracket-summary",
+        "controls-panel",
+        "phase-key",
+        "close-controls",
+        "close-inspector",
     ):
         assert component_id in rendered
+
+    assert "controls-open" in rendered
+    assert "Filters & legend" in rendered
+    assert "Hide match" in rendered
+    assert "action-status" in rendered
+    assert "Teal tint = match resolved" in rendered
+    assert "lock to 100% / 0%" in rendered
+    assert "shows Champion" not in rendered
+    assert (ASSETS_DIR / "oddsfox-favicon.png").exists()
+    assert (ASSETS_DIR / "inter-latin-variable.woff2").exists()
+    assert (ASSETS_DIR / "jetbrains-mono-latin-variable.woff2").exists()
 
     for removed_id in (
         "view-mode",
@@ -148,6 +166,9 @@ def test_build_app_registers_layout_assets_and_callbacks(tmp_path: Path) -> None
         "expand-button",
     ):
         assert removed_id not in rendered
+
+    # Utility drawer defaults closed (no is-open on controls panel class).
+    assert "explorer-controls is-open" not in rendered
 
     styles = bracket_stylesheet()
     assert any(rule["selector"] == "edge" for rule in styles)
