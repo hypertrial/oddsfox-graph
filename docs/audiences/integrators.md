@@ -49,11 +49,66 @@ and validation path.
 - Ignoring `rejected_edges.parquet` when debugging missing relationships
 - Materializing transitive `IMPLIES` by hand instead of using `oddsgraph closure`
 
+## Query recipes
+
+Runnable DuckDB snippets over a completed `build/`. Adjust paths if you used
+`--build-dir`.
+
+Bridge covered outcomes to topology via `REFERS_TO`:
+
+```bash
+duckdb -c "
+SELECT o.canonical_id AS outcome_id, o.label AS outcome,
+       t.canonical_id AS entity_id, t.type AS entity_type, t.label AS entity
+FROM 'build/edges.parquet' e
+JOIN 'build/nodes.parquet' o ON o.canonical_id = e.source_id
+JOIN 'build/nodes.parquet' t ON t.canonical_id = e.target_id
+WHERE e.edge_type = 'REFERS_TO'
+ORDER BY o.label
+LIMIT 20
+"
+```
+
+Filter edges by confidence (post-export equivalent of `--minimum-confidence`):
+
+```bash
+duckdb -c "
+SELECT edge_type, count(*) AS n
+FROM 'build/edges.parquet'
+WHERE confidence >= 0.5
+GROUP BY 1
+ORDER BY 2 DESC
+"
+```
+
+Debug missing relationships via rejection reasons:
+
+```bash
+duckdb -c "
+SELECT rejection_reason, count(*) AS n
+FROM 'build/rejected_edges.parquet'
+GROUP BY 1
+ORDER BY 2 DESC
+"
+```
+
+Query transitive implications after `oddsgraph closure`:
+
+```bash
+duckdb -c "
+SELECT source_id, target_id, premises
+FROM 'build/implies_closure.parquet'
+WHERE derivation_type = 'transitive'
+LIMIT 20
+"
+```
+
 ## Next pages
 
 | Goal | Page |
 | --- | --- |
 | Column schemas | [Output artifacts](../reference/output-artifacts.md) |
+| Propositions / rules | [Logical layer](../guides/logical-layer.md) |
 | Allowed patterns | [Ontology](../reference/ontology.md) |
 | How IDs merge | [Entity resolution](../concepts/entity-resolution.md) |
 | Input grain | [Source data schema](../reference/source-data-schema.md) |

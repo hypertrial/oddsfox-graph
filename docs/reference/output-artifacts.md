@@ -48,6 +48,18 @@ Same columns as edges, plus:
 | --- | --- | --- |
 | `rejection_reason` | string | Why the edge was dropped |
 
+Known `rejection_reason` values:
+
+| Reason | Meaning |
+| --- | --- |
+| `implies_cycle` | Accepting the edge would introduce a cycle in the `IMPLIES` DAG |
+| `below_minimum_confidence` | Edge confidence is below `--minimum-confidence` |
+| `invalid_confidence` | Confidence is missing or outside `[0, 1]` |
+| `missing_evidence` | Required evidence fields are empty |
+| `missing_endpoint` | `source_id` or `target_id` is not present in the node set |
+| `invalid_pattern` | `(source_type, edge_type, target_type)` is not in the ontology |
+| `progression_cycle` | Accepting the edge would cycle progression (`ADVANCES_TO` / `QUALIFIES_FOR`) |
+
 ## `implies_closure.parquet`
 
 Optional on-demand export from `oddsgraph closure`. Same columns as
@@ -91,5 +103,6 @@ escape `build/fragments/` or collide with reserved suffixes such as
 ## See also
 
 - [Ontology](ontology.md)
+- [Logical layer](../guides/logical-layer.md)
 - [Explorer](../guides/explorer.md)
 - [Integrators](../audiences/integrators.md)

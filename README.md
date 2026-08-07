@@ -93,6 +93,8 @@ Key topics covered in the docs site:
   extraction (~91% of WC2026 events) and optional `--verify-deterministic`
 - [Official bracket](docs/guides/official-bracket.md) — curated FIFA schedule
   injection on `build`
+- [Logical layer](docs/guides/logical-layer.md) — propositions, structural
+  logical edges, WC2026 rules, and on-demand `IMPLIES` closure
 - [Inference backends](docs/guides/inference-backends.md) — `inprocess` /
   `server` / `mlx`, outlines constrained decoding, benchmarks
 - [llama-server](docs/guides/llama-server.md) — concurrent residual inference

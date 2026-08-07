@@ -67,29 +67,18 @@ written to `rejected_edges.parquet`.
 
 ## Proposition layer
 
-Compiled markets attach a formal `Proposition` to `OUTCOME` nodes:
+Compiled markets attach a formal `Proposition` to `OUTCOME` nodes.
+`REFERS_TO` / `PRICES` / `COMPLEMENT` / `EXACTLY_ONE` are emitted at compile
+time; deterministic rules then add `IMPLIES` / `EQUIVALENT` / `MUTEX`.
+Match-result `EXACTLY_ONE` partitions require the draw market in addition to
+the two team moneylines.
 
-```json
-{
-  "predicate": "reaches_stage",
-  "arguments": {
-    "team": "team:canada",
-    "competition": "competition:world-cup-2026",
-    "stage": "stage:world-cup-2026:final"
-  },
-  "polarity": true
-}
-```
-
-`REFERS_TO` edges connect each outcome to the topology entities named in its
-arguments. Deterministic rules then emit `IMPLIES` / `EQUIVALENT` / `MUTEX`
-edges between outcomes; `COMPLEMENT` and `EXACTLY_ONE` are emitted at compile
-time from market structure. Match-result `EXACTLY_ONE` partitions require the
-draw market in addition to the two team moneylines — team-only moneylines do
-not claim exclusivity because a soccer match can still draw.
+Predicate tables, the WC2026 rule registry, build flags, and on-demand
+closure are documented in [Logical layer](../guides/logical-layer.md).
 
 ## See also
 
+- [Logical layer](../guides/logical-layer.md)
 - [Output artifacts](output-artifacts.md)
 - [Entity resolution](../concepts/entity-resolution.md)
 - [Architecture](../concepts/architecture.md)

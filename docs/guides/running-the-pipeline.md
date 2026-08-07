@@ -82,6 +82,7 @@ build/ontology.json
 
 - [Deterministic topology](deterministic-topology.md)
 - [Official bracket](official-bracket.md)
+- [Logical layer](logical-layer.md)
 - [Inference backends](inference-backends.md)
 - [llama-server](llama-server.md)
 - [CLI](../reference/cli.md)

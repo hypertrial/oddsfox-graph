@@ -34,6 +34,14 @@ repository root or under `data/` — see
 `--data-dir`, note it is **exclusive**: there is no repo-root fallback once
 set.
 
+### `semantic_markets.parquet` has 0 rows
+
+An empty reduce still writes a schema-typed parquet (zero rows, not a missing
+file). Check that the input glob matched the expected hourly-odds export, that
+the `.schema.json` sidecar is present beside it, and that any
+`--event-id` / `--limit-events` filters did not exclude every market. Re-run
+`oddsgraph -v reduce` and inspect the logged input path.
+
 ## `infer`
 
 ### Deterministic coverage is much lower than ~91%
@@ -82,8 +90,9 @@ matches between the build and explore invocations.
 Covered proposition templates emit `REFERS_TO` / `PRICES` bridges from
 outcomes to topology entities. If expand still stops at the topology layer,
 the selected node's residual market type may lack a compiled proposition —
-see [Known limitations](limitations.md). Confirm `proposition_json` on nearby
-`OUTCOME` nodes and that the build ran with propositions enabled.
+see [Known limitations](limitations.md) and the predicate table in
+[Logical layer](../guides/logical-layer.md). Confirm `proposition_json` on
+nearby `OUTCOME` nodes and that the build ran with propositions enabled.
 
 ## Docs
 

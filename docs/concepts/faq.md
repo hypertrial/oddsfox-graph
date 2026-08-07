@@ -30,7 +30,8 @@ Yes for markets covered by the proposition compiler. Those `OUTCOME` nodes
 carry a formal `Proposition` and link into topology via `REFERS_TO` (plus
 `PRICES` / `COMPLEMENT` / `EXACTLY_ONE`). Deterministic rules then add
 `IMPLIES` / `EQUIVALENT` / `MUTEX`. Residual / unrecognized market types may
-still lack propositions — see [Known limitations](limitations.md).
+still lack propositions — see [Logical layer](../guides/logical-layer.md) and
+[Known limitations](limitations.md).
 
 ## Where do configuration defaults live?
 
@@ -40,6 +41,7 @@ page mirrors those code defaults.
 ## See also
 
 - [Architecture](architecture.md)
+- [Logical layer](../guides/logical-layer.md)
 - [Glossary](glossary.md)
 - [Known limitations](limitations.md)
 - [Troubleshooting](troubleshooting.md)

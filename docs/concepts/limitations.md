@@ -21,6 +21,12 @@ proposition compiler for:
 - nation/team reaches-stage markets (`Nation to Reach Final/Semifinals/…`,
   `Team to advance to Knockout Stages`)
 
+Match-result `EXACTLY_ONE` partitions require the draw market in addition to
+the two team moneylines — team-only moneylines do not claim exclusivity
+because a soccer match can still draw. See
+[Logical layer](../guides/logical-layer.md) for the full predicate and edge
+emission table.
+
 Residual / unrecognized market types still produce `EVENT` / `MARKET` /
 `OUTCOME` structure without formal propositions, so those outcomes remain
 disconnected from topology entities. Check `proposition_json` on exported
@@ -31,7 +37,8 @@ nodes and `derivation_type` on edges before assuming a logical bridge exists.
 Direct logical edges (`IMPLIES`, `EQUIVALENT`, `MUTEX`) come from a fixed
 WC2026 rule registry — not from LLM judgment. Transitive `IMPLIES` closure is
 **on-demand** via `oddsgraph closure` and is not written into
-`edges.parquet` by default.
+`edges.parquet` by default. See [Logical layer](../guides/logical-layer.md)
+for the registry table and flag interactions.
 
 ## Scope is WC2026 / Polymarket only
 
@@ -76,6 +83,7 @@ benchmarking.
 
 ## See also
 
+- [Logical layer](../guides/logical-layer.md)
 - [FAQ](faq.md)
 - [Troubleshooting](troubleshooting.md)
 - [Architecture](architecture.md)

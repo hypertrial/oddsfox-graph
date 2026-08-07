@@ -167,3 +167,51 @@ def test_vercel_config_builds_mkdocs_site():
     assert config["outputDirectory"] == "site"
     assert "mkdocs build --strict" in config["buildCommand"]
     assert config["redirects"] == []
+
+
+_SUBCOMMANDS = frozenset(
+    {
+        "reduce",
+        "infer",
+        "build",
+        "validate",
+        "closure",
+        "explore",
+        "run",
+    }
+)
+_BASH_FENCE = re.compile(r"```bash\n(.*?)```", re.DOTALL)
+
+
+def _verbose_appears_after_subcommand(command: str) -> bool:
+    """Return True when -v/--verbose follows a known oddsgraph subcommand token."""
+    tokens = command.split()
+    if not tokens or tokens[0] != "oddsgraph":
+        return False
+    seen_subcommand = False
+    for token in tokens[1:]:
+        if token in _SUBCOMMANDS:
+            seen_subcommand = True
+            continue
+        if token in {"-v", "--verbose"} or token.startswith("--verbose="):
+            return seen_subcommand
+    return False
+
+
+def test_docs_place_verbose_before_subcommand():
+    """Typer defines -v/--verbose on the root callback; it must precede the subcommand."""
+    paths = [REPO_ROOT / "README.md", *DOCS_DIR.rglob("*.md")]
+    offenders: list[str] = []
+    for path in paths:
+        text = path.read_text()
+        for block in _BASH_FENCE.findall(text):
+            normalized = re.sub(r"\\\n", " ", block)
+            for line in normalized.splitlines():
+                command = line.strip()
+                if _verbose_appears_after_subcommand(command):
+                    offenders.append(path.relative_to(REPO_ROOT).as_posix())
+                    break
+    assert not offenders, (
+        "Place -v/--verbose before the oddsgraph subcommand "
+        f"(e.g. `oddsgraph -v run`), found after in: {offenders}"
+    )

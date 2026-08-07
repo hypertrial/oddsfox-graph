@@ -96,12 +96,12 @@ flowchart LR
 
 Local LLM inference dominates end-to-end wall-clock time. Deterministic
 topology covers most WC2026 events; residual LLM work is the expensive path.
-Proposition compilation and rule application are deterministic; rule candidate
-indexing is scoped to `team`/`match` keys so application stays cheap on
-tournament-scale graphs. Time those stages locally with
-`scripts/benchmark_build.py` (see [Development](../development/index.md)).
-Backend choice (`inprocess` / `server` / `mlx`), outlines constrained
-decoding, and MLX setup are documented in
+Proposition compilation and rule application are deterministic and cheap
+relative to residual LLM decode — see [Logical layer](../guides/logical-layer.md).
+Time those stages locally with `scripts/benchmark_build.py` (see
+[Development](../development/index.md)). Backend choice
+(`inprocess` / `server` / `mlx`), outlines constrained decoding, and MLX
+setup are documented in
 [Inference backends](../guides/inference-backends.md).
 
 ## See also
@@ -109,6 +109,7 @@ decoding, and MLX setup are documented in
 - [Glossary](glossary.md)
 - [Deterministic topology](../guides/deterministic-topology.md)
 - [Official bracket](../guides/official-bracket.md)
+- [Logical layer](../guides/logical-layer.md)
 - [Inference backends](../guides/inference-backends.md)
 - [Entity resolution](entity-resolution.md)
 - [Running the pipeline](../guides/running-the-pipeline.md)

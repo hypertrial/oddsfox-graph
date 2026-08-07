@@ -52,7 +52,8 @@ The default explorer view is a left-to-right knockout bracket (32 `MATCH`
 cards, `ADVANCES_TO` edges, path highlight on click). Switch to **Full
 topology** for `COMPETITION` / `STAGE` / `GROUP` / `ROUND` / `MATCH` / `TEAM`.
 Compiled market outcomes bridge into topology via `REFERS_TO` (and related
-logical edges) when the proposition compiler covers the market template.
+logical edges) when the proposition compiler covers the market template —
+see [Logical layer](../guides/logical-layer.md) for predicates and rules.
 Residual / unrecognized markets may still lack that bridge — check
 `proposition_json` on outcomes. Search for an event title or market id to
 explore the market layer directly.
@@ -62,6 +63,7 @@ explore the market layer directly.
 | Goal | Page |
 | --- | --- |
 | Visual inspection | [Explorer](../guides/explorer.md) |
+| Propositions / rules | [Logical layer](../guides/logical-layer.md) |
 | Column contracts | [Output artifacts](../reference/output-artifacts.md) |
 | Allowed node/edge types | [Ontology](../reference/ontology.md) |
 | Input parquet grain | [Source data schema](../reference/source-data-schema.md) |

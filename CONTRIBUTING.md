@@ -25,10 +25,11 @@ uv run pytest tests/docs -q
   [Deterministic topology](https://graph.oddsfox.io/guides/deterministic-topology/)).
 - Keep ontology changes paired with validation and docs updates
   (`docs/reference/ontology.md`, `oddsgraph/ontology.py`).
+- Update relevant `docs/` pages and add a `CHANGELOG.md` entry under
+  `[Unreleased]` for any user-visible behavior change (CLI flags, defaults,
+  output schema, rejection reasons, proposition/rule coverage).
 - Do not commit large parquet exports or model weights — both are
   git-ignored on purpose.
-- Add a `CHANGELOG.md` entry under `[Unreleased]` for user-visible changes
-  (new CLI flags, changed defaults, output schema changes).
 - If you add or move a page under `docs/`, add a matching entry to
   `mkdocs.yml`'s `nav` — `tests/docs/test_docs_structure.py` enforces this.
 

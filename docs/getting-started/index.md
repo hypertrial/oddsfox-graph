@@ -47,7 +47,7 @@ Details live in `models/README.md`.
 Smoke on a few events:
 
 ```bash
-oddsgraph run --limit-events 5 -v
+oddsgraph -v run --limit-events 5
 ```
 
 Full pipeline:
