@@ -92,7 +92,7 @@ flowchart LR
    parquet / JSON (code generation). Toggle with `--propositions/--no-propositions`
    and `--reasoning/--no-reasoning`.
 4. **odds-history** — Build `odds_history.parquet` and
-   `stage_odds_history.parquet` for explorer time scrubbing and projection
+   `stage_odds_history.parquet` as hourly probability time-series exports
    (also available as a standalone `oddsgraph odds-history` command; included
    in `oddsgraph run`). Both artifacts are written from a single scan of the
    hourly source mart.

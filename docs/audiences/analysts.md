@@ -1,5 +1,5 @@
 ---
-description: Inspect OddsFox Graph exports with DuckDB or the local explorer without running the inference pipeline.
+description: Inspect OddsFox Graph exports with DuckDB without running the inference pipeline.
 ---
 
 # Analysts
@@ -32,17 +32,7 @@ dataset.
     duckdb -c "SELECT type, count(*) FROM 'build/nodes.parquet' GROUP BY 1 ORDER BY 2 DESC"
     ```
 
-    Or launch the local explorer (run `odds-history` first if projection odds
-    are missing; the time slider itself uses the bundled schedule):
-
-    ```bash
-    uv sync --extra explore
-    oddsgraph odds-history
-    oddsgraph explore
-    ```
-
-    Continue with [Explorer](../guides/explorer.md) and
-    [Output artifacts](../reference/output-artifacts.md).
+    Continue with [Output artifacts](../reference/output-artifacts.md).
 
 === "No — need a run first"
 
@@ -50,14 +40,7 @@ dataset.
     [Running the pipeline](../guides/running-the-pipeline.md), then return here.
     Analysts do not need a live LLM for ordinary post-build queries.
 
-## Knockout bracket explorer
-
-The explorer is a mirrored knockout tree (32 `MATCH` cards converging on a
-centered Final / Third Place column, with a stacked-rounds fallback on narrow
-viewports) with projected future matchups and advance probabilities when
-`build/odds_history.parquet` and `build/stage_odds_history.parquet` are present.
-
-Compiled market outcomes still bridge into the exported graph via `REFERS_TO`
+Compiled market outcomes bridge into the exported graph via `REFERS_TO`
 (and related logical edges) when the proposition compiler covers the market
 template — see [Logical layer](../guides/logical-layer.md) for predicates and
 rules. Residual / unrecognized markets may still lack that bridge — check
@@ -67,7 +50,6 @@ rules. Residual / unrecognized markets may still lack that bridge — check
 
 | Goal | Page |
 | --- | --- |
-| Visual inspection | [Explorer](../guides/explorer.md) |
 | Propositions / rules | [Logical layer](../guides/logical-layer.md) |
 | Column contracts | [Output artifacts](../reference/output-artifacts.md) |
 | Allowed node/edge types | [Ontology](../reference/ontology.md) |

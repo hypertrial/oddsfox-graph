@@ -13,7 +13,6 @@ uv sync --frozen --extra dev
 Optional extras:
 
 ```bash
-uv sync --frozen --extra explore
 uv sync --frozen --extra mlx
 uv sync --extra docs
 ```

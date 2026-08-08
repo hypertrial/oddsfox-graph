@@ -98,10 +98,6 @@ tournament (World Cup Winner markets, stored as stage label `Champion`).
 | `reach_prob` | float | Probability the team reaches that stage / wins |
 | `market_id` | string | Source Polymarket market id |
 
-The explorer uses these series to project unresolved future matchups and to
-estimate conditional advance probabilities when direct head-to-head advance
-markets are unavailable.
-
 ## `ontology.json`
 
 Dump of node types, edge types, allowed patterns, progression edge types, and
@@ -144,5 +140,4 @@ escape `build/fragments/` or collide with reserved suffixes such as
 
 - [Ontology](ontology.md)
 - [Logical layer](../guides/logical-layer.md)
-- [Explorer](../guides/explorer.md)
 - [Integrators](../audiences/integrators.md)

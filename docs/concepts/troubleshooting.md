@@ -1,5 +1,5 @@
 ---
-description: Fix common OddsFox Graph install, reduce, infer, build, explorer, and docs problems by stage.
+description: Fix common OddsFox Graph install, reduce, infer, build, and docs problems by stage.
 ---
 
 # Troubleshooting
@@ -78,27 +78,6 @@ or pass an explicit `--model-path`.
 (default `http://127.0.0.1:8080`). Start it first — see
 [llama-server](../guides/llama-server.md). `--concurrency` only has an effect
 with this backend.
-
-## `build` / explorer
-
-### Explorer shows no data
-
-`oddsgraph explore` requires `build/nodes.parquet` and `build/edges.parquet`
-from a completed `oddsgraph build` (or `run`) first. Confirm `--build-dir`
-matches between the build and explore invocations.
-
-### Explorer time slider shows no probabilities / cards stay uncolored
-
-The tournament time slider spans Round of 32 kickoff through Final full-time
-(Group Stage is skipped) and snaps to knockout kickoff / full-time milestones.
-Advance
-probabilities and future-round projection need
-`build/odds_history.parquet` and `build/stage_odds_history.parquet` from
-`oddsgraph odds-history` (also produced by `oddsgraph run`). Without those
-artifacts the bracket still loads from `nodes.parquet` / `edges.parquet`, but
-MATCH cards lack advance probabilities. Confirm `--build-dir` matches and that
-the source parquet includes `soccer_team_to_advance` plus reaches-stage /
-World Cup Winner markets.
 
 ## Docs
 

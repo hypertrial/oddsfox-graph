@@ -70,16 +70,9 @@ build/inference_report.json
 build/ontology.json
 ```
 
-Optional explorer:
-
-```bash
-uv sync --extra explore
-oddsgraph odds-history   # optional temporal + projection odds for the explorer
-oddsgraph explore
-```
 ## Next steps
 
 - [Running the pipeline](../guides/running-the-pipeline.md)
 - [Deterministic topology](../guides/deterministic-topology.md)
 - [llama-server](../guides/llama-server.md)
-- [Explorer](../guides/explorer.md)
+- [Output artifacts](../reference/output-artifacts.md)

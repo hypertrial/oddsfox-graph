@@ -16,7 +16,7 @@ for notable changes.
 
 | Path | Role |
 | --- | --- |
-| `oddsgraph/` | Package: CLI, reduce, infer, resolution, build, export, explorer |
+| `oddsgraph/` | Package: CLI, reduce, infer, resolution, build, export |
 | `scripts/` | Operator/dev utilities (schedule export, fine-tune, benchmarks) |
 | `tests/` | Unit and optional live integration tests |
 | `docs/` | This documentation site |

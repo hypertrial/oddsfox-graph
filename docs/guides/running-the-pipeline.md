@@ -1,5 +1,5 @@
 ---
-description: Stage-by-stage oddsgraph CLI walkthrough for reduce, infer, build, validate, explore, closure, and run.
+description: Stage-by-stage oddsgraph CLI walkthrough for reduce, infer, build, validate, closure, and run.
 ---
 
 # Running the pipeline
@@ -14,10 +14,9 @@ OddsFox Graph exposes a Typer CLI named `oddsgraph`. Every command shares
 | `oddsgraph reduce` | Reduce hourly odds parquet to semantic market records |
 | `oddsgraph infer` | Infer graph fragments per event (deterministic + residual LLM) |
 | `oddsgraph build` | Resolve entities, compile propositions, apply rules, export |
-| `oddsgraph odds-history` | Build match + stage probability histories for the explorer (one source scan) |
+| `oddsgraph odds-history` | Build match + stage probability time-series parquet (one source scan) |
 | `oddsgraph validate` | Validate exported artifacts |
 | `oddsgraph closure` | On-demand transitive `IMPLIES` closure |
-| `oddsgraph explore` | Local Dash explorer over exported parquet |
 | `oddsgraph run` | Full pipeline: reduce → infer → build → odds-history → validate |
 
 ## Stage-by-stage

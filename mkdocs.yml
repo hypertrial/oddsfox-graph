@@ -86,7 +86,6 @@ nav:
       - Inference backends: guides/inference-backends.md
       - llama-server: guides/llama-server.md
       - Linux / CPU-only setup: guides/linux-cpu-setup.md
-      - Explorer: guides/explorer.md
       - Fine-tuning: guides/finetuning.md
   - Reference:
       - CLI: reference/cli.md

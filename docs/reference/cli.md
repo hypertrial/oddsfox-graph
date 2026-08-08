@@ -1,13 +1,13 @@
 ---
-description: Complete oddsgraph CLI reference for reduce, infer, build, validate, explore, closure, and run flags.
+description: Complete oddsgraph CLI reference for reduce, infer, build, validate, closure, and run flags.
 ---
 
 # CLI
 
 Entry point: `oddsgraph` (Typer). Shared options apply to every command and
 must appear **before** the subcommand (for example
-`oddsgraph --build-dir build explore`). `-v` / `--verbose` follows the same
-rule. `explore` also accepts `--build-dir` after the subcommand.
+`oddsgraph --build-dir build validate`). `-v` / `--verbose` follows the same
+rule.
 
 ## Global options
 
@@ -57,7 +57,7 @@ Resolve entities, compile propositions, apply logical rules, and export artifact
 
 ## `oddsgraph odds-history`
 
-Build hourly probability histories for the explorer from a **single** scan of
+Build hourly probability time-series exports from a **single** scan of
 the hourly-odds parquet:
 
 - `build/odds_history.parquet` from Polymarket `soccer_team_to_advance`
@@ -76,19 +76,6 @@ Validate exported graph artifacts. Exits non-zero on failure.
 
 Compute on-demand transitive `IMPLIES` closure from exported edges into
 `build/implies_closure.parquet`. Requires a prior `oddsgraph build`.
-
-## `oddsgraph explore`
-
-Launch a local, read-only graph explorer.
-
-| Option | Description |
-| --- | --- |
-| `--host` | Bind host (default `127.0.0.1`) |
-| `--port` | Port (default `8050`) |
-| `--debug` | Enable Dash debug / hot-reload |
-| `--build-dir` | Build artifacts directory (also available as a global option) |
-
-Requires `--extra explore`.
 
 ## `oddsgraph run`
 

@@ -15,136 +15,25 @@ flags and output schema as pre-1.0 and subject to change.
 
 ## [Unreleased]
 
+### Removed
+
+- **Breaking:** The local Dash Explorer (`oddsgraph explore`, `--extra explore`)
+  and all plotting/visualization code (SVG sparklines, Plotly charts, bracket
+  UI, flag assets, projection helpers). Use exported parquet artifacts
+  directly with DuckDB or downstream tooling. `oddsgraph odds-history` and the
+  `odds_history.parquet` / `stage_odds_history.parquet` exports remain.
+
 ### Added
 
-- Explorer odds-change visualization: always-on per-card SVG probability
-  sparklines, click-to-expand full match odds chart (Plotly), and a one-hop
-  ripple highlight from a just-finished match into the next-round slot(s) it
-  feeds. When the direct match series has no points yet at the scrub hour,
-  sparklines/charts fall back to stage-reach series; after full-time they lock
-  to the same 100%/0% endpoints as the card. Charts never look ahead of the
-  selected scrub hour.
 - Shared hourly parquet scan for `odds-history` (one pass writes match + stage
-  series) plus `scripts/benchmark_scrub.py` and
-  `scripts/benchmark_odds_history.py`.
+  series) plus `scripts/benchmark_odds_history.py`.
 - Infer persists `__topology.json` fragments for deterministically covered
   events; build reuses them instead of reclassifying when present.
-- Explorer viewport layout Store gates desktop vs mobile tree HTML after width
-  is measured (≥1400px mirrored, else stacked).
-- Explorer dark sports-data shell: branded header, persistent phase tracker,
-  bottom playback dock, and on-demand Filters & legend drawer.
-- Schedule-derived tournament phase model with active, intermission, Final
-  weekend, and complete states; compact UTC timestamps (`Jun 28 · 19:00 UTC`)
-  plus full tooltip/ISO forms.
-- Explorer playback bounds span Round of 32 kickoff through Final full-time so
-  Champion lock is reachable on the slider (Group Stage is omitted).
 - `stage_odds_history.parquet` from `oddsgraph odds-history` / `run`: hourly
-  team stage-reach and World Cup Winner probabilities for explorer projection.
-- Explorer projects unresolved future matchups from feeder-branch leaders,
-  shows numeric advance probabilities on every card, and renders local SVG
-  country flags on both sides of each match node.
-- Explorer Final / Third Place cards lock winners to **100%** / **0%** at full
-  time (Spain and England in the curated WC2026 schedule) with the same teal
-  resolved styling as other locked matches (thicker border on Final / 3rd).
-- Explorer playback highlights matches that just finished: when the scrubbed
-  hour equals a match’s full-time milestone, the card shows a **Just finished**
-  badge and pulse (simultaneous fixtures share the highlight).
-
-### Changed
-
-- Stage-reach / advance hour lookups use binary search (no look-ahead) on
-  sorted series; explorer scrub caches the last projected frame for odds-motion
-  deltas instead of reprojecting the previous hour.
-- Explorer pure helpers `short_match_label` / `stage_rank` live in
-  `explorer/bracket_view.py`; MATCH merge policy lives in `match_merge.py`.
-- Explorer bracket connectors include filled arrowheads pointing toward the
-  Final so tournament progression reads clearly left→center and right→center.
-- Explorer playback skips Group Stage entirely: the slider and Play steps run
-  from Round of 32 kickoff through Final full-time (64 knockout milestones),
-  and the phase tracker starts at Round of 32.
-- Explorer odds motion: when Play/scrub changes a card’s advance %, the
-  probability flashes green/red, shows a signed point delta (`+8` / `−3`), and
-  a thin row accent; favorite flips get a brief border flash.
-- Explorer UI is a mirrored HTML/CSS knockout tree (website-style cards and SVG
-  connectors) instead of Dash Cytoscape; Inspector / path-highlight / hide-match
-  interactions were removed with that migration.
-- Explorer match cards use a wider dark layout with aligned probability
-  columns, row-aligned flags, and taxi connectors with progression arrowheads.
-- Explorer Controls moved into a closed-by-default utility drawer; playback
-  lives in a full-width footer dock below the bracket stage (not an overlay).
-  Action status stays in the dock.
-- Explorer chrome densifies on short viewports (hide legend copy / pills,
-  smaller title and tree floor) so more of the mirrored bracket stays on screen.
-- Explorer match-card tint encodes resolution, not favorite: teal fill means
-  the match is resolved at the selected tournament hour; unfinished cards
-  rely on numeric percentages and dashed borders when projected.
-- Explorer time slider spans Round of 32 kickoff through Final full-time, not
-  the full early Champion-market odds-history window (Group Stage omitted).
-- Explorer Play / time scrubbing advances by schedule kickoff and full-time
-  milestones (64 knockout steps end-to-end; Group Stage omitted) instead of
-  one hour at a time; simultaneous fixtures share a step. Manual scrubbing
-  snaps to the same milestones.
-
-### Fixed
-
-- Bracket projection falls back to feeder direct-advance odds whenever any
-  stage-reach side is missing (not only when both are missing), so partial
-  markets no longer mis-rank Final / Third Place participants.
-- Explorer unavailable probabilities (`—`) use Diverged gray styling even when
-  the card is not yet marked projected.
-- `oddsgraph infer` reports deterministic counts from this run’s statuses, not
-  the cumulative on-disk inference report.
-- Explorer playback dock no longer covers bottom bracket cards on short /
-  non-maximized viewports: the dock is a normal-flow flex sibling below the
-  scrollable canvas instead of an absolute overlay inside it.
-- Explorer Filters drawer is scoped to the bracket stage so the playback
-  footer stays usable while filters are open.
-- Explorer Final / Third Place locked cards use the same teal resolved tint as
-  other finished matches (gold/silver champion overrides removed).
-- Explorer attaches curated schedule winners by team pair when MATCH ids
-  drift by kickoff date, so completed knockout cards resolve to teal at
-  tournament end instead of staying projected.
-- Explorer Dash 4 sliders no longer show white direct-entry number fields or
-  white value tooltips in the playback dock and Filters drawer (set
-  ``allow_direct_input=False`` and restyle ``.dash-slider-*`` for the dark shell).
-- Explorer match-card flag SVGs use node-relative sizes so they scale with
-  zoom instead of shrinking when zooming in.
-- Flag SVG assets declare explicit ``width`` / ``height`` for consistent
-  rendering in match cards.
-- Explorer projection maps feeder branches onto schedule home/away slots
-  (not alphabetical feeder labels) and ranks Third Place candidates by
-  `P(reach Final)`.
-- Missing flag assets no longer shift the opposite flag into the wrong slot.
-- Odds-history no longer treats the last observed hour of a live
-  `soccer_team_to_advance` series as match end / winner lock.
-- Explorer time scrub returns no probability before the first odds point
-  (no look-ahead to future opening odds).
-- Entity resolution coalesces Polymarket slug dates with FIFA kickoff dates
-  within ±1 day for the same MATCH team pair, and stamps merged MATCH nodes
-  `inference_method=official_bracket` when the schedule fragment binds.
-- `reduce` normalizes real `timestamp` `game_start_time` / `end_time` values
-  instead of crashing with ArrowTypeError on schema-faithful source parquet.
-- Match-result `EXACTLY_ONE` requires both team moneylines and the draw market
-  (draw + a single team moneyline no longer emits a false partition).
-- Explorer projection falls back to feeder advance odds when stage-reach
-  markets are missing, instead of inventing schedule-home favorites.
-- Odds-history / stage-odds-history dedupe repeated `(match,hour)` /
-  `(team,stage,hour)` rows from multi-file input globs.
-- `oddsgraph run --help` and architecture docs include the `odds-history`
-  stage that `run` already executes.
-- `oddsgraph explore --build-dir` is accepted (in addition to the global
-  prefix form).
-- `load_all_fragments` honors `--no-resume` and skips `__verified.json`.
-- Residual `--resume` re-infers when market membership changes (chunk
-  manifest), not only when chunk budget settings change.
-
-### Added
-
+  team stage-reach and World Cup Winner probabilities.
 - `oddsgraph odds-history` builds `build/odds_history.parquet`: hourly knockout
   win probabilities from Polymarket `soccer_team_to_advance` markets, with
   winner lock after match end.
-- Explorer knockout time slider colors each MATCH by home win-probability
-  (green = home favored, red = away) and locks winners to 1 after end.
 - Logical layer guide documenting proposition predicates, compile-time
   structural edges, the WC2026 rule registry, build flags, and on-demand
   `IMPLIES` closure.
@@ -164,8 +53,8 @@ flags and output schema as pre-1.0 and subject to change.
 - `oddsgraph build --propositions/--no-propositions` and
   `--reasoning/--no-reasoning` (both default on).
 - On-demand `oddsgraph closure` writing `build/implies_closure.parquet`.
-- `oddsgraph` CLI (`reduce`, `infer`, `build`, `validate`, `explore`, `run`)
-  over Polymarket WC2026 hourly-odds parquet.
+- `oddsgraph` CLI (`reduce`, `infer`, `build`, `validate`, `run`) over
+  Polymarket WC2026 hourly-odds parquet.
 - Deterministic topology extraction for match/group/stage/tournament
   templates, covering ~91% of WC2026 events without an LLM call.
 - Optional LLM verification tier (`--verify-deterministic`) that
@@ -178,8 +67,6 @@ flags and output schema as pre-1.0 and subject to change.
 - Few-shot exemplar retrieval (`--few-shot`) for residual LLM prompts.
 - Entity resolution with tiered exact/alias/fuzzy matching and confidence
   filtering (`--minimum-confidence`).
-- Local Dash + Cytoscape explorer (`oddsgraph explore`) with a temporal
-  knockout-bracket view.
 - LoRA fine-tuning / self-distillation scripts (`scripts/export_finetune_dataset.py`,
   `scripts/finetune_lora.py`, `scripts/eval_finetuned_model.py`) for the
   residual LLM path.
@@ -188,16 +75,12 @@ flags and output schema as pre-1.0 and subject to change.
 
 ### Changed
 
-- Explorer is bracket-only: removed Full topology view, search, expand
-  neighbors, type filter, and layout chooser.
-- Controls and Inspector sidebars are collapsible on all viewport widths.
-- Explorer knockout bracket draws non-interactive stage column headers
-  (Round of 32 → Final / 3rd) across the canvas.
+- MATCH merge policy lives in `match_merge.py`.
 - Contributor checklist now explicitly asks for docs + changelog updates on
   user-visible behavior changes.
 - Public export schema API (`NODE_SCHEMA`, `EDGE_SCHEMA`, `write_parquet`,
   `table_with_schema`) replaces the prior underscore-private helpers used by
-  the CLI and explorer.
+  the CLI.
 - Rule-engine candidate indexing uses only `team`/`match` keys (dropping
   tournament-wide `competition`/`group` buckets that forced O(n²) pair scans).
 - Shared `has_implies_cycle` / `reject_implies_cycle()` helpers: graph build
@@ -205,8 +88,6 @@ flags and output schema as pre-1.0 and subject to change.
   rule-engine IMPLIES so fragment edges are preserved.
 - Entity resolution caches `normalize_label` and skips no-op evidence
   `model_copy`s on finalize.
-- Explorer callbacks split into `canvas_actions.py` / `inspector.py` with
-  stable re-exports from `callbacks.py`.
 - Ontology adds `CONSTRAINT`, `REFERS_TO`, `EQUIVALENT`, `COMPLEMENT`,
   `MUTEX`, and `EXACTLY_ONE`.
 - Exported `nodes.parquet` includes `proposition_json`; `edges.parquet`
@@ -214,17 +95,31 @@ flags and output schema as pre-1.0 and subject to change.
 - Docs updated for the topology↔market bridge (no longer universally
   disconnected; residual market types may still lack propositions).
 - Empty parquet exports use explicit Arrow schemas so list columns stay
-  `list[string]` (explorer search/UNNEST no longer BinderErrors on empty
-  graphs).
+  `list[string]`.
 
 ### Fixed
 
+- `oddsgraph infer` reports deterministic counts from this run's statuses, not
+  the cumulative on-disk inference report.
+- Odds-history no longer treats the last observed hour of a live
+  `soccer_team_to_advance` series as match end / winner lock.
+- Entity resolution coalesces Polymarket slug dates with FIFA kickoff dates
+  within ±1 day for the same MATCH team pair, and stamps merged MATCH nodes
+  `inference_method=official_bracket` when the schedule fragment binds.
+- `reduce` normalizes real `timestamp` `game_start_time` / `end_time` values
+  instead of crashing with ArrowTypeError on schema-faithful source parquet.
+- Match-result `EXACTLY_ONE` requires both team moneylines and the draw market
+  (draw + a single team moneyline no longer emits a false partition).
+- Odds-history / stage-odds-history dedupe repeated `(match,hour)` /
+  `(team,stage,hour)` rows from multi-file input globs.
+- `oddsgraph run --help` and architecture docs include the `odds-history`
+  stage that `run` already executes.
+- `load_all_fragments` honors `--no-resume` and skips `__verified.json`.
+- Residual `--resume` re-infers when market membership changes (chunk
+  manifest), not only when chunk budget settings change.
 - Known-limitations wording for match-result `EXACTLY_ONE` (draw market
   required) aligned with ontology / compiler behavior.
-- Troubleshooting recipes for empty schema-typed `semantic_markets.parquet`
-  and explorer market-bridge diagnostics.
-- Match-result `EXACTLY_ONE` only emits when a draw market is present in the
-  partition (team-only moneylines no longer claim exclusivity).
+- Troubleshooting recipes for empty schema-typed `semantic_markets.parquet`.
 - Distinct dateful MATCH ids with the same display label no longer collapse
   during entity resolution.
 - Scoped `run`/`build` market lists ignore on-disk fragments for other events.
@@ -246,12 +141,8 @@ flags and output schema as pre-1.0 and subject to change.
   collision); implication requires the Final stage slug.
 - `soccer_team_to_advance` markets now emit `CONSTRAINT` + `EXACTLY_ONE`
   as documented for covered templates.
-- Explorer missing-parquet stubs match the export schema; `graph_counts`
-  falls back to parquet when `inference_report` histograms are empty.
 - `oddsgraph closure` writes via the edge Arrow schema (was still passing
   the removed row-template API).
-- Troubleshooting / explorer expand copy no longer claims topology and
-  market layers are universally disconnected.
 
 ### Documentation
 

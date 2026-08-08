@@ -46,5 +46,4 @@ page mirrors those code defaults.
 - [Known limitations](limitations.md)
 - [Troubleshooting](troubleshooting.md)
 - [Inference backends](../guides/inference-backends.md)
-- [Explorer](../guides/explorer.md)
 - [Quickstart](../getting-started/index.md)

@@ -79,8 +79,7 @@ oddsgraph reduce          # reduce parquet to semantic markets
 oddsgraph infer           # infer graph fragments per event
 oddsgraph build           # resolve, validate, export graph
 oddsgraph validate        # validate exported artifacts
-oddsgraph odds-history    # match + stage odds histories for explorer projection
-oddsgraph explore         # local Dash explorer over nodes/edges parquet
+oddsgraph odds-history    # hourly match + stage probability time-series exports
 oddsgraph run             # full pipeline
 ```
 
@@ -119,23 +118,6 @@ build/ontology.json
 
 Column contracts: [Output artifacts](docs/reference/output-artifacts.md).
 
-## Explore
-
-```bash
-uv sync --extra explore   # or: uv sync --extra dev --extra explore
-oddsgraph odds-history    # optional match + stage odds for explorer projection
-oddsgraph explore         # http://127.0.0.1:8050
-```
-
-Default view is a mirrored knockout tree (desktop) with flags, numeric advance
-probabilities, inline odds sparklines, click-to-expand match charts, a footer
-playback dock, and a schedule-aware phase tracker
-(when `odds_history.parquet` and `stage_odds_history.parquet` are present).
-Compiled propositions still bridge covered markets into the exported graph via
-`REFERS_TO` — residual types may still lack that bridge; see
-[Explorer](docs/guides/explorer.md) and
-[Known limitations](docs/concepts/limitations.md).
-
 ## Stack
 
 - `duckdb` — query and reduce parquet
@@ -148,7 +130,6 @@ Compiled propositions still bridge covered markets into the exported graph via
 - `rapidfuzz` — entity, alias, and few-shot exemplar matching
 - `rustworkx` — graph construction and validation
 - `typer` — CLI
-- `dash` — optional local knockout-tree explorer (`--extra explore`)
 - `pytest` — tests
 
 ## Testing

@@ -40,34 +40,6 @@ WC2026 rule registry — not from LLM judgment. Transitive `IMPLIES` closure is
 `edges.parquet` by default. See [Logical layer](../guides/logical-layer.md)
 for the registry table and flag interactions.
 
-## Explorer future-round projection is a heuristic
-
-Unresolved future match cards are populated by picking the most likely team
-from each feeder branch (`P(reach displayed round)`), then normalizing
-conditional stage ratios `P(reach next) / P(reach current)` for the displayed
-pair. When stage-reach odds are missing for either team in a feeder, projection
-falls back to that feeder's direct `soccer_team_to_advance` series rather than
-inventing schedule-home favorites; if both stage-reach and advance odds are
-unavailable the slot stays unresolved. That is **not** a
-coherent joint bracket model: independence is assumed, Third Place has no
-dedicated reach market, and missing/zero stage odds mark probabilities
-unavailable rather than inventing 50/50. Prefer resolved match results and
-direct advance series when both exist. Curated schedule `winner_team` overlays
-(Final champion / Third Place) take precedence over soft odds-history locks in
-the explorer so Spain / England remain authoritative once those cards lock.
-
-## Explorer odds charts are hourly-grain
-
-Match-card sparklines and the click-to-expand odds chart sample the same hourly
-parquet series used for projection (`odds_history.parquet` /
-`stage_odds_history.parquet`). A live ~2–3 hour match therefore yields only a
-handful of points, and there are **no in-play goal-event markers** in the data
-model. When the direct match series has no points at or before the selected
-hour (missing, or only future points), trends fall back to each projected
-team's stage-reach probability for the displayed round — that is **not** the
-eventual head-to-head advance market. After full-time, sparkline endpoints lock
-to the same 100% / 0% winner probabilities shown on the card.
-
 ## Scope is WC2026 / Polymarket only
 
 Deterministic templates, team alias/code tables, proposition predicates, and

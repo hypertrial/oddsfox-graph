@@ -23,7 +23,6 @@ Hypertrial-owned MIT software. No hosted service or bundled production data.
 [License](https://github.com/hypertrial/oddsfox-graph/blob/main/LICENSE).
 
 [Get started](getting-started/index.md){ .md-button .md-button--primary }
-[Explore the graph](guides/explorer.md){ .md-button }
 
 </div>
 
@@ -52,8 +51,7 @@ uv sync --frozen --extra dev
 
 ### Analyze the graph
 
-Open exported `nodes.parquet` / `edges.parquet`, or launch the local Dash
-explorer over a completed build.
+Open exported `nodes.parquet` / `edges.parquet` with DuckDB or your own tooling.
 
 [Analysts hub](audiences/analysts.md)
 
@@ -73,7 +71,7 @@ Install the project, download a local model, and run `oddsgraph run` end to end.
 
 ### Contribute code
 
-Change inference, resolution, ontology, explorer, or docs with the right tests.
+Change inference, resolution, ontology, or docs with the right tests.
 
 [Contributors hub](audiences/contributors.md)
 

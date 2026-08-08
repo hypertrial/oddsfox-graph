@@ -38,7 +38,7 @@ coalesces into one node, preferring the official-bracket kickoff id when that
 fragment binds. Label-only MATCH ids may still upgrade to a dateful id when the
 official bracket or topology supplies the more specific form. Merging an
 `official_bracket` fragment also stamps `inference_method=official_bracket` on
-the canonical MATCH so explorer filters stay consistent with progression edges.
+the canonical MATCH so progression edges stay consistent with official bracket data.
 
 MATCH merge policy lives in `oddsgraph/match_merge.py` and is applied by
 `oddsgraph/resolution.py`.

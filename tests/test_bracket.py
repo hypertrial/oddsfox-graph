@@ -9,7 +9,6 @@ from oddsgraph.bracket import (
     STAGE_KEY_TO_LABEL,
     build_official_bracket_fragment,
     load_wc2026_schedule,
-    tournament_time_bounds,
 )
 from oddsgraph.config import Settings
 from oddsgraph.ontology import EdgeType, NodeType
@@ -31,65 +30,6 @@ def _m(**kwargs) -> SemanticMarket:
     return SemanticMarket(**defaults)
 
 
-def test_tournament_playback_bounds_extend_through_final_full_time() -> None:
-    from oddsgraph.bracket import (
-        schedule_stage_windows,
-        tournament_playback_bounds,
-        tournament_time_bounds,
-    )
-
-    windows = schedule_stage_windows()
-    assert [w.stage_key for w in windows] == [
-        "group_stage",
-        "round_of_32",
-        "round_of_16",
-        "quarterfinal",
-        "semifinal",
-        "third_place",
-        "final",
-    ]
-    kickoff_start, kickoff_end = tournament_time_bounds()
-    play_start, play_end = tournament_playback_bounds()
-    r32 = next(w for w in windows if w.stage_key == "round_of_32")
-    assert play_start == r32.start_hour
-    assert play_start is not None and kickoff_start is not None
-    assert play_start > kickoff_start
-    assert play_end is not None and kickoff_end is not None
-    assert play_end > kickoff_end
-    assert play_end == windows[-1].end_hour
-    assert windows[0].match_count == 72
-    assert windows[-1].label == "Final"
-
-
-def test_schedule_playback_milestones_are_kickoffs_and_full_times() -> None:
-    from datetime import datetime, timezone
-
-    from oddsgraph.bracket import (
-        schedule_playback_milestones,
-        tournament_playback_bounds,
-    )
-
-    milestones = schedule_playback_milestones()
-    play_start, play_end = tournament_playback_bounds()
-    assert len(milestones) == 64
-    assert milestones == tuple(sorted(set(milestones)))
-    assert milestones[0] == play_start
-    assert milestones[-1] == play_end
-
-    # Simultaneous knockout kickoffs collapse into one milestone epoch.
-    # Group Stage kickoffs are excluded from playback.
-    group_simultaneous = int(
-        datetime(2026, 6, 24, 19, 0, tzinfo=timezone.utc).timestamp()
-    )
-    assert group_simultaneous not in milestones
-    fixtures = [
-        f
-        for f in load_wc2026_schedule()["fixtures"]
-        if f.get("kickoff_at_utc") == "2026-06-24T19:00:00"
-    ]
-    assert len(fixtures) == 2
-    assert all(f.get("stage_key") == "group_stage" for f in fixtures)
-
 def test_schedule_has_104_fixtures_with_expected_stage_counts() -> None:
     schedule = load_wc2026_schedule()
     fixtures = schedule["fixtures"]
@@ -106,29 +46,6 @@ def test_schedule_has_104_fixtures_with_expected_stage_counts() -> None:
         "final": 1,
     }
     assert set(STAGE_KEY_TO_LABEL) == set(counts)
-
-
-def test_tournament_time_bounds_span_first_to_last_kickoff() -> None:
-    from datetime import datetime, timezone
-
-    schedule = load_wc2026_schedule()
-    kickoffs = [
-        datetime.fromisoformat(str(f["kickoff_at_utc"])).replace(tzinfo=timezone.utc)
-        for f in schedule["fixtures"]
-    ]
-    expected_start = int(min(kickoffs).timestamp())
-    expected_end = int(max(kickoffs).timestamp())
-    expected_start -= expected_start % 3600
-    expected_end -= expected_end % 3600
-
-    start, end = tournament_time_bounds()
-    assert start == expected_start
-    assert end == expected_end
-    assert start == 1_781_204_400  # 2026-06-11 19:00 UTC
-    assert end == 1_784_487_600  # 2026-07-19 19:00 UTC
-    assert end > start
-    assert start % 3600 == 0
-    assert end % 3600 == 0
 
 
 def test_schedule_knockout_outcomes_mark_spain_champion_and_england_third() -> None:

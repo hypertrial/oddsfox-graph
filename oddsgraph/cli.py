@@ -160,7 +160,7 @@ def reduce(ctx: typer.Context) -> None:
 
 @app.command("odds-history")
 def odds_history(ctx: typer.Context) -> None:
-    """Build hourly match and stage probability histories for the explorer."""
+    """Build hourly match and stage probability time-series exports."""
     settings = _base_settings(ctx)
     match_path, stage_path = build_odds_histories(settings)
     typer.echo(f"Wrote odds history to {match_path}")
@@ -314,50 +314,6 @@ def implies_closure(ctx: typer.Context) -> None:
     typer.echo(
         f"Wrote {len(closure_edges)} transitive IMPLIES edges to {settings.implies_closure_path}"
     )
-
-
-@app.command()
-def explore(
-    ctx: typer.Context,
-    host: Annotated[
-        str,
-        typer.Option(help="Bind host (local-only by default)"),
-    ] = "127.0.0.1",
-    port: Annotated[
-        int,
-        typer.Option(help="Port for the explorer server"),
-    ] = 8050,
-    debug: Annotated[
-        bool,
-        typer.Option(help="Enable Dash debug/hot-reload"),
-    ] = False,
-    build_dir: Annotated[
-        Optional[Path],
-        typer.Option(help="Directory for build artifacts"),
-    ] = None,
-) -> None:
-    """Launch a local, read-only graph explorer over exported artifacts."""
-    settings = _base_settings(ctx)
-    if build_dir is not None:
-        settings.configure_build_dir(build_dir)
-    if not settings.nodes_path.exists() or not settings.edges_path.exists():
-        typer.echo(
-            f"No exported graph found under {settings.build_dir}. "
-            "Run `oddsgraph build` first."
-        )
-        raise typer.Exit(code=1)
-    try:
-        from oddsgraph.explorer.runner import run_explorer
-    except ImportError as exc:
-        typer.echo(
-            "Explorer dependencies are missing. Install with:\n"
-            "  uv sync --frozen --extra explore\n"
-            f"Import error: {exc}"
-        )
-        raise typer.Exit(code=1) from exc
-
-    typer.echo(f"Starting explorer at http://{host}:{port} (build={settings.build_dir})")
-    run_explorer(settings, host=host, port=port, debug=debug)
 
 
 @app.command()

@@ -176,7 +176,7 @@ _SUBCOMMANDS = frozenset(
         "build",
         "validate",
         "closure",
-        "explore",
+        "odds-history",
         "run",
     }
 )
