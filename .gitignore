@@ -22,6 +22,7 @@ dist/
 /output/
 /site/
 /.oddsgraph-runtime/
+/oddsfox.duckdb
 
 # Local LLM model weights (large, not versioned)
 /models/*.gguf
