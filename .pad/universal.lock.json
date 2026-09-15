@@ -3,10 +3,10 @@
     ".agents/skills/pad-engineering/SKILL.md": "3cb5185116663c2f8ee58764a4180784ff2604b05e2e75b2b6f13cc1ccfd0071",
     "AGENTS.md": "8e0e7df28f0df8d847f4981da0978c28c2c9615b0382c3bfc62c6af90a52f6b1",
     "PROJECT_AGENT.md": "82e382b65859e6fd9f08d07abdbb34d9d9e8a799e3a1df667141b17f8345ed8e",
-    "scripts/verify": "c302d453339b1f15c4ddc2271e273a8e415518b1f8c0b931a48f0273e4761b73",
-    "scripts/verify-fast": "c57d80180950ce1a7905b85577a89b2466c8313fad6af2c78d613163d76a9ae3"
+    "scripts/verify": "f4f3531c88c7bb159bba642c85e8dc3960e4971e733ce1e340e3632b0028b7f5",
+    "scripts/verify-fast": "ede976f27e868e37398df835eb9f2ad2bafa923e198bbc92a58c205acefc9efe"
   },
   "repository": "oddsfox-graph",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "workspace": "oddsfox-graph-engineering"
 }
