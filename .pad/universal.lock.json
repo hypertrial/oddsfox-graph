@@ -7,6 +7,6 @@
     "scripts/verify-fast": "c57d80180950ce1a7905b85577a89b2466c8313fad6af2c78d613163d76a9ae3"
   },
   "repository": "oddsfox-graph",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "workspace": "oddsfox-graph-engineering"
 }
