@@ -1,5 +1,5 @@
 #!/bin/sh
 set -eu
 cd "$(dirname "$0")/.."
-uv run ruff check .
-uv run pytest
+uv run --extra dev ruff check .
+uv run --extra dev pytest
